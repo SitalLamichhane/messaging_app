@@ -2,6 +2,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 enum CallStatus {
   idle,
+  incoming,
   calling,
   ringing,
   connected,
@@ -25,7 +26,8 @@ class CallState {
   final String? receiverId;
   final String? name;
   final String? avatarUrl;
-  final Map? incomingOffer;
+
+  final Map<String, dynamic>? incomingOffer;
 
   final Duration duration;
 
@@ -60,7 +62,7 @@ class CallState {
     String? receiverId,
     String? name,
     String? avatarUrl,
-    Map? incomingOffer,
+    Map<String, dynamic>? incomingOffer,
     Duration? duration,
     RTCVideoRenderer? localRenderer,
     RTCVideoRenderer? remoteRenderer,
@@ -82,4 +84,10 @@ class CallState {
       remoteRenderer: remoteRenderer ?? this.remoteRenderer,
     );
   }
+
+  bool get isInCall =>
+      status == CallStatus.calling ||
+      status == CallStatus.ringing ||
+      status == CallStatus.connected ||
+      status == CallStatus.incoming;
 }

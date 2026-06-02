@@ -1,113 +1,138 @@
+import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 class SocketService {
   static final SocketService instance = SocketService._internal();
-
   SocketService._internal();
 
-  IO.Socket? socket;
+  WebSocketChannel? _channel;
+  StreamSubscription? _subscription;
 
-  String? _userId;
+  final Map<String, Function(dynamic)> _handlers = {};
 
-  bool get isConnected => socket?.connected == true;
+  bool _connected = false;
+  String? _url;
 
-  void connect({
-    required String userId,
-    required String serverUrl,
-  }) {
-    if (socket != null && socket!.connected) {
-      debugPrint('SOCKET ALREADY CONNECTED');
+  bool get isConnected => _connected;
+
+  void connect({required String url}) {
+    if (_connected && _channel != null && _url == url) {
+      debugPrint('CALL WS ALREADY CONNECTED');
       return;
     }
 
-    _userId = userId;
+    if (_channel != null) {
+      disconnect(clearHandlers: false);
+    }
 
-    socket = IO.io(
-      serverUrl,
-      IO.OptionBuilder()
-          .setTransports(['websocket'])
-          .disableAutoConnect()
-          .enableReconnection()
-          .setReconnectionAttempts(999999)
-          .setReconnectionDelay(2000)
-          .build(),
-    );
+    _url = url;
 
-    socket!.connect();
+    try {
+      _channel = WebSocketChannel.connect(Uri.parse(url));
+      _connected = true;
 
-    socket!.onConnect((_) {
-      debugPrint('SOCKET CONNECTED');
+      debugPrint('CALL WS CONNECTED: $url');
 
-      socket!.emit('join', {
-        'userId': userId,
-      });
+      _subscription = _channel!.stream.listen(
+        (message) {
+          debugPrint('========================');
+          debugPrint('CALL WS RAW: $message');
 
-      socket!.emit('user_online', {
-        'userId': userId,
-      });
-    });
+          try {
+            final data = jsonDecode(message);
 
-    socket!.onReconnect((_) {
-      debugPrint('SOCKET RECONNECTED');
+            final event = data['event'];
 
-      socket!.emit('join', {
-        'userId': userId,
-      });
+            debugPrint('CALL WS EVENT: $event');
+            debugPrint('CALL WS PAYLOAD: ${data['payload']}');
 
-      socket!.emit('user_online', {
-        'userId': userId,
-      });
-    });
+            if (event == null) {
+              debugPrint('CALL WS EVENT NULL');
+              return;
+            }
 
-    socket!.onDisconnect((_) {
-      debugPrint('SOCKET DISCONNECTED');
-    });
+            final handler = _handlers[event];
 
-    socket!.onConnectError((data) {
-      debugPrint('SOCKET CONNECT ERROR: $data');
-    });
+            if (handler != null) {
+              debugPrint('CALL WS HANDLER FOUND: $event');
+              handler(data);
+            } else {
+              debugPrint('CALL WS NO HANDLER FOR: $event');
+            }
+          } catch (e) {
+            debugPrint('CALL WS PARSE ERROR: $e');
+          }
 
-    socket!.onError((data) {
-      debugPrint('SOCKET ERROR: $data');
-    });
+          debugPrint('========================');
+        },
+        onError: (error) {
+          debugPrint('CALL WS ERROR: $error');
+          _connected = false;
+        },
+        onDone: () {
+          debugPrint('CALL WS CLOSED');
+          _connected = false;
+        },
+      );
+    } catch (e) {
+      debugPrint('CALL WS CONNECT ERROR: $e');
+      _connected = false;
+    }
   }
 
-  void emit(String event, dynamic data) {
-    debugPrint('EMIT => $event');
-    debugPrint(data.toString());
+  void emit(
+    String event,
+    Map<String, dynamic> payload, {
+    String? targetUser,
+    String? conversationId,
+  }) {
+    if (_channel == null || !_connected) {
+      debugPrint('CALL WS NOT CONNECTED');
+      return;
+    }
 
-    socket?.emit(event, data);
+    final data = {
+      'event': event,
+      'payload': payload,
+      if (targetUser != null) 'target_user': targetUser,
+      if (conversationId != null) 'conversation_id': conversationId,
+    };
+
+    debugPrint('CALL WS SEND: ${jsonEncode(data)}');
+    _channel!.sink.add(jsonEncode(data));
   }
 
   void on(String event, Function(dynamic) handler) {
-    socket?.off(event);
-
-    socket?.on(event, (data) {
-      debugPrint('ON => $event');
-      debugPrint(data.toString());
-
-      handler(data);
-    });
+    _handlers[event] = handler;
   }
 
   void off(String event) {
-    socket?.off(event);
+    _handlers.remove(event);
   }
 
-  void disconnect() {
-    if (_userId != null) {
-      socket?.emit('user_offline', {
-        'userId': _userId,
-      });
+  void reconnect() {
+    if (_url == null) return;
+
+    disconnect(clearHandlers: false);
+    connect(url: _url!);
+  }
+
+  void disconnect({bool clearHandlers = true}) {
+    _subscription?.cancel();
+    _subscription = null;
+
+    _channel?.sink.close();
+    _channel = null;
+
+    if (clearHandlers) {
+      _handlers.clear();
     }
 
-    socket?.disconnect();
-    socket?.dispose();
+    _connected = false;
 
-    socket = null;
-
-    debugPrint('SOCKET CLOSED');
+    debugPrint('CALL WS DISCONNECTED');
   }
 }

@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart' as foundation;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:messaging_app/core/api_client.dart';
 import 'package:saver_gallery/saver_gallery.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -17,6 +18,7 @@ import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/inside_chat/chat_settingScreen.dart';
 import 'package:messaging_app/core/chat/chat_provider.dart';
+import 'package:messaging_app/core/call/global_call_handler.dart';
 import 'package:messaging_app/widgets/dynamic_message_media.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
@@ -106,6 +108,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         conversationId: conversationId,
         // myUserId: 1, // TODO: replace with real logged-in user id
       );
+
+      final accessToken = await ApiClient.storage.read(key: 'access');
+      final currentUserId = await ApiClient.storage.read(key: 'user_id');
+
+      if (accessToken != null &&
+          accessToken.trim().isNotEmpty &&
+          currentUserId != null &&
+          currentUserId.trim().isNotEmpty) {
+        GlobalCallHandler.connectCallSocket(
+          url:
+              'ws://192.168.1.97:8000/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
+          currentUserId: currentUserId,
+        );
+      } else {
+        debugPrint('CALL SOCKET ERROR: token/user missing in ChatDetailScreen');
+      }
 
       if (!mounted) return;
 
@@ -1734,15 +1752,61 @@ void _openReactionPicker(
     });
   }
 
-void _startCall(bool isVideo) {
-  const currentUserId = '1'; // TODO: replace with logged-in user id
-  final receiverId = widget.chat.id;
+Future<void> _startCall(bool isVideo) async {
+  final currentUserId = await ApiClient.storage.read(key: 'user_id');
+  final accessToken = await ApiClient.storage.read(key: 'access');
+
+  if (currentUserId == null || currentUserId.trim().isEmpty) {
+    debugPrint('CALL ERROR: currentUserId missing');
+    return;
+  }
+
+  if (accessToken == null || accessToken.trim().isEmpty) {
+    debugPrint('CALL ERROR: accessToken missing');
+    return;
+  }
+
+  final conversationId = int.tryParse(widget.chat.id);
+
+  if (conversationId == null) {
+    debugPrint('CALL ERROR: invalid conversation id ${widget.chat.id}');
+    return;
+  }
+
+  String? receiverId;
+
+  for (final member in widget.chat.members) {
+    if (member.id.toString() != currentUserId.toString()) {
+      receiverId = member.id.toString();
+      break;
+    }
+  }
+
+  debugPrint('======================');
+  debugPrint('CURRENT USER: $currentUserId');
+  debugPrint('RECEIVER: $receiverId');
+  debugPrint('CONVERSATION: $conversationId');
+  debugPrint('CHAT MEMBERS: ${widget.chat.members.length}');
+  debugPrint('======================');
+
+  if (receiverId == null || receiverId.trim().isEmpty) {
+    debugPrint('CALL ERROR: receiver id not found');
+    return;
+  }
+
+  GlobalCallHandler.connectCallSocket(
+    url:
+        'ws://192.168.1.97:8000/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
+    currentUserId: currentUserId,
+  );
 
   AppChatData.addCallLog(
     chat: widget.chat,
     type: isVideo ? CallEntryType.video : CallEntryType.voice,
     status: CallEntryStatus.outgoing,
   );
+
+  if (!mounted) return;
 
   Navigator.push(
     context,
@@ -1753,7 +1817,7 @@ void _startCall(bool isVideo) {
         isVideoCall: isVideo,
         chat: widget.chat,
         currentUserId: currentUserId,
-        receiverId: receiverId,
+        receiverId: receiverId!,
         isCaller: true,
       ),
     ),

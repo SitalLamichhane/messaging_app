@@ -37,7 +37,7 @@ class ChatSocketService {
       }
 
       final uri = Uri.parse(
-        'ws://192.168.1.112:8000/ws/chat/$conversationId/?token=${Uri.encodeComponent(token.trim())}',
+        'ws://192.168.1.97:8000/ws/chat/$conversationId/?token=${Uri.encodeComponent(token.trim())}',
       );
 
       debugPrint('SOCKET CONNECTING: $uri');

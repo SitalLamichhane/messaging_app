@@ -1,5 +1,3 @@
-// lib/call_screen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
@@ -18,7 +16,8 @@ class CallScreen extends ConsumerStatefulWidget {
   final String currentUserId;
   final String receiverId;
   final bool isCaller;
-  final Map? incomingOffer;
+  final Map<String, dynamic>? incomingOffer;
+  final String? conversationId;
 
   const CallScreen({
     super.key,
@@ -30,6 +29,7 @@ class CallScreen extends ConsumerStatefulWidget {
     required this.receiverId,
     required this.isCaller,
     this.incomingOffer,
+    this.conversationId,
   });
 
   @override
@@ -37,14 +37,28 @@ class CallScreen extends ConsumerStatefulWidget {
 }
 
 class _CallScreenState extends ConsumerState<CallScreen> {
+  bool _didStart = false;
   bool _didSaveCallResult = false;
   bool _didPop = false;
+
+  ProviderSubscription<CallState>? _callListener;
 
   @override
   void initState() {
     super.initState();
 
+    _callListener = ref.listenManual<CallState>(
+      callProvider,
+      (previous, next) {
+        _listenForAutoClose(next);
+      },
+    );
+
     Future.microtask(() {
+      if (!mounted || _didStart) return;
+
+      _didStart = true;
+
       ref.read(callProvider.notifier).startCall(
             currentUserId: widget.currentUserId,
             receiverId: widget.receiverId,
@@ -53,14 +67,29 @@ class _CallScreenState extends ConsumerState<CallScreen> {
             isVideoCall: widget.isVideoCall,
             isCaller: widget.isCaller,
             incomingOffer: widget.incomingOffer,
+            conversationId: widget.conversationId ?? widget.chat?.id,
           );
     });
   }
 
+  @override
+  void dispose() {
+    _callListener?.close();
+    _callListener = null;
+
+    try {
+      ref.read(callProvider.notifier).disposeCall();
+    } catch (_) {}
+
+    super.dispose();
+  }
+
   String _formatDuration(Duration duration) {
     final hours = duration.inHours;
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final minutes =
+        duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds =
+        duration.inSeconds.remainder(60).toString().padLeft(2, '0');
 
     if (hours > 0) {
       return '${hours.toString().padLeft(2, '0')}:$minutes:$seconds';
@@ -70,13 +99,37 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   }
 
   String _callStatusText(CallState callState) {
-    if (callState.status == CallStatus.ended) return 'Call ended';
-    if (callState.status == CallStatus.connected) {
-      return _formatDuration(callState.duration);
+    switch (callState.status) {
+      case CallStatus.connected:
+        return _formatDuration(callState.duration);
+      case CallStatus.calling:
+        return 'Calling...';
+      case CallStatus.ringing:
+        return 'Ringing...';
+      case CallStatus.rejected:
+        return 'Call rejected';
+      case CallStatus.busy:
+        return 'User busy';
+      case CallStatus.timeout:
+        return 'No answer';
+      case CallStatus.missed:
+        return 'Missed call';
+      case CallStatus.failed:
+        return 'Call failed';
+      case CallStatus.ended:
+        return 'Call ended';
+      default:
+        return widget.isCaller ? 'Calling...' : 'Connecting...';
     }
-    if (callState.status == CallStatus.failed) return 'Call failed';
+  }
 
-    return widget.isVideoCall ? 'Ringing...' : 'Calling...';
+  bool _isFinalStatus(CallStatus status) {
+    return status == CallStatus.ended ||
+        status == CallStatus.failed ||
+        status == CallStatus.rejected ||
+        status == CallStatus.busy ||
+        status == CallStatus.timeout ||
+        status == CallStatus.missed;
   }
 
   void _saveCallResultIfNeeded(CallState callState) {
@@ -85,221 +138,287 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
     _didSaveCallResult = true;
 
+    final answered = callState.duration.inSeconds > 0 ||
+        callState.status == CallStatus.connected ||
+        callState.status == CallStatus.ended;
+
+    String text;
+
+    if (callState.status == CallStatus.rejected) {
+      text = widget.isVideoCall ? 'Video call rejected' : 'Voice call rejected';
+    } else if (callState.status == CallStatus.missed ||
+        callState.status == CallStatus.timeout) {
+      text = widget.isVideoCall ? 'Missed video call' : 'Missed voice call';
+    } else {
+      text = widget.isVideoCall ? 'Video call ended' : 'Voice call ended';
+    }
+
     AppChatData.addMessage(
       widget.chat!,
       ChatMessage(
         id: DateTime.now().microsecondsSinceEpoch.toString(),
         type: MessageType.call,
-        text: widget.isVideoCall ? 'Video call ended' : 'Voice call ended',
-        isMe: true,
+        text: text,
+        isMe: widget.isCaller,
         sentAt: DateTime.now(),
         isSeen: true,
-        callType: widget.isVideoCall ? CallEntryType.video : CallEntryType.voice,
+        callType:
+            widget.isVideoCall ? CallEntryType.video : CallEntryType.voice,
         callDuration: callState.duration,
-        callAnswered: callState.status == CallStatus.connected,
+        callAnswered: answered,
       ),
     );
   }
 
   Future<void> _endCall() async {
-    if (_didPop) return;
+    if (_didPop || !mounted) return;
 
     final callState = ref.read(callProvider);
-
     _saveCallResultIfNeeded(callState);
 
-    await ref.read(callProvider.notifier).endCall();
+    try {
+      await ref.read(callProvider.notifier).endCall(emitSocket: true);
+    } catch (_) {}
+
+    if (!mounted) return;
 
     _didPop = true;
 
-    if (mounted) {
+    if (Navigator.canPop(context)) {
       Navigator.pop(context);
     }
   }
 
-  @override
-  void dispose() {
-    ref.read(callProvider.notifier).disposeCall();
-    super.dispose();
+  void _listenForAutoClose(CallState callState) {
+    if (!_isFinalStatus(callState.status)) return;
+    if (_didPop) return;
+
+    _saveCallResultIfNeeded(callState);
+
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (!mounted || _didPop) return;
+
+      _didPop = true;
+
+      if (Navigator.canPop(context)) {
+        Navigator.pop(context);
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final callState = ref.watch(callProvider);
-    final callNotifier = ref.read(callProvider.notifier);
     final hasAvatar = widget.avatarUrl.trim().isNotEmpty;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          Positioned.fill(
-            child: widget.isVideoCall
-                ? _buildRemoteVideoBackground(callState, hasAvatar)
-                : _buildVoiceCallBackground(hasAvatar),
-          ),
-          Positioned.fill(
-            child: Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.18),
-                    Colors.black.withOpacity(0.40),
-                    Colors.black.withOpacity(0.68),
-                  ],
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop && mounted) {
+          await _endCall();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: widget.isVideoCall
+                  ? _buildRemoteVideoBackground(callState, hasAvatar)
+                  : _buildVoiceCallBackground(hasAvatar),
+            ),
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.black.withOpacity(0.18),
+                      Colors.black.withOpacity(0.40),
+                      Colors.black.withOpacity(0.68),
+                    ],
+                  ),
                 ),
               ),
             ),
-          ),
-          SafeArea(
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: [
-                      _TopCircleButton(
-                        icon: Icons.arrow_back,
-                        onTap: _endCall,
-                      ),
-                      const Spacer(),
-                      if (widget.isVideoCall)
+            SafeArea(
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 14,
+                      vertical: 10,
+                    ),
+                    child: Row(
+                      children: [
                         _TopCircleButton(
-                          icon: Icons.flip_camera_ios_outlined,
-                          onTap: callNotifier.switchCamera,
+                          icon: Icons.arrow_back,
+                          asyncOnTap: _endCall,
                         ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (!widget.isVideoCall || callState.isCameraOff) ...[
-                  CircleAvatar(
-                    radius: 52,
-                    backgroundColor: const Color(0xFF1F2937),
-                    backgroundImage:
-                        hasAvatar ? NetworkImage(widget.avatarUrl) : null,
-                    child: !hasAvatar
-                        ? Text(
-                            widget.name.isNotEmpty
-                                ? widget.name[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 34,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          )
-                        : null,
-                  ),
-                  const SizedBox(height: 18),
-                ],
-                Text(
-                  widget.name,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  _callStatusText(callState),
-                  style: TextStyle(
-                    color: Colors.white.withOpacity(0.86),
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const Spacer(),
-                if (widget.isVideoCall)
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: Container(
-                      margin: const EdgeInsets.only(right: 16, bottom: 18),
-                      width: 110,
-                      height: 170,
-                      clipBehavior: Clip.antiAlias,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF111827),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: Colors.white.withOpacity(0.22),
-                          width: 1,
-                        ),
-                      ),
-                      child: _buildLocalPreview(callState),
+                        const Spacer(),
+                        if (widget.isVideoCall)
+                          _TopCircleButton(
+                            icon: Icons.flip_camera_ios_outlined,
+                            asyncOnTap: () async {
+                              if (!mounted) return;
+
+                              try {
+                                await ref
+                                    .read(callProvider.notifier)
+                                    .switchCamera();
+                              } catch (_) {}
+                            },
+                          ),
+                      ],
                     ),
                   ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 28),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                    children: [
-                      _MessengerCallButton(
-                        icon: callState.isMicOff
-                            ? Icons.mic_off_rounded
-                            : Icons.mic_none_rounded,
-                        bgColor: const Color(0x33FFFFFF),
-                        onTap: callNotifier.toggleMic,
-                      ),
-                      _MessengerCallButton(
-                        icon: callState.isSpeakerOn
-                            ? Icons.volume_up_rounded
-                            : Icons.volume_down_rounded,
-                        bgColor: const Color(0x33FFFFFF),
-                        onTap: callNotifier.toggleSpeaker,
-                      ),
-                      _MessengerCallButton(
-                        icon: Icons.call_end_rounded,
-                        bgColor: const Color(0xFFFF3B30),
-                        size: 64,
-                        iconSize: 30,
-                        onTap: _endCall,
-                      ),
-                      _MessengerCallButton(
-                        icon: widget.isVideoCall
-                            ? (callState.isCameraOff
-                                ? Icons.videocam_off_rounded
-                                : Icons.videocam_rounded)
-                            : Icons.videocam_rounded,
-                        bgColor: const Color(0x33FFFFFF),
-                        onTap: callNotifier.toggleCamera,
-                      ),
-                    ],
+                  const SizedBox(height: 12),
+                  if (!widget.isVideoCall || callState.isCameraOff) ...[
+                    CircleAvatar(
+                      radius: 52,
+                      backgroundColor: const Color(0xFF1F2937),
+                      backgroundImage:
+                          hasAvatar ? NetworkImage(widget.avatarUrl) : null,
+                      child: !hasAvatar
+                          ? Text(
+                              widget.name.isNotEmpty
+                                  ? widget.name[0].toUpperCase()
+                                  : '?',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 34,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            )
+                          : null,
+                    ),
+                    const SizedBox(height: 18),
+                  ],
+                  Text(
+                    widget.name,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 8),
+                  Text(
+                    _callStatusText(callState),
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.86),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const Spacer(),
+                  if (widget.isVideoCall)
+                    Align(
+                      alignment: Alignment.bottomRight,
+                      child: Container(
+                        margin: const EdgeInsets.only(right: 16, bottom: 18),
+                        width: 110,
+                        height: 170,
+                        clipBehavior: Clip.antiAlias,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF111827),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: Colors.white.withOpacity(0.22),
+                            width: 1,
+                          ),
+                        ),
+                        child: _buildLocalPreview(callState),
+                      ),
+                    ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 28),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        _MessengerCallButton(
+                          icon: callState.isMicOff
+                              ? Icons.mic_off_rounded
+                              : Icons.mic_none_rounded,
+                          bgColor: const Color(0x33FFFFFF),
+                          onTap: () {
+                            if (!mounted) return;
+
+                            try {
+                              ref.read(callProvider.notifier).toggleMic();
+                            } catch (_) {}
+                          },
+                        ),
+                        _MessengerCallButton(
+                          icon: callState.isSpeakerOn
+                              ? Icons.volume_up_rounded
+                              : Icons.volume_down_rounded,
+                          bgColor: const Color(0x33FFFFFF),
+                          onTap: () {
+                            if (!mounted) return;
+
+                            try {
+                              ref.read(callProvider.notifier).toggleSpeaker();
+                            } catch (_) {}
+                          },
+                        ),
+                        _MessengerCallButton(
+                          icon: Icons.call_end_rounded,
+                          bgColor: const Color(0xFFFF3B30),
+                          size: 64,
+                          iconSize: 30,
+                          asyncOnTap: _endCall,
+                        ),
+                        _MessengerCallButton(
+                          icon: widget.isVideoCall
+                              ? (callState.isCameraOff
+                                  ? Icons.videocam_off_rounded
+                                  : Icons.videocam_rounded)
+                              : Icons.videocam_rounded,
+                          bgColor: const Color(0x33FFFFFF),
+                          onTap: () {
+                            if (!mounted) return;
+
+                            try {
+                              ref.read(callProvider.notifier).toggleCamera();
+                            } catch (_) {}
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildRemoteVideoBackground(CallState callState, bool hasAvatar) {
-    final isConnected = callState.status == CallStatus.connected;
-    final remoteRenderer = callState.remoteRenderer;
+ Widget _buildRemoteVideoBackground(CallState callState, bool hasAvatar) {
+  final remoteRenderer = callState.remoteRenderer;
 
-    if (isConnected && remoteRenderer != null) {
-      return RTCVideoView(
-        remoteRenderer,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-      );
-    }
+  if (widget.isVideoCall && remoteRenderer != null) {
+    return RTCVideoView(
+      remoteRenderer,
+      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+    );
+  }
 
-    if (hasAvatar) {
-      return Image.network(
-        widget.avatarUrl,
-        fit: BoxFit.cover,
-      );
-    }
+  if (hasAvatar) {
+    return Image.network(
+      widget.avatarUrl,
+      fit: BoxFit.cover,
+      errorBuilder: (_, __, ___) => _emptyVideoBackground(),
+    );
+  }
 
+  return _emptyVideoBackground();
+}
+  Widget _emptyVideoBackground() {
     return Container(
       color: const Color(0xFF111827),
       child: const Center(
@@ -334,6 +453,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                   fit: BoxFit.cover,
                   width: double.infinity,
                   height: double.infinity,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 ),
               ),
             )
@@ -363,13 +483,10 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       );
     }
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
-      child: RTCVideoView(
-        localRenderer,
-        mirror: true,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-      ),
+    return RTCVideoView(
+      localRenderer,
+      mirror: true,
+      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
     );
   }
 }
@@ -377,14 +494,16 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 class _MessengerCallButton extends StatelessWidget {
   final IconData icon;
   final Color bgColor;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final Future<void> Function()? asyncOnTap;
   final double size;
   final double iconSize;
 
   const _MessengerCallButton({
     required this.icon,
     required this.bgColor,
-    required this.onTap,
+    this.onTap,
+    this.asyncOnTap,
     this.size = 56,
     this.iconSize = 26,
   });
@@ -392,7 +511,11 @@ class _MessengerCallButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: onTap,
+      onTap: asyncOnTap != null
+          ? () async {
+              await asyncOnTap!();
+            }
+          : onTap,
       borderRadius: BorderRadius.circular(999),
       child: Container(
         width: size,
@@ -413,17 +536,23 @@ class _MessengerCallButton extends StatelessWidget {
 
 class _TopCircleButton extends StatelessWidget {
   final IconData icon;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final Future<void> Function()? asyncOnTap;
 
   const _TopCircleButton({
     required this.icon,
-    required this.onTap,
+    this.onTap,
+    this.asyncOnTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return InkWell(
-      onTap: onTap,
+      onTap: asyncOnTap != null
+          ? () async {
+              await asyncOnTap!();
+            }
+          : onTap,
       borderRadius: BorderRadius.circular(999),
       child: Container(
         width: 42,

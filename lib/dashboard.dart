@@ -31,6 +31,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     super.initState();
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       context.read<ChatProvider>().loadConversations();
     });
   }

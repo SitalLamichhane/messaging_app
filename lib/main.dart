@@ -3,17 +3,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart'
     hide ChangeNotifierProvider;
+import 'package:messaging_app/core/call/global_call_handler.dart';
 import 'package:provider/provider.dart';
 
 import 'package:messaging_app/auth_gate.dart';
 import 'package:messaging_app/features/auth/auth_provider.dart';
 import 'package:messaging_app/theme_controller.dart';
-
 import 'package:messaging_app/core/chat/chat_provider.dart';
-import 'package:messaging_app/core/call/call_socket_service.dart';
-import 'package:messaging_app/incoming_call_screen.dart';
-
-final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -155,137 +151,16 @@ class AppText {
   );
 }
 
-class MyApp extends StatefulWidget {
+class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
   @override
-  State<MyApp> createState() => _MyAppState();
-}
-
-class _MyAppState extends State<MyApp> {
-  bool _socketInitialized = false;
-  bool _incomingCallOpen = false;
-
-  void _setupCallSocket(AuthProvider authProvider) {
-    if (_socketInitialized) return;
-    if (!authProvider.isLoggedIn) return;
-
-    final myUserId = authProvider.user?['id']?.toString();
-
-    if (myUserId == null || myUserId.trim().isEmpty) {
-      debugPrint('CALL SOCKET ERROR: user id missing');
-      return;
-    }
-
-    _socketInitialized = true;
-
-    SocketService.instance.connect(
-      userId: myUserId,
-
-      // Replace this with your backend socket URL.
-      // Example local:
-      // serverUrl: 'http://192.168.1.5:3000',
-      //
-      // Example production:
-      // serverUrl: 'https://your-backend-domain.com',
-      serverUrl: 'http://192.168.1.5:3000',
-    );
-
-    SocketService.instance.on('incoming_call', (data) {
-      if (data == null) return;
-      if (_incomingCallOpen) return;
-
-      final offerData = data['offer'];
-      if (offerData == null) return;
-
-      _incomingCallOpen = true;
-
-      navigatorKey.currentState
-          ?.push(
-        MaterialPageRoute(
-          builder: (_) => IncomingCallScreen(
-            currentUserId: myUserId,
-            callerId: data['from']?.toString() ?? '',
-            callerName: data['callerName'] ??
-                data['caller_name'] ??
-                'Unknown',
-            callerAvatar: data['callerAvatar'] ??
-                data['caller_avatar'] ??
-                '',
-            isVideoCall: data['isVideoCall'] ??
-                data['is_video'] ??
-                false,
-            offer: Map<String, dynamic>.from(offerData),
-          ),
-        ),
-      )
-          .then((_) {
-        _incomingCallOpen = false;
-      });
-    });
-
-    SocketService.instance.on('call_ringing', (data) {
-      debugPrint('CALL RINGING: $data');
-      _showCallSnack('Ringing...');
-    });
-
-    SocketService.instance.on('call_busy', (data) {
-      debugPrint('CALL BUSY: $data');
-      _showCallSnack('User is busy on another call');
-      navigatorKey.currentState?.maybePop();
-    });
-
-    SocketService.instance.on('call_timeout', (data) {
-      debugPrint('CALL TIMEOUT: $data');
-      _showCallSnack('Call timed out');
-      navigatorKey.currentState?.maybePop();
-    });
-
-    SocketService.instance.on('missed_call', (data) {
-      debugPrint('MISSED CALL: $data');
-      _showCallSnack('Missed call');
-    });
-
-    SocketService.instance.on('call_ended', (data) {
-      debugPrint('CALL ENDED: $data');
-      _showCallSnack('Call ended');
-      navigatorKey.currentState?.maybePop();
-    });
-  }
-
-  void _showCallSnack(String message) {
-    final context = navigatorKey.currentContext;
-    if (context == null) return;
-
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(message),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-  }
-
-  @override
-  void dispose() {
-    SocketService.instance.disconnect();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final authProvider = context.watch<AuthProvider>();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _setupCallSocket(authProvider);
-    });
-
     return ValueListenableBuilder<ThemeMode>(
       valueListenable: appThemeMode,
       builder: (context, themeMode, child) {
         return MaterialApp(
-          navigatorKey: navigatorKey,
+          navigatorKey: GlobalCallHandler.navigatorKey,
           debugShowCheckedModeBanner: false,
           title: 'SocialConnect',
           themeMode: themeMode,

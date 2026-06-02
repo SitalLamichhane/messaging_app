@@ -5,7 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class ApiClient {
   static const storage = FlutterSecureStorage();
 
-  static const String baseUrl = 'http://192.168.1.112:8000/api';
+  static const String baseUrl = 'http://192.168.1.97:8000/api';
 
   static final Dio _refreshDio = Dio(
     BaseOptions(
@@ -86,7 +86,7 @@ class ApiClient {
 } 
 
           debugPrint('╔════════ REQUEST ════════');
-          debugPrint('URL: ${options.baseUrl}${options.path}');
+          debugPrint('URL: ${options.uri}');
           debugPrint('METHOD: ${options.method}');
           debugPrint('HEADERS: ${options.headers}');
           debugPrint('BODY: ${options.data}');
@@ -96,7 +96,7 @@ class ApiClient {
         },
         onResponse: (response, handler) {
           debugPrint('╔════════ RESPONSE ════════');
-          debugPrint('URL: ${response.requestOptions.path}');
+          debugPrint('URL: ${response.requestOptions.uri}');
           debugPrint('STATUS: ${response.statusCode}');
           debugPrint('DATA: ${response.data}');
           debugPrint('╚═════════════════════════');
@@ -105,7 +105,7 @@ class ApiClient {
         },
         onError: (DioException e, handler) async {
           debugPrint('╔════════ ERROR ════════');
-          debugPrint('URL: ${e.requestOptions.path}');
+          debugPrint('URL: ${e.requestOptions.uri}');
           debugPrint('MESSAGE: ${e.message}');
           debugPrint('RESPONSE: ${e.response?.data}');
           debugPrint('╚═══════════════════════');

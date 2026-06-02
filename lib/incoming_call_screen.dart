@@ -10,7 +10,7 @@ class IncomingCallScreen extends StatelessWidget {
   final String callerName;
   final String callerAvatar;
   final bool isVideoCall;
-  final Map offer;
+  final Map<String, dynamic> offer;
   final ChatItem? chat;
 
   const IncomingCallScreen({
@@ -25,10 +25,13 @@ class IncomingCallScreen extends StatelessWidget {
   });
 
   void _reject(BuildContext context) {
-    SocketService.instance.emit('call_rejected', {
-      'to': callerId,
-      'from': currentUserId,
-    });
+    SocketService.instance.emit(
+  'call_reject',
+  {
+    'from': currentUserId,
+  },
+  targetUser: callerId,
+);
 
     if (chat != null) {
       AppChatData.addCallLog(
@@ -177,11 +180,7 @@ class _IncomingButton extends StatelessWidget {
               color: color,
               shape: BoxShape.circle,
             ),
-            child: Icon(
-              icon,
-              color: Colors.white,
-              size: 34,
-            ),
+            child: Icon(icon, color: Colors.white, size: 34),
           ),
         ),
         const SizedBox(height: 12),
