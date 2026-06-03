@@ -51,6 +51,8 @@ class CallState {
     this.remoteRenderer,
   });
 
+  static const Object _noChange = Object();
+
   CallState copyWith({
     CallStatus? status,
     bool? isMicOff,
@@ -58,14 +60,14 @@ class CallState {
     bool? isCameraOff,
     bool? isVideoCall,
     bool? isCaller,
-    String? currentUserId,
-    String? receiverId,
-    String? name,
-    String? avatarUrl,
-    Map<String, dynamic>? incomingOffer,
+    Object? currentUserId = _noChange,
+    Object? receiverId = _noChange,
+    Object? name = _noChange,
+    Object? avatarUrl = _noChange,
+    Object? incomingOffer = _noChange,
     Duration? duration,
-    RTCVideoRenderer? localRenderer,
-    RTCVideoRenderer? remoteRenderer,
+    Object? localRenderer = _noChange,
+    Object? remoteRenderer = _noChange,
   }) {
     return CallState(
       status: status ?? this.status,
@@ -74,14 +76,24 @@ class CallState {
       isCameraOff: isCameraOff ?? this.isCameraOff,
       isVideoCall: isVideoCall ?? this.isVideoCall,
       isCaller: isCaller ?? this.isCaller,
-      currentUserId: currentUserId ?? this.currentUserId,
-      receiverId: receiverId ?? this.receiverId,
-      name: name ?? this.name,
-      avatarUrl: avatarUrl ?? this.avatarUrl,
-      incomingOffer: incomingOffer ?? this.incomingOffer,
+      currentUserId: currentUserId == _noChange
+          ? this.currentUserId
+          : currentUserId as String?,
+      receiverId: receiverId == _noChange
+          ? this.receiverId
+          : receiverId as String?,
+      name: name == _noChange ? this.name : name as String?,
+      avatarUrl: avatarUrl == _noChange ? this.avatarUrl : avatarUrl as String?,
+      incomingOffer: incomingOffer == _noChange
+          ? this.incomingOffer
+          : incomingOffer as Map<String, dynamic>?,
       duration: duration ?? this.duration,
-      localRenderer: localRenderer ?? this.localRenderer,
-      remoteRenderer: remoteRenderer ?? this.remoteRenderer,
+      localRenderer: localRenderer == _noChange
+          ? this.localRenderer
+          : localRenderer as RTCVideoRenderer?,
+      remoteRenderer: remoteRenderer == _noChange
+          ? this.remoteRenderer
+          : remoteRenderer as RTCVideoRenderer?,
     );
   }
 

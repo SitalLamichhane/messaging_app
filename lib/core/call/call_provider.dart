@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:messaging_app/core/call/call_socket_service.dart';
 import 'package:messaging_app/core/call/call_state.dart';
@@ -27,6 +28,8 @@ class CallNotifier extends StateNotifier<CallState> {
   bool _socketListening = false;
   bool _finishing = false;
 
+  String? _conversationId;
+
   bool get _canUpdate => mounted && !_disposed;
 
   void _safeState(CallState newState) {
@@ -50,9 +53,12 @@ class CallNotifier extends StateNotifier<CallState> {
     try {
       _disposed = false;
       _finishing = false;
+      _conversationId = conversationId;
 
       _durationTimer?.cancel();
       _timeoutTimer?.cancel();
+
+      _safeState(const CallState());
 
       await _disposeWebRTCOnly();
       await webrtc.disposeRenderers();
@@ -92,6 +98,7 @@ class CallNotifier extends StateNotifier<CallState> {
               'candidate': candidate.toMap(),
             },
             targetUser: receiverId,
+            conversationId: _conversationId,
           );
         },
         onRemoteStream: () {
@@ -135,6 +142,7 @@ class CallNotifier extends StateNotifier<CallState> {
             'offer': offer.toMap(),
           },
           targetUser: receiverId,
+          conversationId: _conversationId,
         );
       } else {
         if (incomingOffer == null) {
@@ -157,9 +165,12 @@ class CallNotifier extends StateNotifier<CallState> {
             'answer': answer.toMap(),
           },
           targetUser: receiverId,
+          conversationId: _conversationId,
         );
       }
     } catch (e) {
+      debugPrint('Start call error: $e');
+
       if (_canUpdate) {
         await _finishCall(CallStatus.failed, emitSocket: false);
       }
@@ -195,7 +206,8 @@ class CallNotifier extends StateNotifier<CallState> {
         );
 
         setConnected();
-      } catch (_) {
+      } catch (e) {
+        debugPrint('Call answer error: $e');
         await _finishCall(CallStatus.failed, emitSocket: false);
       }
     });
@@ -209,7 +221,88 @@ class CallNotifier extends StateNotifier<CallState> {
 
       try {
         await webrtc.addCandidate(payload['candidate']);
-      } catch (_) {}
+      } catch (e) {
+        debugPrint('ICE error: $e');
+      }
+    });
+
+    SocketService.instance.on('call_renegotiate_offer', (data) async {
+      if (!_canUpdate) return;
+      if (_isFinalStatus(state.status)) return;
+
+      final payload = data['payload'];
+      if (payload == null || payload['offer'] == null) return;
+
+      final currentUserId = state.currentUserId;
+      final receiverId = state.receiverId;
+
+      if (currentUserId == null || receiverId == null) return;
+
+      try {
+        await webrtc.enableVideo();
+        final answer = await webrtc.handleRenegotiationOffer(payload['offer']);
+
+        SocketService.instance.emit(
+          'call_renegotiate_answer',
+          {
+            'from': currentUserId,
+            'answer': answer.toMap(),
+          },
+          targetUser: receiverId,
+          conversationId: _conversationId,
+        );
+
+        _safeState(
+          state.copyWith(
+            isVideoCall: true,
+            isCameraOff: false,
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+      } catch (e) {
+        debugPrint('Renegotiation offer error: $e');
+      }
+    });
+
+    SocketService.instance.on('call_renegotiate_answer', (data) async {
+      if (!_canUpdate) return;
+      if (_isFinalStatus(state.status)) return;
+
+      final payload = data['payload'];
+      if (payload == null || payload['answer'] == null) return;
+
+      try {
+        await webrtc.handleRenegotiationAnswer(payload['answer']);
+
+        _safeState(
+          state.copyWith(
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+      } catch (e) {
+        debugPrint('Renegotiation answer error: $e');
+      }
+    });
+
+    SocketService.instance.on('call_video_toggle', (data) {
+      if (!_canUpdate) return;
+      if (_isFinalStatus(state.status)) return;
+
+      final payload = data['payload'];
+      if (payload == null) return;
+
+      final isVideoCall = payload['isVideoCall'] == true;
+
+      _safeState(
+        state.copyWith(
+          isVideoCall: isVideoCall,
+          isCameraOff: !isVideoCall,
+          localRenderer: webrtc.localRenderer,
+          remoteRenderer: webrtc.remoteRenderer,
+        ),
+      );
     });
 
     SocketService.instance.on('call_reject', (_) async {
@@ -238,6 +331,88 @@ class CallNotifier extends StateNotifier<CallState> {
     });
   }
 
+  Future<void> switchToVideoCall() async {
+    if (!_canUpdate) return;
+    if (state.isVideoCall) return;
+    if (_isFinalStatus(state.status)) return;
+
+    final currentUserId = state.currentUserId;
+    final receiverId = state.receiverId;
+
+    if (currentUserId == null || receiverId == null) return;
+
+    try {
+      await webrtc.enableVideo();
+
+      final offer = await webrtc.createRenegotiationOffer();
+
+      SocketService.instance.emit(
+        'call_renegotiate_offer',
+        {
+          'from': currentUserId,
+          'offer': offer.toMap(),
+        },
+        targetUser: receiverId,
+        conversationId: _conversationId,
+      );
+
+      SocketService.instance.emit(
+        'call_video_toggle',
+        {
+          'from': currentUserId,
+          'isVideoCall': true,
+        },
+        targetUser: receiverId,
+        conversationId: _conversationId,
+      );
+
+      _safeState(
+        state.copyWith(
+          isVideoCall: true,
+          isCameraOff: false,
+          localRenderer: webrtc.localRenderer,
+          remoteRenderer: webrtc.remoteRenderer,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Switch to video error: $e');
+    }
+  }
+
+  Future<void> switchToAudioCall() async {
+    if (!_canUpdate) return;
+    if (!state.isVideoCall) return;
+    if (_isFinalStatus(state.status)) return;
+
+    final currentUserId = state.currentUserId;
+    final receiverId = state.receiverId;
+
+    if (currentUserId == null || receiverId == null) return;
+
+    try {
+      await webrtc.disableVideo();
+
+      SocketService.instance.emit(
+        'call_video_toggle',
+        {
+          'from': currentUserId,
+          'isVideoCall': false,
+        },
+        targetUser: receiverId,
+        conversationId: _conversationId,
+      );
+
+      _safeState(
+        state.copyWith(
+          isVideoCall: false,
+          isCameraOff: true,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Switch to audio error: $e');
+    }
+  }
+
   void _startCallTimeout() {
     _timeoutTimer?.cancel();
 
@@ -258,6 +433,7 @@ class CallNotifier extends StateNotifier<CallState> {
             'reason': 'timeout',
           },
           targetUser: receiverId,
+          conversationId: _conversationId,
         );
       }
 
@@ -266,23 +442,23 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   void setConnected() {
-  if (!_canUpdate) return;
-  if (state.status == CallStatus.connected) return;
-  if (_isFinalStatus(state.status)) return;
+    if (!_canUpdate) return;
+    if (state.status == CallStatus.connected) return;
+    if (_isFinalStatus(state.status)) return;
 
-  _timeoutTimer?.cancel();
+    _timeoutTimer?.cancel();
 
-  webrtc.setSpeaker(true);
+    webrtc.setSpeaker(true);
 
-  _safeState(
-    state.copyWith(
-      status: CallStatus.connected,
-      isSpeakerOn: true,
-    ),
-  );
+    _safeState(
+      state.copyWith(
+        status: CallStatus.connected,
+        isSpeakerOn: true,
+      ),
+    );
 
-  _startDurationTimer();
-}
+    _startDurationTimer();
+  }
 
   void _startDurationTimer() {
     _durationTimer?.cancel();
@@ -334,7 +510,9 @@ class CallNotifier extends StateNotifier<CallState> {
 
     try {
       await webrtc.switchCamera();
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Switch camera error: $e');
+    }
   }
 
   Future<void> rejectCall() async {
@@ -350,6 +528,7 @@ class CallNotifier extends StateNotifier<CallState> {
           'from': currentUserId,
         },
         targetUser: receiverId,
+        conversationId: _conversationId,
       );
     }
 
@@ -370,7 +549,6 @@ class CallNotifier extends StateNotifier<CallState> {
   }) async {
     if (!_canUpdate) return;
     if (_finishing) return;
-
     if (_isFinalStatus(state.status)) return;
 
     _finishing = true;
@@ -391,23 +569,24 @@ class CallNotifier extends StateNotifier<CallState> {
             'from': currentUserId,
           },
           targetUser: receiverId,
+          conversationId: _conversationId,
         );
       }
     }
 
+    _safeState(
+      oldState.copyWith(
+        status: finalStatus,
+        localRenderer: null,
+        remoteRenderer: null,
+        duration: oldState.duration,
+      ),
+    );
+
+    await Future.delayed(const Duration(milliseconds: 250));
+
     await _disposeWebRTCOnly();
     await webrtc.disposeRenderers();
-
-    if (_canUpdate) {
-      _safeState(
-        oldState.copyWith(
-          status: finalStatus,
-          localRenderer: null,
-          remoteRenderer: null,
-          duration: oldState.duration,
-        ),
-      );
-    }
 
     _finishing = false;
   }
@@ -417,13 +596,14 @@ class CallNotifier extends StateNotifier<CallState> {
     _timeoutTimer?.cancel();
 
     _finishing = false;
+    _conversationId = null;
+
+    _safeState(const CallState());
+
+    await Future.delayed(const Duration(milliseconds: 200));
 
     await _disposeWebRTCOnly();
     await webrtc.disposeRenderers();
-
-    if (_canUpdate) {
-      _safeState(const CallState());
-    }
   }
 
   bool _isFinalStatus(CallStatus status) {
@@ -443,16 +623,16 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _removeSocketEvents();
 
-    try {
-      await webrtc.dispose();
-      await webrtc.disposeRenderers();
-    } catch (e) {
-      print('WebRTC dispose error: $e');
-    }
-
     if (mounted) {
       state = const CallState();
     }
+
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    try {
+      await webrtc.dispose();
+      await webrtc.disposeRenderers();
+    } catch (_) {}
   }
 
   Future<void> _disposeWebRTCOnly() async {
@@ -469,6 +649,10 @@ class CallNotifier extends StateNotifier<CallState> {
     SocketService.instance.off('ice_candidate');
     SocketService.instance.off('call_busy');
     SocketService.instance.off('call_timeout');
+
+    SocketService.instance.off('call_renegotiate_offer');
+    SocketService.instance.off('call_renegotiate_answer');
+    SocketService.instance.off('call_video_toggle');
   }
 
   void _removeSocketEvents() {
@@ -477,21 +661,21 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   @override
-void dispose() {
-  _disposed = true;
+  void dispose() {
+    _disposed = true;
 
-  _durationTimer?.cancel();
-  _timeoutTimer?.cancel();
+    _durationTimer?.cancel();
+    _timeoutTimer?.cancel();
 
-  _removeSocketEvents();
+    _removeSocketEvents();
 
-  Future.microtask(() async {
-    try {
-      await webrtc.dispose();
-      await webrtc.disposeRenderers();
-    } catch (_) {}
-  });
+    Future.microtask(() async {
+      try {
+        await webrtc.dispose();
+        await webrtc.disposeRenderers();
+      } catch (_) {}
+    });
 
-  super.dispose();
-}
+    super.dispose();
+  }
 }

@@ -4,6 +4,23 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
+class CallSocketEvents {
+  static const callOffer = 'call_offer';
+  static const callAnswer = 'call_answer';
+  static const iceCandidate = 'ice_candidate';
+
+  static const callReject = 'call_reject';
+  static const callEnd = 'call_end';
+  static const callLeave = 'call_leave';
+  static const callBusy = 'call_busy';
+  static const callTimeout = 'call_timeout';
+
+  // Audio <-> Video switch
+  static const callRenegotiateOffer = 'call_renegotiate_offer';
+  static const callRenegotiateAnswer = 'call_renegotiate_answer';
+  static const callVideoToggle = 'call_video_toggle';
+}
+
 class SocketService {
   static final SocketService instance = SocketService._internal();
   SocketService._internal();
@@ -76,6 +93,7 @@ class SocketService {
           debugPrint('CALL WS CLOSED');
           _connected = false;
         },
+        cancelOnError: false,
       );
     } catch (e) {
       debugPrint('CALL WS CONNECT ERROR: $e');
@@ -102,7 +120,13 @@ class SocketService {
     };
 
     debugPrint('CALL WS SEND: ${jsonEncode(data)}');
-    _channel!.sink.add(jsonEncode(data));
+
+    try {
+      _channel!.sink.add(jsonEncode(data));
+    } catch (e) {
+      debugPrint('CALL WS SEND ERROR: $e');
+      _connected = false;
+    }
   }
 
   void on(String event, Function(dynamic) handler) {
@@ -124,7 +148,10 @@ class SocketService {
     _subscription?.cancel();
     _subscription = null;
 
-    _channel?.sink.close();
+    try {
+      _channel?.sink.close();
+    } catch (_) {}
+
     _channel = null;
 
     if (clearHandlers) {

@@ -116,6 +116,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       case MessageType.image:
         return '📷 Photo';
 
+      case MessageType.mediaAlbum:
+        final count = latest.mediaUrls?.length ?? 0;
+        return count <= 1 ? '📷 Photo' : '📷 $count Photos';
+
       case MessageType.video:
         return '🎥 Video';
 

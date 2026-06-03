@@ -213,23 +213,31 @@ class AppChatData {
   }
 
   static String _chatPreview(ChatMessage message) {
-    switch (message.type) {
-      case MessageType.text:
-        return message.text;
-      case MessageType.image:
-        return '📷 Photo';
-      case MessageType.video:
-        return '🎥 Video';
-      case MessageType.file:
-        return '📎 ${message.fileName ?? "File"}';
-      case MessageType.call:
-        return message.callType == CallEntryType.video
-            ? '📹 Video call'
-            : '📞 Voice call';
-      case MessageType.audio:
-        return '🎤 Voice message';
-    }
+  switch (message.type) {
+    case MessageType.text:
+      return message.text;
+
+    case MessageType.image:
+      return '📷 Photo';
+
+    case MessageType.mediaAlbum:
+      return '📷 ${message.mediaUrls?.length ?? 0} Photos';
+
+    case MessageType.video:
+      return '🎥 Video';
+
+    case MessageType.file:
+      return '📎 ${message.fileName ?? "File"}';
+
+    case MessageType.call:
+      return message.callType == CallEntryType.video
+          ? '📹 Video call'
+          : '📞 Voice call';
+
+    case MessageType.audio:
+      return '🎤 Voice message';
   }
+}
 
   static String _formatChatTime(DateTime time) {
     final hour = time.hour > 12

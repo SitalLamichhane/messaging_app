@@ -40,10 +40,15 @@ class DynamicMessageMedia extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     switch (message.type) {
-      case MessageType.image:
-        return _ImageBubble(message: message);
+  case MessageType.image:
+    return _ImageBubble(message: message);
 
-      case MessageType.audio:
+  case MessageType.mediaAlbum:
+    return _MediaAlbumBubble(
+      message: message,
+    );
+
+  case MessageType.audio:
         return _AudioBubble(message: message);
 
       case MessageType.video:
@@ -641,6 +646,146 @@ class _BrokenMediaBox extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+class _MediaAlbumBubble extends StatelessWidget {
+  final ChatMessage message;
+
+  const _MediaAlbumBubble({
+    required this.message,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final images = message.mediaUrls ?? [];
+
+    if (images.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    if (images.length == 1) {
+      return _ImageBubble(
+        message: message.copyWith(
+          filePath: images.first,
+        ),
+      );
+    }
+
+    final visible = images.take(4).toList();
+    final extra = images.length - 4;
+
+    Widget imageTile(
+      String path,
+      int index, {
+      bool showOverlay = false,
+    }) {
+      final fixedPath = fixedMediaUrl(path);
+
+      return GestureDetector(
+        onTap: () {},
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _isNetworkPath(fixedPath)
+                ? Image.network(
+                    fixedPath,
+                    fit: BoxFit.cover,
+                  )
+                : Image.file(
+                    File(fixedPath),
+                    fit: BoxFit.cover,
+                  ),
+            if (showOverlay)
+              Container(
+                color: Colors.black54,
+                alignment: Alignment.center,
+                child: Text(
+                  '+$extra',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 28,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        width: 240,
+        height: 190,
+        child: images.length == 2
+            ? Row(
+                children: [
+                  Expanded(child: imageTile(visible[0], 0)),
+                  const SizedBox(width: 2),
+                  Expanded(child: imageTile(visible[1], 1)),
+                ],
+              )
+            : images.length == 3
+                ? Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: imageTile(visible[0], 0),
+                      ),
+                      const SizedBox(width: 2),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            Expanded(
+                              child: imageTile(visible[1], 1),
+                            ),
+                            const SizedBox(height: 2),
+                            Expanded(
+                              child: imageTile(visible[2], 2),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    children: [
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: imageTile(visible[0], 0),
+                            ),
+                            const SizedBox(width: 2),
+                            Expanded(
+                              child: imageTile(visible[1], 1),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Expanded(
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: imageTile(visible[2], 2),
+                            ),
+                            const SizedBox(width: 2),
+                            Expanded(
+                              child: imageTile(
+                                visible[3],
+                                3,
+                                showOverlay: extra > 0,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
       ),
     );
   }

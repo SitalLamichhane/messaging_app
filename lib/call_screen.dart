@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
+import 'package:simple_pip_mode/simple_pip.dart';
 
 import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_models.dart';
@@ -36,7 +37,8 @@ class CallScreen extends ConsumerStatefulWidget {
   ConsumerState<CallScreen> createState() => _CallScreenState();
 }
 
-class _CallScreenState extends ConsumerState<CallScreen> {
+class _CallScreenState extends ConsumerState<CallScreen>
+    with WidgetsBindingObserver {
   bool _didStart = false;
   bool _didSaveCallResult = false;
   bool _didPop = false;
@@ -46,6 +48,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
 
     _callListener = ref.listenManual<CallState>(
       callProvider,
@@ -74,22 +77,62 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _callListener?.close();
     _callListener = null;
 
-    try {
-      ref.read(callProvider.notifier).disposeCall();
-    } catch (_) {}
+    final callState = ref.read(callProvider);
+
+    if (_didPop || _isFinalStatus(callState.status)) {
+      try {
+        ref.read(callProvider.notifier).disposeCall();
+      } catch (_) {}
+    }
 
     super.dispose();
   }
 
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) async {
+    final callState = ref.read(callProvider);
+
+    if (state == AppLifecycleState.paused &&
+        callState.isVideoCall &&
+        !_isFinalStatus(callState.status)) {
+      try {
+        await SimplePip().enterPipMode();
+      } catch (e) {
+        debugPrint('PiP error: $e');
+      }
+    }
+  }
+
+  Future<void> _minimizeCall() async {
+    final callState = ref.read(callProvider);
+
+    if (_isFinalStatus(callState.status)) {
+      await _endCall();
+      return;
+    }
+
+    if (callState.isVideoCall) {
+      try {
+        await SimplePip().enterPipMode();
+        return;
+      } catch (e) {
+        debugPrint('PiP minimize error: $e');
+      }
+    }
+
+    if (mounted && Navigator.canPop(context)) {
+      Navigator.pop(context);
+    }
+  }
+
   String _formatDuration(Duration duration) {
     final hours = duration.inHours;
-    final minutes =
-        duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds =
-        duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
 
     if (hours > 0) {
       return '${hours.toString().padLeft(2, '0')}:$minutes:$seconds';
@@ -138,6 +181,8 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
     _didSaveCallResult = true;
 
+    final isVideoCall = callState.isVideoCall;
+
     final answered = callState.duration.inSeconds > 0 ||
         callState.status == CallStatus.connected ||
         callState.status == CallStatus.ended;
@@ -145,12 +190,12 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     String text;
 
     if (callState.status == CallStatus.rejected) {
-      text = widget.isVideoCall ? 'Video call rejected' : 'Voice call rejected';
+      text = isVideoCall ? 'Video call rejected' : 'Voice call rejected';
     } else if (callState.status == CallStatus.missed ||
         callState.status == CallStatus.timeout) {
-      text = widget.isVideoCall ? 'Missed video call' : 'Missed voice call';
+      text = isVideoCall ? 'Missed video call' : 'Missed voice call';
     } else {
-      text = widget.isVideoCall ? 'Video call ended' : 'Voice call ended';
+      text = isVideoCall ? 'Video call ended' : 'Voice call ended';
     }
 
     AppChatData.addMessage(
@@ -162,8 +207,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         isMe: widget.isCaller,
         sentAt: DateTime.now(),
         isSeen: true,
-        callType:
-            widget.isVideoCall ? CallEntryType.video : CallEntryType.voice,
+        callType: isVideoCall ? CallEntryType.video : CallEntryType.voice,
         callDuration: callState.duration,
         callAnswered: answered,
       ),
@@ -206,16 +250,32 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     });
   }
 
+  Future<void> _switchAudioVideo(CallState callState) async {
+    if (!mounted) return;
+    if (_isFinalStatus(callState.status)) return;
+
+    try {
+      final notifier = ref.read(callProvider.notifier);
+
+      if (callState.isVideoCall) {
+        await notifier.switchToAudioCall();
+      } else {
+        await notifier.switchToVideoCall();
+      }
+    } catch (_) {}
+  }
+
   @override
   Widget build(BuildContext context) {
     final callState = ref.watch(callProvider);
     final hasAvatar = widget.avatarUrl.trim().isNotEmpty;
+    final isVideoCall = callState.isVideoCall;
 
     return PopScope(
       canPop: false,
-      onPopInvokedWithResult: (didPop, result) async {
+      onPopInvoked: (didPop) async {
         if (!didPop && mounted) {
-          await _endCall();
+          await _minimizeCall();
         }
       },
       child: Scaffold(
@@ -223,7 +283,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
         body: Stack(
           children: [
             Positioned.fill(
-              child: widget.isVideoCall
+              child: isVideoCall
                   ? _buildRemoteVideoBackground(callState, hasAvatar)
                   : _buildVoiceCallBackground(hasAvatar),
             ),
@@ -254,10 +314,10 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                       children: [
                         _TopCircleButton(
                           icon: Icons.arrow_back,
-                          asyncOnTap: _endCall,
+                          asyncOnTap: _minimizeCall,
                         ),
                         const Spacer(),
-                        if (widget.isVideoCall)
+                        if (isVideoCall)
                           _TopCircleButton(
                             icon: Icons.flip_camera_ios_outlined,
                             asyncOnTap: () async {
@@ -274,7 +334,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (!widget.isVideoCall || callState.isCameraOff) ...[
+                  if (!isVideoCall || callState.isCameraOff) ...[
                     CircleAvatar(
                       radius: 52,
                       backgroundColor: const Color(0xFF1F2937),
@@ -314,7 +374,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                     ),
                   ),
                   const Spacer(),
-                  if (widget.isVideoCall)
+                  if (isVideoCall)
                     Align(
                       alignment: Alignment.bottomRight,
                       child: Container(
@@ -372,18 +432,14 @@ class _CallScreenState extends ConsumerState<CallScreen> {
                           asyncOnTap: _endCall,
                         ),
                         _MessengerCallButton(
-                          icon: widget.isVideoCall
-                              ? (callState.isCameraOff
-                                  ? Icons.videocam_off_rounded
-                                  : Icons.videocam_rounded)
-                              : Icons.videocam_rounded,
-                          bgColor: const Color(0x33FFFFFF),
-                          onTap: () {
-                            if (!mounted) return;
-
-                            try {
-                              ref.read(callProvider.notifier).toggleCamera();
-                            } catch (_) {}
+                          icon: callState.isVideoCall
+                              ? Icons.videocam
+                              : Icons.videocam_off,
+                          bgColor: callState.isVideoCall
+                              ? const Color(0xFF0084FF)
+                              : const Color(0x33FFFFFF),
+                          asyncOnTap: () async {
+                            await _switchAudioVideo(callState);
                           },
                         ),
                       ],
@@ -398,26 +454,30 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     );
   }
 
- Widget _buildRemoteVideoBackground(CallState callState, bool hasAvatar) {
-  final remoteRenderer = callState.remoteRenderer;
+  Widget _buildRemoteVideoBackground(CallState callState, bool hasAvatar) {
+    final remoteRenderer = callState.remoteRenderer;
 
-  if (widget.isVideoCall && remoteRenderer != null) {
-    return RTCVideoView(
-      remoteRenderer,
-      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-    );
+    if (callState.isVideoCall &&
+        !_isFinalStatus(callState.status) &&
+        remoteRenderer != null &&
+        remoteRenderer.srcObject != null) {
+      return RTCVideoView(
+        remoteRenderer,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+      );
+    }
+
+    if (hasAvatar) {
+      return Image.network(
+        widget.avatarUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, __, ___) => _emptyVideoBackground(),
+      );
+    }
+
+    return _emptyVideoBackground();
   }
 
-  if (hasAvatar) {
-    return Image.network(
-      widget.avatarUrl,
-      fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => _emptyVideoBackground(),
-    );
-  }
-
-  return _emptyVideoBackground();
-}
   Widget _emptyVideoBackground() {
     return Container(
       color: const Color(0xFF111827),
@@ -464,6 +524,10 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   Widget _buildLocalPreview(CallState callState) {
     final localRenderer = callState.localRenderer;
 
+    if (_isFinalStatus(callState.status)) {
+      return const SizedBox();
+    }
+
     if (callState.isCameraOff) {
       return const Center(
         child: Icon(
@@ -474,7 +538,7 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       );
     }
 
-    if (localRenderer == null) {
+    if (localRenderer == null || localRenderer.srcObject == null) {
       return const Center(
         child: CircularProgressIndicator(
           color: Colors.white,

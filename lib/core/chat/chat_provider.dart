@@ -417,6 +417,28 @@ class ChatProvider extends ChangeNotifier {
     _setSending(false);
   }
 
+  Future<void> sendImages({
+  required int conversationId,
+  required List<File> images,
+  String? caption,
+}) async {
+  if (images.isEmpty) return;
+
+  final temp = ChatMessage(
+    id: DateTime.now().microsecondsSinceEpoch.toString(),
+    type: MessageType.mediaAlbum,
+    text: caption ?? '',
+    isMe: true,
+    sentAt: DateTime.now(),
+    isSeen: false,
+    mediaUrls: images.map((e) => e.path).toList(),
+  );
+
+  _addLocalMessage(conversationId, temp);
+
+  notifyListeners();
+}
+
   Future<void> sendVideo({
     required int conversationId,
     required File video,
@@ -529,6 +551,20 @@ class ChatProvider extends ChangeNotifier {
     }
 
     _setSending(false);
+  }
+
+  Future<void> sendFiles({
+    required int conversationId,
+    required List<File> files,
+  }) async {
+    if (files.isEmpty) return;
+
+    for (final file in files) {
+      await sendFile(
+        conversationId: conversationId,
+        file: file,
+      );
+    }
   }
 
   List<ChatMessage> getMessagesForChat(String conversationId) {
@@ -807,6 +843,8 @@ class ChatProvider extends ChangeNotifier {
     switch (type) {
       case 'image':
         return MessageType.image;
+      case 'media_album':
+        return MessageType.mediaAlbum;
       case 'video':
         return MessageType.video;
       case 'audio':
@@ -825,6 +863,8 @@ class ChatProvider extends ChangeNotifier {
 
   String _preview(ChatMessage message) {
     switch (message.type) {
+      case MessageType.mediaAlbum:
+     return '📷 ${message.mediaUrls?.length ?? 0} Photos';
       case MessageType.text:
         return message.text.isEmpty ? 'Message' : message.text;
       case MessageType.image:

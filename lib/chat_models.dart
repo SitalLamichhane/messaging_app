@@ -7,6 +7,7 @@ enum MessageType {
   file,
   call,
   audio,
+  mediaAlbum,
 }
 
 enum CallEntryType {
@@ -62,6 +63,16 @@ class ChatMessage {
   final String? fileName;
   final int? fileSizeBytes;
 
+  /// Messenger-like multi photo album.
+  /// Use this when type == MessageType.mediaAlbum.
+  ///
+  /// Example:
+  /// [
+  ///   "/storage/emulated/0/DCIM/image1.jpg",
+  ///   "/storage/emulated/0/DCIM/image2.jpg",
+  /// ]
+  final List<String>? mediaUrls;
+
   final CallEntryType? callType;
   final Duration? callDuration;
   final bool? callAnswered;
@@ -86,6 +97,7 @@ class ChatMessage {
     this.filePath,
     this.fileName,
     this.fileSizeBytes,
+    this.mediaUrls,
     this.callType,
     this.callDuration,
     this.callAnswered,
@@ -109,6 +121,7 @@ class ChatMessage {
     String? filePath,
     String? fileName,
     int? fileSizeBytes,
+    List<String>? mediaUrls,
     CallEntryType? callType,
     Duration? callDuration,
     bool? callAnswered,
@@ -131,6 +144,7 @@ class ChatMessage {
       filePath: filePath ?? this.filePath,
       fileName: fileName ?? this.fileName,
       fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
+      mediaUrls: mediaUrls ?? this.mediaUrls,
       callType: callType ?? this.callType,
       callDuration: callDuration ?? this.callDuration,
       callAnswered: callAnswered ?? this.callAnswered,
