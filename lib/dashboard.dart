@@ -10,7 +10,16 @@ import 'package:messaging_app/profile_page.dart';
 import 'package:provider/provider.dart';
 
 class ChatListScreen extends StatefulWidget {
-  const ChatListScreen({super.key});
+  final String currentUserId;
+  final String currentUserName;
+  final String currentUserAvatar;
+
+  const ChatListScreen({
+    super.key,
+    this.currentUserId = '',
+    this.currentUserName = '',
+    this.currentUserAvatar = '',
+  });
 
   @override
   State<ChatListScreen> createState() => _ChatListScreenState();
@@ -18,12 +27,9 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   Timer? _debounce;
-
   int _selectedBottomIndex = 0;
 
-  final TextEditingController _searchController =
-      TextEditingController();
-
+  final TextEditingController _searchController = TextEditingController();
   String _search = '';
 
   @override
@@ -44,17 +50,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   List<ChatItem> _filteredChats(List<ChatItem> chats) {
-    if (_search.trim().isEmpty) {
-      return chats;
-    }
+    if (_search.trim().isEmpty) return chats;
 
     final q = _search.toLowerCase().trim();
 
     return chats.where((chat) {
       final preview = _buildPreview(chat).toLowerCase();
-
-      return chat.name.toLowerCase().contains(q) ||
-          preview.contains(q);
+      return chat.name.toLowerCase().contains(q) || preview.contains(q);
     }).toList();
   }
 
@@ -73,7 +75,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
     Widget? page;
 
     if (index == 1) {
-      page = const CallHistoryScreen();
+      page = CallHistoryScreen(
+        currentUserId: widget.currentUserId,
+        currentUserName: widget.currentUserName,
+        currentUserAvatar: widget.currentUserAvatar,
+      );
     } else if (index == 2) {
       page = const PagesScreen();
     } else if (index == 3) {
@@ -109,9 +115,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     switch (latest.type) {
       case MessageType.text:
-        return latest.text.isEmpty
-            ? 'Message'
-            : latest.text;
+        return latest.text.isEmpty ? 'Message' : latest.text;
 
       case MessageType.image:
         return '📷 Photo';
@@ -141,28 +145,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final provider = context.watch<ChatProvider>();
 
     final isSearching = _search.trim().isNotEmpty;
-
     final searchedUsers = provider.searchedUsers;
-
     final chats = _filteredChats(provider.conversations);
 
-    final isDark =
-        Theme.of(context).brightness == Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final bg = isDark
-        ? const Color(0xFF0F172A)
-        : const Color(0xFFF5F7FB);
-
-    final borderColor = isDark
-        ? const Color(0xFF243041)
-        : const Color(0xFFE5E7EB);
-
-    final secondaryText = isDark
-        ? const Color(0xFF94A3B8)
-        : const Color(0xFF6B7280);
-
-    final cardColor =
-        isDark ? const Color(0xFF1E293B) : Colors.white;
+    final bg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF5F7FB);
+    final borderColor =
+        isDark ? const Color(0xFF243041) : const Color(0xFFE5E7EB);
+    final secondaryText =
+        isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280);
+    final cardColor = isDark ? const Color(0xFF1E293B) : Colors.white;
 
     return Scaffold(
       backgroundColor: bg,
@@ -170,8 +163,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         child: Column(
           children: [
             Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(16, 16, 16, 12),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
               child: Row(
                 children: [
                   Container(
@@ -190,21 +182,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   Expanded(
                     child: Text(
                       'Chats',
-                      style: Theme.of(context)
-                          .textTheme
-                          .headlineSmall
-                          ?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
+                      style:
+                          Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.w800,
+                              ),
                     ),
                   ),
                   IconButton(
                     onPressed: () {
                       provider.loadConversations();
                     },
-                    icon: const Icon(
-                      Icons.refresh_rounded,
-                    ),
+                    icon: const Icon(Icons.refresh_rounded),
                   ),
                 ],
               ),
@@ -213,8 +201,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             const SizedBox(height: 10),
 
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 16),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
                 height: 50,
                 decoration: BoxDecoration(
@@ -249,8 +236,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     hintText: 'Search user by phone',
                     prefixIcon: Icon(Icons.search_rounded),
                     border: InputBorder.none,
-                    contentPadding:
-                        EdgeInsets.symmetric(vertical: 14),
+                    contentPadding: EdgeInsets.symmetric(vertical: 14),
                   ),
                 ),
               ),
@@ -260,15 +246,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
             Expanded(
               child: isSearching
-                  ? _buildSearchResults(
-                      provider,
-                      searchedUsers,
-                    )
-                  : _buildConversationList(
-                      provider,
-                      chats,
-                      secondaryText,
-                    ),
+                  ? _buildSearchResults(provider, searchedUsers)
+                  : _buildConversationList(provider, chats, secondaryText),
             ),
 
             _buildBottomNavigation(
@@ -304,18 +283,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
               (user['name'] ?? 'U')[0].toUpperCase(),
             ),
           ),
-          title: Text(
-            user['name'] ?? 'Unknown',
-          ),
-          subtitle: Text(
-            user['phone_number'] ?? '',
-          ),
+          title: Text(user['name'] ?? 'Unknown'),
+          subtitle: Text(user['phone_number'] ?? ''),
           onTap: () async {
             if (provider.isSending) return;
 
-            final chat = await provider.startPrivateChat(
-              user['id'],
-            );
+            final chat = await provider.startPrivateChat(user['id']);
 
             if (!context.mounted) return;
 
@@ -327,12 +300,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
               });
 
               provider.searchedUsers.clear();
+              provider.notifyListeners();
 
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (_) =>
-                      ChatDetailScreen(chat: chat),
+                  builder: (_) => ChatDetailScreen(chat: chat),
                 ),
               );
             }
@@ -370,11 +343,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return Center(
         child: Text(
           'No chats found',
-          style:
-              Theme.of(context).textTheme.bodyLarge?.copyWith(
-                    color: secondaryText,
-                    fontWeight: FontWeight.w600,
-                  ),
+          style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                color: secondaryText,
+                fontWeight: FontWeight.w600,
+              ),
         ),
       );
     }
@@ -399,51 +371,38 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   isOnline: chat.isOnline,
                   isGroup: chat.isGroup,
                 ),
-
                 const SizedBox(width: 14),
-
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         chat.name,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .titleMedium
-                            ?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.titleMedium?.copyWith(
+                                  fontWeight: FontWeight.w700,
+                                ),
                       ),
-
                       const SizedBox(height: 4),
-
                       Text(
                         _buildPreview(chat),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context)
-                            .textTheme
-                            .bodyMedium
-                            ?.copyWith(
-                              color: secondaryText,
-                              fontWeight: FontWeight.w500,
-                            ),
+                        style:
+                            Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: secondaryText,
+                                  fontWeight: FontWeight.w500,
+                                ),
                       ),
                     ],
                   ),
                 ),
-
                 const SizedBox(width: 12),
-
                 Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.end,
-                  mainAxisAlignment:
-                      MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       _listTime(chat),
@@ -453,20 +412,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         fontWeight: FontWeight.w500,
                       ),
                     ),
-
                     if (chat.unreadCount > 0) ...[
                       const SizedBox(height: 8),
-
                       Container(
-                        padding:
-                            const EdgeInsets.symmetric(
+                        padding: const EdgeInsets.symmetric(
                           horizontal: 8,
                           vertical: 3,
                         ),
                         decoration: const BoxDecoration(
                           color: Color(0xFF1877F2),
-                          borderRadius:
-                              BorderRadius.all(
+                          borderRadius: BorderRadius.all(
                             Radius.circular(999),
                           ),
                         ),
@@ -499,22 +454,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final textTheme = Theme.of(context).textTheme;
 
     final items = [
-      _BottomNavItemData(
-        Icons.chat_bubble_outline,
-        'Chats',
-      ),
-      _BottomNavItemData(
-        Icons.call_outlined,
-        'Calls',
-      ),
-      _BottomNavItemData(
-        Icons.description_outlined,
-        'Pages',
-      ),
-      _BottomNavItemData(
-        Icons.person_outline,
-        'Profile',
-      ),
+      _BottomNavItemData(Icons.chat_bubble_outline, 'Chats'),
+      _BottomNavItemData(Icons.call_outlined, 'Calls'),
+      _BottomNavItemData(Icons.description_outlined, 'Pages'),
+      _BottomNavItemData(Icons.person_outline, 'Profile'),
     ];
 
     return Container(
@@ -535,8 +478,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         children: List.generate(
           items.length,
           (index) {
-            final isSelected =
-                _selectedBottomIndex == index;
+            final isSelected = _selectedBottomIndex == index;
 
             return Expanded(
               child: InkWell(
@@ -545,40 +487,27 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     AnimatedContainer(
-                      duration:
-                          const Duration(milliseconds: 180),
+                      duration: const Duration(milliseconds: 180),
                       width: 72,
                       height: 3,
-                      margin:
-                          const EdgeInsets.only(bottom: 10),
+                      margin: const EdgeInsets.only(bottom: 10),
                       decoration: BoxDecoration(
-                        color: isSelected
-                            ? accent
-                            : Colors.transparent,
-                        borderRadius:
-                            BorderRadius.circular(20),
+                        color: isSelected ? accent : Colors.transparent,
+                        borderRadius: BorderRadius.circular(20),
                       ),
                     ),
-
                     Icon(
                       items[index].icon,
                       size: 24,
-                      color: isSelected
-                          ? accent
-                          : secondaryText,
+                      color: isSelected ? accent : secondaryText,
                     ),
-
                     const SizedBox(height: 6),
-
                     Text(
                       items[index].label,
                       style: textTheme.bodySmall?.copyWith(
-                        fontWeight: isSelected
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                        color: isSelected
-                            ? accent
-                            : secondaryText,
+                        fontWeight:
+                            isSelected ? FontWeight.w700 : FontWeight.w500,
+                        color: isSelected ? accent : secondaryText,
                       ),
                     ),
                   ],
@@ -596,10 +525,7 @@ class _BottomNavItemData {
   final IconData icon;
   final String label;
 
-  _BottomNavItemData(
-    this.icon,
-    this.label,
-  );
+  _BottomNavItemData(this.icon, this.label);
 }
 
 class _Avatar extends StatelessWidget {
@@ -628,16 +554,10 @@ class _Avatar extends StatelessWidget {
               ? const Color(0xFFEFF4FF)
               : const Color(0xFFE5E7EB),
           backgroundImage:
-              avatarUrl.trim().isNotEmpty
-                  ? NetworkImage(avatarUrl)
-                  : null,
+              avatarUrl.trim().isNotEmpty ? NetworkImage(avatarUrl) : null,
           child: avatarUrl.trim().isEmpty
               ? Text(
-                  (
-                    name.isNotEmpty
-                        ? name[0]
-                        : 'U'
-                  ).toUpperCase(),
+                  (name.isNotEmpty ? name[0] : 'U').toUpperCase(),
                   style: TextStyle(
                     fontWeight: FontWeight.w800,
                     fontSize: radius * 0.65,

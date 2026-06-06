@@ -8,8 +8,15 @@ import 'package:messaging_app/pages.dart';
 import 'package:messaging_app/profile_page.dart';
 
 class CallHistoryScreen extends StatefulWidget {
+  final String currentUserId;
+  final String currentUserName;
+  final String currentUserAvatar;
+
   const CallHistoryScreen({
     super.key,
+    required this.currentUserId,
+    required this.currentUserName,
+    required this.currentUserAvatar,
   });
 
   @override
@@ -104,14 +111,19 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
       context,
       MaterialPageRoute(
         builder: (_) => CallScreen(
-  name: name,
-  avatarUrl: avatarUrl,
-  isVideoCall: false,
-  chat: chat,
-  currentUserId: '1',
-  receiverId: chat.id,
-  isCaller: true,
-),
+          name: name,
+          avatarUrl: avatarUrl,
+          isVideoCall: false,
+          chat: chat,
+
+          currentUserId: widget.currentUserId,
+          currentUserName: widget.currentUserName,
+          currentUserAvatar: widget.currentUserAvatar,
+
+          receiverId: chat.id,
+          isCaller: true,
+          conversationId: chat.id,
+        ),
       ),
     ).then((_) {
       if (mounted) setState(() {});
@@ -138,15 +150,20 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
     Navigator.push(
       context,
       MaterialPageRoute(
-            builder: (_) => CallScreen(
-  name: name,
-  avatarUrl: avatarUrl,
-  isVideoCall: true,
-  chat: chat,
-  currentUserId: '1',
-  receiverId: chat.id,
-  isCaller: true,
-),
+        builder: (_) => CallScreen(
+          name: name,
+          avatarUrl: avatarUrl,
+          isVideoCall: true,
+          chat: chat,
+
+          currentUserId: widget.currentUserId,
+          currentUserName: widget.currentUserName,
+          currentUserAvatar: widget.currentUserAvatar,
+
+          receiverId: chat.id,
+          isCaller: true,
+          conversationId: chat.id,
+        ),
       ),
     ).then((_) {
       if (mounted) setState(() {});
@@ -378,8 +395,8 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                                                               shape: BoxShape
                                                                   .circle,
                                                               border: Border.all(
-                                                                color: Colors
-                                                                    .white,
+                                                                color:
+                                                                    Colors.white,
                                                                 width: 2,
                                                               ),
                                                             ),
@@ -447,10 +464,10 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                           delegate: SliverChildBuilderDelegate(
                             (context, index) {
                               final call = _filteredRecentCalls[index];
-                              final subtitleColor = call.status ==
-                                      CallEntryStatus.missed
-                                  ? const Color(0xFFEF4444)
-                                  : hintColor;
+                              final subtitleColor =
+                                  call.status == CallEntryStatus.missed
+                                      ? const Color(0xFFEF4444)
+                                      : hintColor;
 
                               return InkWell(
                                 onTap: () => _openChat(
@@ -467,11 +484,10 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                                     children: [
                                       CircleAvatar(
                                         radius: 28,
-                                        backgroundImage: call.avatarUrl
-                                                .trim()
-                                                .isNotEmpty
-                                            ? NetworkImage(call.avatarUrl)
-                                            : null,
+                                        backgroundImage:
+                                            call.avatarUrl.trim().isNotEmpty
+                                                ? NetworkImage(call.avatarUrl)
+                                                : null,
                                         child: call.avatarUrl.trim().isEmpty
                                             ? Text(
                                                 call.name.isNotEmpty

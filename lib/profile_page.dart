@@ -5,17 +5,24 @@ import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/dashboard.dart';
 import 'package:messaging_app/login_page.dart';
 import 'package:messaging_app/pages.dart';
-import 'package:messaging_app/profile_data/Profile_data_page.dart';
+import 'package:messaging_app/profile_data/profile_data_page.dart';
 import 'package:messaging_app/theme_controller.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String chatId;
   final String chatName;
 
+  final String currentUserId;
+  final String currentUserName;
+  final String currentUserAvatar;
+
   const ProfileScreen({
     super.key,
     required this.chatId,
     required this.chatName,
+    this.currentUserId = '',
+    this.currentUserName = 'You',
+    this.currentUserAvatar = '',
   });
 
   @override
@@ -38,8 +45,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   void initState() {
     super.initState();
-    _name = widget.chatName.trim().isEmpty ? 'User Name' : widget.chatName;
-    _profileImageUrl = _defaultImage;
+
+    _name = widget.currentUserName.trim().isNotEmpty
+        ? widget.currentUserName.trim()
+        : widget.chatName.trim().isEmpty
+            ? 'User Name'
+            : widget.chatName.trim();
+
+    _profileImageUrl = widget.currentUserAvatar.trim().isNotEmpty
+        ? widget.currentUserAvatar.trim()
+        : _defaultImage;
   }
 
   Future<void> _openProfileDataPage() async {
@@ -80,9 +95,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (index == 0) {
       page = const ChatListScreen();
     } else if (index == 1) {
-      page = const CallHistoryScreen();
+      page = CallHistoryScreen(
+        currentUserId: widget.currentUserId,
+        currentUserName: _name.trim().isEmpty ? widget.currentUserName : _name,
+        currentUserAvatar: _profileImageUrl.trim().isEmpty
+            ? widget.currentUserAvatar
+            : _profileImageUrl,
+      );
     } else if (index == 2) {
-      page = const PagesScreen();
+      page = PagesScreen(
+        currentUserId: widget.currentUserId,
+        currentUserName: _name.trim().isEmpty ? widget.currentUserName : _name,
+        currentUserAvatar: _profileImageUrl.trim().isEmpty
+            ? widget.currentUserAvatar
+            : _profileImageUrl,
+      );
     } else if (index == 3) {
       return;
     }
@@ -414,7 +441,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
               textColor: primaryText,
               subtitleColor: secondaryText,
               dividerColor: dividerColor,
-              onTap: _openProfileDataPage,
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PagesScreen(
+                      currentUserId: widget.currentUserId,
+                      currentUserName:
+                          _name.trim().isEmpty ? widget.currentUserName : _name,
+                      currentUserAvatar: _profileImageUrl.trim().isEmpty
+                          ? widget.currentUserAvatar
+                          : _profileImageUrl,
+                    ),
+                  ),
+                );
+              },
             ),
             ProfileSwitchTile(
               icon: Icons.notifications_none_outlined,

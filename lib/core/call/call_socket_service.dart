@@ -1,3 +1,5 @@
+// core/call/call_socket_service.dart
+
 import 'dart:async';
 import 'dart:convert';
 
@@ -5,68 +7,83 @@ import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class CallSocketEvents {
-  static const callOffer = 'call_offer';
-  static const callAnswer = 'call_answer';
-  static const iceCandidate = 'ice_candidate';
+  static const String callOffer = 'call_offer';
+  static const String callAnswer = 'call_answer';
+  static const String iceCandidate = 'ice_candidate';
 
-  static const callReject = 'call_reject';
-  static const callEnd = 'call_end';
-  static const callLeave = 'call_leave';
-  static const callBusy = 'call_busy';
-  static const callTimeout = 'call_timeout';
+  static const String callReject = 'call_reject';
+  static const String callEnd = 'call_end';
+  static const String callLeave = 'call_leave';
+  static const String callBusy = 'call_busy';
+  static const String callTimeout = 'call_timeout';
 
   // Audio <-> Video switch
-  static const callRenegotiateOffer = 'call_renegotiate_offer';
-  static const callRenegotiateAnswer = 'call_renegotiate_answer';
-  static const callVideoToggle = 'call_video_toggle';
+  static const String callRenegotiateOffer = 'call_renegotiate_offer';
+  static const String callRenegotiateAnswer = 'call_renegotiate_answer';
+  static const String callVideoToggle = 'call_video_toggle';
+  static const String callVideoUpgradeRejected =
+      'call_video_upgrade_rejected';
 }
+
+typedef SocketHandler = FutureOr<void> Function(Map<String, dynamic> data);
 
 class SocketService {
   static final SocketService instance = SocketService._internal();
+
   SocketService._internal();
 
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
 
-  final Map<String, Function(dynamic)> _handlers = {};
+  final Map<String, SocketHandler> _handlers = {};
 
   bool _connected = false;
+  bool _connecting = false;
   String? _url;
 
   bool get isConnected => _connected;
 
-  void connect({required String url}) {
+  Future<void> connect({required String url}) async {
+    if (_connecting) return;
+
     if (_connected && _channel != null && _url == url) {
       debugPrint('CALL WS ALREADY CONNECTED');
       return;
     }
 
-    if (_channel != null) {
-      disconnect(clearHandlers: false);
-    }
-
-    _url = url;
+    _connecting = true;
 
     try {
+      if (_channel != null) {
+        await disconnect(clearHandlers: false);
+      }
+
+      _url = url;
       _channel = WebSocketChannel.connect(Uri.parse(url));
       _connected = true;
 
       debugPrint('CALL WS CONNECTED: $url');
 
       _subscription = _channel!.stream.listen(
-        (message) {
+        (message) async {
           debugPrint('========================');
           debugPrint('CALL WS RAW: $message');
 
           try {
-            final data = jsonDecode(message);
+            final decoded = jsonDecode(message);
 
-            final event = data['event'];
+            if (decoded is! Map) {
+              debugPrint('CALL WS INVALID DATA');
+              return;
+            }
+
+            final data = Map<String, dynamic>.from(decoded);
+            final event = data['event']?.toString();
 
             debugPrint('CALL WS EVENT: $event');
             debugPrint('CALL WS PAYLOAD: ${data['payload']}');
 
-            if (event == null) {
+            if (event == null || event.isEmpty) {
               debugPrint('CALL WS EVENT NULL');
               return;
             }
@@ -75,7 +92,7 @@ class SocketService {
 
             if (handler != null) {
               debugPrint('CALL WS HANDLER FOUND: $event');
-              handler(data);
+              await handler(data);
             } else {
               debugPrint('CALL WS NO HANDLER FOR: $event');
             }
@@ -92,12 +109,17 @@ class SocketService {
         onDone: () {
           debugPrint('CALL WS CLOSED');
           _connected = false;
+          _channel = null;
+          _subscription = null;
         },
         cancelOnError: false,
       );
     } catch (e) {
       debugPrint('CALL WS CONNECT ERROR: $e');
       _connected = false;
+      _channel = null;
+    } finally {
+      _connecting = false;
     }
   }
 
@@ -108,7 +130,7 @@ class SocketService {
     String? conversationId,
   }) {
     if (_channel == null || !_connected) {
-      debugPrint('CALL WS NOT CONNECTED');
+      debugPrint('CALL WS NOT CONNECTED: $event');
       return;
     }
 
@@ -119,17 +141,17 @@ class SocketService {
       if (conversationId != null) 'conversation_id': conversationId,
     };
 
-    debugPrint('CALL WS SEND: ${jsonEncode(data)}');
-
     try {
-      _channel!.sink.add(jsonEncode(data));
+      final encoded = jsonEncode(data);
+      debugPrint('CALL WS SEND: $encoded');
+      _channel!.sink.add(encoded);
     } catch (e) {
       debugPrint('CALL WS SEND ERROR: $e');
       _connected = false;
     }
   }
 
-  void on(String event, Function(dynamic) handler) {
+  void on(String event, SocketHandler handler) {
     _handlers[event] = handler;
   }
 
@@ -137,28 +159,36 @@ class SocketService {
     _handlers.remove(event);
   }
 
-  void reconnect() {
-    if (_url == null) return;
-
-    disconnect(clearHandlers: false);
-    connect(url: _url!);
+  void clearHandlers() {
+    _handlers.clear();
   }
 
-  void disconnect({bool clearHandlers = true}) {
-    _subscription?.cancel();
+  Future<void> reconnect() async {
+    final url = _url;
+    if (url == null || url.trim().isEmpty) return;
+
+    await disconnect(clearHandlers: false);
+    await connect(url: url);
+  }
+
+  Future<void> disconnect({bool clearHandlers = true}) async {
+    try {
+      await _subscription?.cancel();
+    } catch (_) {}
+
     _subscription = null;
 
     try {
-      _channel?.sink.close();
+      await _channel?.sink.close();
     } catch (_) {}
 
     _channel = null;
+    _connected = false;
+    _connecting = false;
 
     if (clearHandlers) {
       _handlers.clear();
     }
-
-    _connected = false;
 
     debugPrint('CALL WS DISCONNECTED');
   }

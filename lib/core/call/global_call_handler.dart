@@ -180,6 +180,8 @@ class GlobalCallHandler {
               avatarUrl: callerAvatar,
               isVideoCall: isVideoCall,
               currentUserId: currentId,
+              currentUserName: _currentUserName ?? '',
+              currentUserAvatar: _currentUserAvatar ?? '',
               receiverId: callerId,
               isCaller: false,
               incomingOffer: Map<String, dynamic>.from(offer),

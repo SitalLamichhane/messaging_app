@@ -6,8 +6,15 @@ import 'package:messaging_app/dashboard.dart';
 import 'package:messaging_app/profile_page.dart';
 
 class PagesScreen extends StatefulWidget {
+  final String currentUserId;
+  final String currentUserName;
+  final String currentUserAvatar;
+
   const PagesScreen({
     super.key,
+    this.currentUserId = '',
+    this.currentUserName = 'You',
+    this.currentUserAvatar = '',
   });
 
   @override
@@ -55,10 +62,11 @@ class _PagesScreenState extends State<PagesScreen> {
   ];
 
   List<PageItem> get _filteredPages {
-    if (_searchQuery.trim().isEmpty) return _allPages;
+    final q = _searchQuery.toLowerCase().trim();
+
+    if (q.isEmpty) return _allPages;
 
     return _allPages.where((page) {
-      final q = _searchQuery.toLowerCase().trim();
       return page.name.toLowerCase().contains(q) ||
           page.category.toLowerCase().contains(q) ||
           page.membersOrFollowers.toLowerCase().contains(q);
@@ -73,21 +81,22 @@ class _PagesScreenState extends State<PagesScreen> {
     if (index == 0) {
       page = const ChatListScreen();
     } else if (index == 1) {
-      page = const CallHistoryScreen();
+      page = CallHistoryScreen(
+        currentUserId: widget.currentUserId,
+        currentUserName: widget.currentUserName,
+        currentUserAvatar: widget.currentUserAvatar,
+      );
     } else if (index == 3) {
       page = const ProfileScreen(
         chatId: '',
         chatName: '',
-
       );
     }
 
     if (page != null) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (_) => page!,
-        ),
+        MaterialPageRoute(builder: (_) => page!),
       );
       return;
     }
@@ -148,6 +157,7 @@ class _PagesScreenState extends State<PagesScreen> {
                             separatorBuilder: (_, __) => _buildDivider(),
                             itemBuilder: (context, index) {
                               final page = _filteredPages[index];
+
                               return _PageTile(
                                 page: page,
                                 onTap: () => _openPage(page),

@@ -19,8 +19,13 @@ class CallState {
   final bool isMicOff;
   final bool isSpeakerOn;
   final bool isCameraOff;
+  final bool isRemoteCameraOff;
   final bool isVideoCall;
   final bool isCaller;
+
+  final bool hasPendingVideoUpgrade;
+  final bool isVideoUpgradeRequesting;
+  final bool isVideoUpgradeRejected;
 
   final String? currentUserId;
   final String? receiverId;
@@ -28,6 +33,7 @@ class CallState {
   final String? avatarUrl;
 
   final Map<String, dynamic>? incomingOffer;
+  final Map<String, dynamic>? pendingVideoOffer;
 
   final Duration duration;
 
@@ -39,67 +45,76 @@ class CallState {
     this.isMicOff = false,
     this.isSpeakerOn = false,
     this.isCameraOff = false,
+    this.isRemoteCameraOff = false,
     this.isVideoCall = false,
-    this.isCaller = true,
+    this.isCaller = false,
+    this.hasPendingVideoUpgrade = false,
+    this.isVideoUpgradeRequesting = false,
+    this.isVideoUpgradeRejected = false,
     this.currentUserId,
     this.receiverId,
     this.name,
     this.avatarUrl,
     this.incomingOffer,
+    this.pendingVideoOffer,
     this.duration = Duration.zero,
     this.localRenderer,
     this.remoteRenderer,
   });
-
-  static const Object _noChange = Object();
 
   CallState copyWith({
     CallStatus? status,
     bool? isMicOff,
     bool? isSpeakerOn,
     bool? isCameraOff,
+    bool? isRemoteCameraOff,
     bool? isVideoCall,
     bool? isCaller,
-    Object? currentUserId = _noChange,
-    Object? receiverId = _noChange,
-    Object? name = _noChange,
-    Object? avatarUrl = _noChange,
-    Object? incomingOffer = _noChange,
+    bool? hasPendingVideoUpgrade,
+    bool? isVideoUpgradeRequesting,
+    bool? isVideoUpgradeRejected,
+    String? currentUserId,
+    String? receiverId,
+    String? name,
+    String? avatarUrl,
+    Map<String, dynamic>? incomingOffer,
+    Map<String, dynamic>? pendingVideoOffer,
+    bool clearPendingVideoOffer = false,
     Duration? duration,
-    Object? localRenderer = _noChange,
-    Object? remoteRenderer = _noChange,
+    RTCVideoRenderer? localRenderer,
+    RTCVideoRenderer? remoteRenderer,
+    bool clearRenderers = false,
   }) {
     return CallState(
       status: status ?? this.status,
       isMicOff: isMicOff ?? this.isMicOff,
       isSpeakerOn: isSpeakerOn ?? this.isSpeakerOn,
       isCameraOff: isCameraOff ?? this.isCameraOff,
+      isRemoteCameraOff:
+          isRemoteCameraOff ?? this.isRemoteCameraOff,
       isVideoCall: isVideoCall ?? this.isVideoCall,
       isCaller: isCaller ?? this.isCaller,
-      currentUserId: currentUserId == _noChange
-          ? this.currentUserId
-          : currentUserId as String?,
-      receiverId: receiverId == _noChange
-          ? this.receiverId
-          : receiverId as String?,
-      name: name == _noChange ? this.name : name as String?,
-      avatarUrl: avatarUrl == _noChange ? this.avatarUrl : avatarUrl as String?,
-      incomingOffer: incomingOffer == _noChange
-          ? this.incomingOffer
-          : incomingOffer as Map<String, dynamic>?,
+      hasPendingVideoUpgrade:
+          hasPendingVideoUpgrade ?? this.hasPendingVideoUpgrade,
+      isVideoUpgradeRequesting:
+          isVideoUpgradeRequesting ?? this.isVideoUpgradeRequesting,
+      isVideoUpgradeRejected:
+          isVideoUpgradeRejected ?? this.isVideoUpgradeRejected,
+      currentUserId: currentUserId ?? this.currentUserId,
+      receiverId: receiverId ?? this.receiverId,
+      name: name ?? this.name,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
+      incomingOffer: incomingOffer ?? this.incomingOffer,
+      pendingVideoOffer: clearPendingVideoOffer
+          ? null
+          : pendingVideoOffer ?? this.pendingVideoOffer,
       duration: duration ?? this.duration,
-      localRenderer: localRenderer == _noChange
-          ? this.localRenderer
-          : localRenderer as RTCVideoRenderer?,
-      remoteRenderer: remoteRenderer == _noChange
-          ? this.remoteRenderer
-          : remoteRenderer as RTCVideoRenderer?,
+      localRenderer: clearRenderers
+          ? null
+          : localRenderer ?? this.localRenderer,
+      remoteRenderer: clearRenderers
+          ? null
+          : remoteRenderer ?? this.remoteRenderer,
     );
   }
-
-  bool get isInCall =>
-      status == CallStatus.calling ||
-      status == CallStatus.ringing ||
-      status == CallStatus.connected ||
-      status == CallStatus.incoming;
-}
+}// This file defines the CallState class, which represents the state of a call in a Flutter application using WebRTC. It includes various properties to track the call status, media settings, user information, and offers. The copyWith method allows for creating a new instance of CallState with updated values while keeping the existing ones unchanged.  

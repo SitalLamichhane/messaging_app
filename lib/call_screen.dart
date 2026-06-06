@@ -13,6 +13,8 @@ class CallScreen extends ConsumerStatefulWidget {
   final String avatarUrl;
   final bool isVideoCall;
   final ChatItem? chat;
+  final String currentUserName;
+  final String currentUserAvatar;
 
   final String currentUserId;
   final String receiverId;
@@ -31,6 +33,8 @@ class CallScreen extends ConsumerStatefulWidget {
     required this.isCaller,
     this.incomingOffer,
     this.conversationId,
+    required this.currentUserName,
+    required this.currentUserAvatar,
   });
 
   @override
@@ -42,6 +46,7 @@ class _CallScreenState extends ConsumerState<CallScreen>
   bool _didStart = false;
   bool _didSaveCallResult = false;
   bool _didPop = false;
+  bool _upgradeDialogShowing = false;
 
   ProviderSubscription<CallState>? _callListener;
 
@@ -54,6 +59,19 @@ class _CallScreenState extends ConsumerState<CallScreen>
       callProvider,
       (previous, next) {
         _listenForAutoClose(next);
+
+        if (next.hasPendingVideoUpgrade &&
+            previous?.hasPendingVideoUpgrade != true) {
+          _showVideoUpgradeRequestDialog();
+        }
+
+        if (next.isVideoUpgradeRejected &&
+            previous?.isVideoUpgradeRejected != true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Video request declined')),
+          );
+          ref.read(callProvider.notifier).clearVideoUpgradeRejectedFlag();
+        }
       },
     );
 
@@ -64,6 +82,8 @@ class _CallScreenState extends ConsumerState<CallScreen>
 
       ref.read(callProvider.notifier).startCall(
             currentUserId: widget.currentUserId,
+            currentUserName: widget.currentUserName,
+            currentUserAvatar: widget.currentUserAvatar,
             receiverId: widget.receiverId,
             name: widget.name,
             avatarUrl: widget.avatarUrl,
@@ -83,7 +103,7 @@ class _CallScreenState extends ConsumerState<CallScreen>
 
     final callState = ref.read(callProvider);
 
-    if (_didPop || _isFinalStatus(callState.status)) {
+    if (_isFinalStatus(callState.status)) {
       try {
         ref.read(callProvider.notifier).disposeCall();
       } catch (_) {}
@@ -104,6 +124,43 @@ class _CallScreenState extends ConsumerState<CallScreen>
       } catch (e) {
         debugPrint('PiP error: $e');
       }
+    }
+  }
+
+  Future<void> _showVideoUpgradeRequestDialog() async {
+    if (!mounted || _upgradeDialogShowing) return;
+
+    _upgradeDialogShowing = true;
+
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) {
+        return AlertDialog(
+          title: const Text('Switch to video call?'),
+          content: Text('${widget.name} wants to turn on video.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Decline'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Accept'),
+            ),
+          ],
+        );
+      },
+    );
+
+    _upgradeDialogShowing = false;
+
+    if (!mounted) return;
+
+    if (accepted == true) {
+      await ref.read(callProvider.notifier).acceptVideoUpgrade();
+    } else {
+      await ref.read(callProvider.notifier).rejectVideoUpgrade();
     }
   }
 
@@ -142,6 +199,14 @@ class _CallScreenState extends ConsumerState<CallScreen>
   }
 
   String _callStatusText(CallState callState) {
+    if (callState.isVideoUpgradeRequesting) {
+      return 'Requesting video...';
+    }
+
+    if (callState.hasPendingVideoUpgrade) {
+      return 'Video request received';
+    }
+
     switch (callState.status) {
       case CallStatus.connected:
         return _formatDuration(callState.duration);
@@ -253,16 +318,19 @@ class _CallScreenState extends ConsumerState<CallScreen>
   Future<void> _switchAudioVideo(CallState callState) async {
     if (!mounted) return;
     if (_isFinalStatus(callState.status)) return;
+    if (callState.status != CallStatus.connected) return;
 
     try {
       final notifier = ref.read(callProvider.notifier);
 
-      if (callState.isVideoCall) {
+      if (callState.isVideoCall || callState.isVideoUpgradeRequesting) {
         await notifier.switchToAudioCall();
       } else {
-        await notifier.switchToVideoCall();
+        await notifier.requestVideoUpgrade();
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('Switch audio/video UI error: $e');
+    }
   }
 
   @override
@@ -432,12 +500,11 @@ class _CallScreenState extends ConsumerState<CallScreen>
                           asyncOnTap: _endCall,
                         ),
                         _MessengerCallButton(
-                          icon: callState.isVideoCall
-                              ? Icons.videocam
-                              : Icons.videocam_off,
-                          bgColor: callState.isVideoCall
-                              ? const Color(0xFF0084FF)
-                              : const Color(0x33FFFFFF),
+                          icon: callState.isVideoCall ||
+                                  callState.isVideoUpgradeRequesting
+                              ? Icons.call_rounded
+                              : Icons.videocam_rounded,
+                          bgColor: const Color(0x33FFFFFF),
                           asyncOnTap: () async {
                             await _switchAudioVideo(callState);
                           },
@@ -458,14 +525,15 @@ class _CallScreenState extends ConsumerState<CallScreen>
     final remoteRenderer = callState.remoteRenderer;
 
     if (callState.isVideoCall &&
-        !_isFinalStatus(callState.status) &&
-        remoteRenderer != null &&
-        remoteRenderer.srcObject != null) {
-      return RTCVideoView(
-        remoteRenderer,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-      );
-    }
+    !callState.isRemoteCameraOff &&
+    !_isFinalStatus(callState.status) &&
+    remoteRenderer != null &&
+    remoteRenderer.srcObject != null) {
+  return RTCVideoView(
+    remoteRenderer,
+    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+  );
+}
 
     if (hasAvatar) {
       return Image.network(

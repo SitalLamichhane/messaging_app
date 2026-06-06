@@ -6,32 +6,42 @@ import 'package:messaging_app/core/call/call_socket_service.dart';
 
 class IncomingCallScreen extends StatelessWidget {
   final String currentUserId;
+  final String currentUserName;
+  final String currentUserAvatar;
+
   final String callerId;
   final String callerName;
   final String callerAvatar;
+
   final bool isVideoCall;
   final Map<String, dynamic> offer;
   final ChatItem? chat;
+  final String? conversationId;
 
   const IncomingCallScreen({
     super.key,
     required this.currentUserId,
+    required this.currentUserName,
+    required this.currentUserAvatar,
     required this.callerId,
     required this.callerName,
     required this.callerAvatar,
     required this.isVideoCall,
     required this.offer,
     this.chat,
+    this.conversationId,
   });
 
   void _reject(BuildContext context) {
     SocketService.instance.emit(
-  'call_reject',
-  {
-    'from': currentUserId,
-  },
-  targetUser: callerId,
-);
+      'call_reject',
+      {
+        'from': currentUserId,
+        'to': callerId,
+        'conversation_id': conversationId ?? chat?.id,
+      },
+      targetUser: callerId,
+    );
 
     if (chat != null) {
       AppChatData.addCallLog(
@@ -41,7 +51,7 @@ class IncomingCallScreen extends StatelessWidget {
       );
     }
 
-    Navigator.pop(context);
+    Navigator.of(context).maybePop();
   }
 
   void _accept(BuildContext context) {
@@ -53,10 +63,15 @@ class IncomingCallScreen extends StatelessWidget {
           avatarUrl: callerAvatar,
           isVideoCall: isVideoCall,
           chat: chat,
+
           currentUserId: currentUserId,
+          currentUserName: currentUserName,
+          currentUserAvatar: currentUserAvatar,
+
           receiverId: callerId,
           isCaller: false,
           incomingOffer: offer,
+          conversationId: conversationId ?? chat?.id,
         ),
       ),
     );
@@ -65,6 +80,7 @@ class IncomingCallScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasAvatar = callerAvatar.trim().isNotEmpty;
+    final displayName = callerName.trim().isNotEmpty ? callerName : 'Unknown';
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -86,15 +102,14 @@ class IncomingCallScreen extends StatelessWidget {
           child: Column(
             children: [
               const Spacer(),
+
               CircleAvatar(
                 radius: 62,
                 backgroundColor: const Color(0xFF1F2937),
                 backgroundImage: hasAvatar ? NetworkImage(callerAvatar) : null,
                 child: !hasAvatar
                     ? Text(
-                        callerName.isNotEmpty
-                            ? callerName[0].toUpperCase()
-                            : '?',
+                        displayName[0].toUpperCase(),
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 40,
@@ -103,9 +118,11 @@ class IncomingCallScreen extends StatelessWidget {
                       )
                     : null,
               ),
+
               const SizedBox(height: 24),
+
               Text(
-                callerName,
+                displayName,
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: Colors.white,
@@ -113,7 +130,9 @@ class IncomingCallScreen extends StatelessWidget {
                   fontWeight: FontWeight.w800,
                 ),
               ),
+
               const SizedBox(height: 10),
+
               Text(
                 isVideoCall ? 'Incoming video call' : 'Incoming audio call',
                 style: TextStyle(
@@ -122,7 +141,9 @@ class IncomingCallScreen extends StatelessWidget {
                   fontWeight: FontWeight.w500,
                 ),
               ),
+
               const Spacer(),
+
               Padding(
                 padding: const EdgeInsets.only(bottom: 46),
                 child: Row(

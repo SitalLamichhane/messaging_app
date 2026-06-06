@@ -2248,6 +2248,12 @@ void _openReactionPicker(
 Future<void> _startCall(bool isVideo) async {
   final currentUserId = await ApiClient.storage.read(key: 'user_id');
   final accessToken = await ApiClient.storage.read(key: 'access');
+  final currentUserName =
+      (await ApiClient.storage.read(key: 'user_name'))?.trim().isNotEmpty == true
+          ? (await ApiClient.storage.read(key: 'user_name'))!.trim()
+          : 'You';
+  final currentUserAvatar =
+      (await ApiClient.storage.read(key: 'user_avatar'))?.trim() ?? '';
 
   if (currentUserId == null || currentUserId.trim().isEmpty) {
     debugPrint('CALL ERROR: currentUserId missing');
@@ -2269,8 +2275,9 @@ Future<void> _startCall(bool isVideo) async {
   String? receiverId;
 
   for (final member in widget.chat.members) {
-    if (member.id.toString() != currentUserId.toString()) {
-      receiverId = member.id.toString();
+    final memberId = member.id.toString();
+    if (memberId != currentUserId.toString()) {
+      receiverId = memberId;
       break;
     }
   }
@@ -2290,7 +2297,7 @@ Future<void> _startCall(bool isVideo) async {
   GlobalCallHandler.connectCallSocket(
     url:
         'ws://192.168.1.97:8000/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
-    currentUserId: currentUserId,
+    currentUserId: currentUserId.trim(),
   );
 
   AppChatData.addCallLog(
@@ -2309,15 +2316,26 @@ Future<void> _startCall(bool isVideo) async {
         avatarUrl: widget.chat.avatarUrl,
         isVideoCall: isVideo,
         chat: widget.chat,
-        currentUserId: currentUserId,
+        currentUserId: currentUserId.trim(),
+        currentUserName: currentUserName,
+        currentUserAvatar: currentUserAvatar,
         receiverId: receiverId!,
         isCaller: true,
+        conversationId: widget.chat.id,
       ),
     ),
   );
 }
 
   Future<void> _openProfile() async {
+    final currentUserId = (await ApiClient.storage.read(key: 'user_id')) ?? '';
+    final storedName = (await ApiClient.storage.read(key: 'user_name')) ?? '';
+    final currentUserName = storedName.trim().isEmpty ? 'You' : storedName.trim();
+    final currentUserAvatar =
+        ((await ApiClient.storage.read(key: 'user_avatar')) ?? '').trim();
+
+    if (!mounted) return;
+
     final result = await Navigator.push(
       context,
       MaterialPageRoute(

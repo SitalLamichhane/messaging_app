@@ -1,3 +1,17 @@
+// core/call/call_provider.dart
+// IMPORTANT:
+// Add this field in CallState first:
+// final bool isRemoteCameraOff;
+//
+// Default:
+// this.isRemoteCameraOff = false,
+//
+// Add in copyWith:
+// bool? isRemoteCameraOff,
+//
+// Then set:
+// isRemoteCameraOff: isRemoteCameraOff ?? this.isRemoteCameraOff,
+
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -25,8 +39,8 @@ class CallNotifier extends StateNotifier<CallState> {
   Timer? _timeoutTimer;
 
   bool _disposed = false;
-  bool _socketListening = false;
   bool _finishing = false;
+  bool _switchingVideo = false;
 
   String? _conversationId;
 
@@ -34,15 +48,14 @@ class CallNotifier extends StateNotifier<CallState> {
 
   void _safeState(CallState newState) {
     if (!_canUpdate) return;
-
-    try {
-      state = newState;
-    } catch (_) {}
+    state = newState;
   }
 
   Future<void> startCall({
     required String currentUserId,
     required String receiverId,
+    required String currentUserName,
+    required String currentUserAvatar,
     required String name,
     required String avatarUrl,
     required bool isVideoCall,
@@ -53,14 +66,17 @@ class CallNotifier extends StateNotifier<CallState> {
     try {
       _disposed = false;
       _finishing = false;
+      _switchingVideo = false;
       _conversationId = conversationId;
 
       _durationTimer?.cancel();
       _timeoutTimer?.cancel();
+      _removeSocketEvents();
 
       _safeState(const CallState());
 
-      await _disposeWebRTCOnly();
+      await webrtc.dispose();
+      await Future.delayed(const Duration(milliseconds: 250));
       await webrtc.disposeRenderers();
 
       if (!_canUpdate) return;
@@ -76,6 +92,7 @@ class CallNotifier extends StateNotifier<CallState> {
           isCaller: isCaller,
           incomingOffer: incomingOffer,
           isCameraOff: !isVideoCall,
+          isRemoteCameraOff: !isVideoCall,
           duration: Duration.zero,
         ),
       );
@@ -83,16 +100,14 @@ class CallNotifier extends StateNotifier<CallState> {
       _listenSocketEvents();
 
       await webrtc.initRenderers();
-      if (!_canUpdate) return;
 
       await webrtc.createConnection(
         isVideoCall: isVideoCall,
         onIceCandidate: (candidate) {
-          if (!_canUpdate) return;
-          if (_isFinalStatus(state.status)) return;
+          if (!_canUpdate || _isFinalStatus(state.status)) return;
 
           SocketService.instance.emit(
-            'ice_candidate',
+            CallSocketEvents.iceCandidate,
             {
               'from': currentUserId,
               'candidate': candidate.toMap(),
@@ -102,8 +117,7 @@ class CallNotifier extends StateNotifier<CallState> {
           );
         },
         onRemoteStream: () {
-          if (!_canUpdate) return;
-          if (_isFinalStatus(state.status)) return;
+          if (!_canUpdate || _isFinalStatus(state.status)) return;
 
           _safeState(
             state.copyWith(
@@ -116,8 +130,6 @@ class CallNotifier extends StateNotifier<CallState> {
         },
       );
 
-      if (!_canUpdate) return;
-
       _safeState(
         state.copyWith(
           localRenderer: webrtc.localRenderer,
@@ -129,15 +141,13 @@ class CallNotifier extends StateNotifier<CallState> {
         _startCallTimeout();
 
         final offer = await webrtc.createOffer();
-        if (!_canUpdate) return;
-        if (_isFinalStatus(state.status)) return;
 
         SocketService.instance.emit(
-          'call_offer',
+          CallSocketEvents.callOffer,
           {
             'from': currentUserId,
-            'callerName': name,
-            'callerAvatar': avatarUrl,
+            'callerName': currentUserName,
+            'callerAvatar': currentUserAvatar,
             'isVideoCall': isVideoCall,
             'offer': offer.toMap(),
           },
@@ -151,15 +161,11 @@ class CallNotifier extends StateNotifier<CallState> {
         }
 
         await webrtc.setRemoteDescription(incomingOffer);
-        if (!_canUpdate) return;
-        if (_isFinalStatus(state.status)) return;
 
         final answer = await webrtc.createAnswer();
-        if (!_canUpdate) return;
-        if (_isFinalStatus(state.status)) return;
 
         SocketService.instance.emit(
-          'call_answer',
+          CallSocketEvents.callAnswer,
           {
             'from': currentUserId,
             'answer': answer.toMap(),
@@ -178,14 +184,10 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   void _listenSocketEvents() {
-    if (_socketListening) return;
-
-    _socketListening = true;
     _removeSocketEventsOnly();
 
-    SocketService.instance.on('call_answer', (data) async {
-      if (!_canUpdate) return;
-      if (_isFinalStatus(state.status)) return;
+    SocketService.instance.on(CallSocketEvents.callAnswer, (data) async {
+      if (!_canUpdate || _isFinalStatus(state.status)) return;
 
       _timeoutTimer?.cancel();
 
@@ -194,9 +196,6 @@ class CallNotifier extends StateNotifier<CallState> {
 
       try {
         await webrtc.setRemoteDescription(payload['answer']);
-
-        if (!_canUpdate) return;
-        if (_isFinalStatus(state.status)) return;
 
         _safeState(
           state.copyWith(
@@ -212,9 +211,8 @@ class CallNotifier extends StateNotifier<CallState> {
       }
     });
 
-    SocketService.instance.on('ice_candidate', (data) async {
-      if (!_canUpdate) return;
-      if (_isFinalStatus(state.status)) return;
+    SocketService.instance.on(CallSocketEvents.iceCandidate, (data) async {
+      if (!_canUpdate || _isFinalStatus(state.status)) return;
 
       final payload = data['payload'];
       if (payload == null || payload['candidate'] == null) return;
@@ -226,48 +224,27 @@ class CallNotifier extends StateNotifier<CallState> {
       }
     });
 
-    SocketService.instance.on('call_renegotiate_offer', (data) async {
-      if (!_canUpdate) return;
-      if (_isFinalStatus(state.status)) return;
+    // Audio -> Video request received.
+    // Receiver does NOT auto-request again. It only shows dialog.
+    SocketService.instance.on(CallSocketEvents.callRenegotiateOffer, (data) async {
+      if (!_canUpdate || _isFinalStatus(state.status)) return;
 
       final payload = data['payload'];
       if (payload == null || payload['offer'] == null) return;
 
-      final currentUserId = state.currentUserId;
-      final receiverId = state.receiverId;
-
-      if (currentUserId == null || receiverId == null) return;
-
-      try {
-        await webrtc.enableVideo();
-        final answer = await webrtc.handleRenegotiationOffer(payload['offer']);
-
-        SocketService.instance.emit(
-          'call_renegotiate_answer',
-          {
-            'from': currentUserId,
-            'answer': answer.toMap(),
-          },
-          targetUser: receiverId,
-          conversationId: _conversationId,
-        );
-
-        _safeState(
-          state.copyWith(
-            isVideoCall: true,
-            isCameraOff: false,
-            localRenderer: webrtc.localRenderer,
-            remoteRenderer: webrtc.remoteRenderer,
-          ),
-        );
-      } catch (e) {
-        debugPrint('Renegotiation offer error: $e');
-      }
+      _safeState(
+        state.copyWith(
+          hasPendingVideoUpgrade: true,
+          pendingVideoOffer: Map<String, dynamic>.from(payload['offer']),
+          isVideoUpgradeRequesting: false,
+          isVideoUpgradeRejected: false,
+        ),
+      );
     });
 
-    SocketService.instance.on('call_renegotiate_answer', (data) async {
-      if (!_canUpdate) return;
-      if (_isFinalStatus(state.status)) return;
+    // Video request accepted by receiver.
+    SocketService.instance.on(CallSocketEvents.callRenegotiateAnswer, (data) async {
+      if (!_canUpdate || _isFinalStatus(state.status)) return;
 
       final payload = data['payload'];
       if (payload == null || payload['answer'] == null) return;
@@ -277,63 +254,130 @@ class CallNotifier extends StateNotifier<CallState> {
 
         _safeState(
           state.copyWith(
+            isVideoCall: true,
+            isCameraOff: false,
+            isRemoteCameraOff: false,
+            isVideoUpgradeRequesting: false,
+            isVideoUpgradeRejected: false,
             localRenderer: webrtc.localRenderer,
             remoteRenderer: webrtc.remoteRenderer,
           ),
         );
       } catch (e) {
         debugPrint('Renegotiation answer error: $e');
+
+        await webrtc.disableVideoHard();
+
+        _safeState(
+          state.copyWith(
+            isVideoCall: false,
+            isCameraOff: true,
+            isRemoteCameraOff: true,
+            isVideoUpgradeRequesting: false,
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+      } finally {
+        _switchingVideo = false;
       }
     });
 
-    SocketService.instance.on('call_video_toggle', (data) {
-      if (!_canUpdate) return;
-      if (_isFinalStatus(state.status)) return;
+    // Same as Messenger:
+    // cameraOff true  = remote video off, show avatar / video off UI
+    // cameraOff false = remote video on, show video
+    // isVideoCall false = remote switched whole call back to audio
+    SocketService.instance.on(CallSocketEvents.callVideoToggle, (data) async {
+      if (!_canUpdate || _isFinalStatus(state.status)) return;
 
       final payload = data['payload'];
       if (payload == null) return;
 
-      final isVideoCall = payload['isVideoCall'] == true;
+      final hasCameraOff = payload.containsKey('cameraOff');
+      final hasVideoCall = payload.containsKey('isVideoCall');
+
+      if (hasCameraOff) {
+        final remoteCameraOff = payload['cameraOff'] == true;
+
+        _safeState(
+          state.copyWith(
+            isVideoCall: true,
+            isRemoteCameraOff: remoteCameraOff,
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+
+        return;
+      }
+
+      if (hasVideoCall) {
+        final remoteIsVideoCall = payload['isVideoCall'] == true;
+
+        _safeState(
+          state.copyWith(
+            isVideoCall: remoteIsVideoCall,
+            isRemoteCameraOff: !remoteIsVideoCall,
+            isVideoUpgradeRequesting: false,
+            hasPendingVideoUpgrade: false,
+            clearPendingVideoOffer: true,
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+      }
+    });
+
+    SocketService.instance.on(CallSocketEvents.callVideoUpgradeRejected, (_) async {
+      if (!_canUpdate || _isFinalStatus(state.status)) return;
+
+      await webrtc.disableVideoHard();
 
       _safeState(
         state.copyWith(
-          isVideoCall: isVideoCall,
-          isCameraOff: !isVideoCall,
+          isVideoCall: false,
+          isCameraOff: true,
+          isRemoteCameraOff: true,
+          isVideoUpgradeRequesting: false,
+          isVideoUpgradeRejected: true,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
       );
+
+      _switchingVideo = false;
     });
 
-    SocketService.instance.on('call_reject', (_) async {
+    SocketService.instance.on(CallSocketEvents.callReject, (_) async {
       if (!_canUpdate) return;
       await _finishCall(CallStatus.rejected, emitSocket: false);
     });
 
-    SocketService.instance.on('call_end', (_) async {
+    SocketService.instance.on(CallSocketEvents.callEnd, (_) async {
       if (!_canUpdate) return;
       await _finishCall(CallStatus.ended, emitSocket: false);
     });
 
-    SocketService.instance.on('call_leave', (_) async {
+    SocketService.instance.on(CallSocketEvents.callLeave, (_) async {
       if (!_canUpdate) return;
       await _finishCall(CallStatus.ended, emitSocket: false);
     });
 
-    SocketService.instance.on('call_busy', (_) async {
+    SocketService.instance.on(CallSocketEvents.callBusy, (_) async {
       if (!_canUpdate) return;
       await _finishCall(CallStatus.busy, emitSocket: false);
     });
 
-    SocketService.instance.on('call_timeout', (_) async {
+    SocketService.instance.on(CallSocketEvents.callTimeout, (_) async {
       if (!_canUpdate) return;
       await _finishCall(CallStatus.timeout, emitSocket: false);
     });
   }
 
-  Future<void> switchToVideoCall() async {
+  Future<void> requestVideoUpgrade() async {
     if (!_canUpdate) return;
     if (state.isVideoCall) return;
+    if (_switchingVideo) return;
     if (_isFinalStatus(state.status)) return;
 
     final currentUserId = state.currentUserId;
@@ -341,26 +385,77 @@ class CallNotifier extends StateNotifier<CallState> {
 
     if (currentUserId == null || receiverId == null) return;
 
+    _switchingVideo = true;
+
     try {
       await webrtc.enableVideo();
 
       final offer = await webrtc.createRenegotiationOffer();
 
       SocketService.instance.emit(
-        'call_renegotiate_offer',
+        CallSocketEvents.callRenegotiateOffer,
         {
           'from': currentUserId,
           'offer': offer.toMap(),
+          'requestType': 'video_upgrade',
         },
         targetUser: receiverId,
         conversationId: _conversationId,
       );
 
+      _safeState(
+        state.copyWith(
+          isVideoUpgradeRequesting: true,
+          isVideoUpgradeRejected: false,
+          localRenderer: webrtc.localRenderer,
+          remoteRenderer: webrtc.remoteRenderer,
+        ),
+      );
+    } catch (e) {
+      debugPrint('Request video upgrade error: $e');
+
+      _switchingVideo = false;
+
+      await webrtc.disableVideoHard();
+
+      _safeState(
+        state.copyWith(
+          isVideoCall: false,
+          isCameraOff: true,
+          isRemoteCameraOff: true,
+          isVideoUpgradeRequesting: false,
+          localRenderer: webrtc.localRenderer,
+          remoteRenderer: webrtc.remoteRenderer,
+        ),
+      );
+    }
+  }
+
+  Future<void> acceptVideoUpgrade() async {
+    if (!_canUpdate) return;
+    if (!state.hasPendingVideoUpgrade) return;
+    if (state.pendingVideoOffer == null) return;
+    if (_isFinalStatus(state.status)) return;
+
+    final currentUserId = state.currentUserId;
+    final receiverId = state.receiverId;
+
+    if (currentUserId == null || receiverId == null) return;
+
+    _switchingVideo = true;
+
+    try {
+      await webrtc.enableVideo();
+
+      final answer = await webrtc.handleRenegotiationOffer(
+        state.pendingVideoOffer!,
+      );
+
       SocketService.instance.emit(
-        'call_video_toggle',
+        CallSocketEvents.callRenegotiateAnswer,
         {
           'from': currentUserId,
-          'isVideoCall': true,
+          'answer': answer.toMap(),
         },
         targetUser: receiverId,
         conversationId: _conversationId,
@@ -370,18 +465,53 @@ class CallNotifier extends StateNotifier<CallState> {
         state.copyWith(
           isVideoCall: true,
           isCameraOff: false,
+          isRemoteCameraOff: false,
+          hasPendingVideoUpgrade: false,
+          isVideoUpgradeRequesting: false,
+          isVideoUpgradeRejected: false,
+          clearPendingVideoOffer: true,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
       );
     } catch (e) {
-      debugPrint('Switch to video error: $e');
+      debugPrint('Accept video upgrade error: $e');
+      await rejectVideoUpgrade();
+    } finally {
+      _switchingVideo = false;
     }
   }
 
+  Future<void> rejectVideoUpgrade() async {
+    if (!_canUpdate) return;
+
+    final currentUserId = state.currentUserId;
+    final receiverId = state.receiverId;
+
+    if (currentUserId != null && receiverId != null) {
+      SocketService.instance.emit(
+        CallSocketEvents.callVideoUpgradeRejected,
+        {
+          'from': currentUserId,
+          'reason': 'declined',
+        },
+        targetUser: receiverId,
+        conversationId: _conversationId,
+      );
+    }
+
+    _safeState(
+      state.copyWith(
+        hasPendingVideoUpgrade: false,
+        clearPendingVideoOffer: true,
+      ),
+    );
+  }
+
+  // Video call -> Audio call
   Future<void> switchToAudioCall() async {
     if (!_canUpdate) return;
-    if (!state.isVideoCall) return;
+    if (!state.isVideoCall && !state.isVideoUpgradeRequesting) return;
     if (_isFinalStatus(state.status)) return;
 
     final currentUserId = state.currentUserId;
@@ -390,10 +520,10 @@ class CallNotifier extends StateNotifier<CallState> {
     if (currentUserId == null || receiverId == null) return;
 
     try {
-      await webrtc.disableVideo();
+      await webrtc.disableVideoHard();
 
       SocketService.instance.emit(
-        'call_video_toggle',
+        CallSocketEvents.callVideoToggle,
         {
           'from': currentUserId,
           'isVideoCall': false,
@@ -406,11 +536,61 @@ class CallNotifier extends StateNotifier<CallState> {
         state.copyWith(
           isVideoCall: false,
           isCameraOff: true,
+          isRemoteCameraOff: true,
+          isVideoUpgradeRequesting: false,
+          hasPendingVideoUpgrade: false,
+          clearPendingVideoOffer: true,
+          localRenderer: webrtc.localRenderer,
+          remoteRenderer: webrtc.remoteRenderer,
         ),
       );
+
+      _switchingVideo = false;
     } catch (e) {
       debugPrint('Switch to audio error: $e');
     }
+  }
+
+  Future<void> switchToVideoCall() => requestVideoUpgrade();
+
+  // Camera on/off inside video call.
+  // This is the part you need for Messenger-like "video off" on receiver.
+  void toggleCamera() {
+    if (!_canUpdate) return;
+    if (!state.isVideoCall) return;
+
+    final currentUserId = state.currentUserId;
+    final receiverId = state.receiverId;
+
+    final newCameraOff = !state.isCameraOff;
+
+    webrtc.toggleCamera(!newCameraOff);
+
+    _safeState(
+      state.copyWith(
+        isCameraOff: newCameraOff,
+        localRenderer: webrtc.localRenderer,
+        remoteRenderer: webrtc.remoteRenderer,
+      ),
+    );
+
+    if (currentUserId != null && receiverId != null) {
+      SocketService.instance.emit(
+        CallSocketEvents.callVideoToggle,
+        {
+          'from': currentUserId,
+          'cameraOff': newCameraOff,
+          'isVideoCall': true,
+        },
+        targetUser: receiverId,
+        conversationId: _conversationId,
+      );
+    }
+  }
+
+  void clearVideoUpgradeRejectedFlag() {
+    if (!_canUpdate) return;
+    _safeState(state.copyWith(isVideoUpgradeRejected: false));
   }
 
   void _startCallTimeout() {
@@ -418,7 +598,6 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _timeoutTimer = Timer(const Duration(seconds: 30), () async {
       if (!_canUpdate) return;
-
       if (state.status == CallStatus.connected) return;
       if (_isFinalStatus(state.status)) return;
 
@@ -427,7 +606,7 @@ class CallNotifier extends StateNotifier<CallState> {
 
       if (currentUserId != null && receiverId != null) {
         SocketService.instance.emit(
-          'call_timeout',
+          CallSocketEvents.callTimeout,
           {
             'from': currentUserId,
             'reason': 'timeout',
@@ -448,12 +627,12 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _timeoutTimer?.cancel();
 
-    webrtc.setSpeaker(true);
+    webrtc.setSpeaker(state.isVideoCall);
 
     _safeState(
       state.copyWith(
         status: CallStatus.connected,
-        isSpeakerOn: true,
+        isSpeakerOn: state.isVideoCall,
       ),
     );
 
@@ -479,6 +658,7 @@ class CallNotifier extends StateNotifier<CallState> {
     if (!_canUpdate) return;
 
     final newValue = !state.isMicOff;
+
     _safeState(state.copyWith(isMicOff: newValue));
 
     webrtc.toggleMic(!newValue);
@@ -488,19 +668,10 @@ class CallNotifier extends StateNotifier<CallState> {
     if (!_canUpdate) return;
 
     final newValue = !state.isSpeakerOn;
+
     _safeState(state.copyWith(isSpeakerOn: newValue));
 
     webrtc.setSpeaker(newValue);
-  }
-
-  void toggleCamera() {
-    if (!_canUpdate) return;
-    if (!state.isVideoCall) return;
-
-    final newValue = !state.isCameraOff;
-    _safeState(state.copyWith(isCameraOff: newValue));
-
-    webrtc.toggleCamera(!newValue);
   }
 
   Future<void> switchCamera() async {
@@ -523,10 +694,8 @@ class CallNotifier extends StateNotifier<CallState> {
 
     if (currentUserId != null && receiverId != null) {
       SocketService.instance.emit(
-        'call_reject',
-        {
-          'from': currentUserId,
-        },
+        CallSocketEvents.callReject,
+        {'from': currentUserId},
         targetUser: receiverId,
         conversationId: _conversationId,
       );
@@ -564,10 +733,8 @@ class CallNotifier extends StateNotifier<CallState> {
 
       if (currentUserId != null && receiverId != null) {
         SocketService.instance.emit(
-          'call_end',
-          {
-            'from': currentUserId,
-          },
+          CallSocketEvents.callEnd,
+          {'from': currentUserId},
           targetUser: receiverId,
           conversationId: _conversationId,
         );
@@ -577,17 +744,20 @@ class CallNotifier extends StateNotifier<CallState> {
     _safeState(
       oldState.copyWith(
         status: finalStatus,
-        localRenderer: null,
-        remoteRenderer: null,
+        clearRenderers: true,
         duration: oldState.duration,
       ),
     );
 
     await Future.delayed(const Duration(milliseconds: 250));
 
-    await _disposeWebRTCOnly();
+    await webrtc.dispose();
     await webrtc.disposeRenderers();
 
+    _removeSocketEvents();
+
+    _conversationId = null;
+    _switchingVideo = false;
     _finishing = false;
   }
 
@@ -596,13 +766,16 @@ class CallNotifier extends StateNotifier<CallState> {
     _timeoutTimer?.cancel();
 
     _finishing = false;
+    _switchingVideo = false;
     _conversationId = null;
+
+    _removeSocketEvents();
 
     _safeState(const CallState());
 
     await Future.delayed(const Duration(milliseconds: 200));
 
-    await _disposeWebRTCOnly();
+    await webrtc.dispose();
     await webrtc.disposeRenderers();
   }
 
@@ -635,28 +808,21 @@ class CallNotifier extends StateNotifier<CallState> {
     } catch (_) {}
   }
 
-  Future<void> _disposeWebRTCOnly() async {
-    try {
-      await webrtc.dispose();
-    } catch (_) {}
-  }
-
   void _removeSocketEventsOnly() {
-    SocketService.instance.off('call_answer');
-    SocketService.instance.off('call_reject');
-    SocketService.instance.off('call_end');
-    SocketService.instance.off('call_leave');
-    SocketService.instance.off('ice_candidate');
-    SocketService.instance.off('call_busy');
-    SocketService.instance.off('call_timeout');
-
-    SocketService.instance.off('call_renegotiate_offer');
-    SocketService.instance.off('call_renegotiate_answer');
-    SocketService.instance.off('call_video_toggle');
+    SocketService.instance.off(CallSocketEvents.callAnswer);
+    SocketService.instance.off(CallSocketEvents.callReject);
+    SocketService.instance.off(CallSocketEvents.callEnd);
+    SocketService.instance.off(CallSocketEvents.callLeave);
+    SocketService.instance.off(CallSocketEvents.iceCandidate);
+    SocketService.instance.off(CallSocketEvents.callBusy);
+    SocketService.instance.off(CallSocketEvents.callTimeout);
+    SocketService.instance.off(CallSocketEvents.callRenegotiateOffer);
+    SocketService.instance.off(CallSocketEvents.callRenegotiateAnswer);
+    SocketService.instance.off(CallSocketEvents.callVideoToggle);
+    SocketService.instance.off(CallSocketEvents.callVideoUpgradeRejected);
   }
 
   void _removeSocketEvents() {
-    _socketListening = false;
     _removeSocketEventsOnly();
   }
 
