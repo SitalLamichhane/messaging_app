@@ -1,9 +1,12 @@
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
 
 import 'package:flutter/material.dart';
 import 'package:messaging_app/chat_detail.dart';
 import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/core/chat/chat_provider.dart';
+import 'package:messaging_app/core/config/app_config.dart';
 import 'package:provider/provider.dart';
 
 class CreateGroupChatScreen extends StatefulWidget {
@@ -21,8 +24,10 @@ class CreateGroupChatScreen extends StatefulWidget {
 class _CreateGroupChatScreenState extends State<CreateGroupChatScreen> {
   final TextEditingController _groupNameController = TextEditingController();
   final TextEditingController _phoneSearchController = TextEditingController();
+  final ImagePicker _imagePicker = ImagePicker();
 
   final Set<String> _selectedUserIds = {};
+  File? _groupImage;
 
   bool _isCreating = false;
   String _phoneQuery = '';
@@ -55,6 +60,123 @@ class _CreateGroupChatScreenState extends State<CreateGroupChatScreen> {
 
   String _digitsOnly(String value) {
     return value.replaceAll(RegExp(r'[^0-9]'), '');
+  }
+
+  String _cleanImageUrl(String value) {
+    final cleanValue = value.trim();
+
+    if (cleanValue.isEmpty) return '';
+
+    if (cleanValue.startsWith('http://') || cleanValue.startsWith('https://')) {
+      return cleanValue;
+    }
+
+    if (cleanValue.startsWith('/media/')) {
+      return '${AppConfig.apiBaseUrl}$cleanValue';
+    }
+
+    if (cleanValue.startsWith('media/')) {
+      return '${AppConfig.apiBaseUrl}/$cleanValue';
+    }
+
+    return cleanValue;
+  }
+
+  Future<void> _pickGroupImage() async {
+    if (_isCreating) return;
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (context) {
+        final isDark = Theme.of(context).brightness == Brightness.dark;
+        final textColor = isDark ? Colors.white : Colors.black87;
+
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Group image',
+                    style: TextStyle(
+                      color: textColor,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.photo_camera_rounded,
+                    color: Color(0xFF1877F2),
+                  ),
+                  title: Text(
+                    'Take photo',
+                    style: TextStyle(color: textColor),
+                  ),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(
+                    Icons.photo_library_rounded,
+                    color: Color(0xFF1877F2),
+                  ),
+                  title: Text(
+                    'Choose from gallery',
+                    style: TextStyle(color: textColor),
+                  ),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+                if (_groupImage != null)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(
+                      Icons.delete_outline_rounded,
+                      color: Color(0xFFEF4444),
+                    ),
+                    title: const Text(
+                      'Remove image',
+                      style: TextStyle(color: Color(0xFFEF4444)),
+                    ),
+                    onTap: () => Navigator.pop(context, null),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (source == null) {
+      if (_groupImage != null) {
+        setState(() {
+          _groupImage = null;
+        });
+      }
+      return;
+    }
+
+    final picked = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 85,
+      maxWidth: 1800,
+    );
+
+    if (picked == null) return;
+
+    setState(() {
+      _groupImage = File(picked.path);
+    });
   }
 
   Future<void> _createGroup() async {
@@ -92,6 +214,7 @@ class _CreateGroupChatScreenState extends State<CreateGroupChatScreen> {
     final group = await provider.createGroup(
       name: name,
       memberIds: memberIds,
+      groupImage: _groupImage,
     );
 
     if (!mounted) return;
@@ -187,10 +310,43 @@ class _CreateGroupChatScreenState extends State<CreateGroupChatScreen> {
             ),
             child: Row(
               children: [
-                const CircleAvatar(
-                  radius: 28,
-                  backgroundColor: Color(0xFF1877F2),
-                  child: Icon(Icons.groups_rounded, color: Colors.white),
+                GestureDetector(
+                  onTap: _pickGroupImage,
+                  child: Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      CircleAvatar(
+                        radius: 28,
+                        backgroundColor: const Color(0xFF1877F2),
+                        backgroundImage:
+                            _groupImage != null ? FileImage(_groupImage!) : null,
+                        child: _groupImage == null
+                            ? const Icon(
+                                Icons.groups_rounded,
+                                color: Colors.white,
+                              )
+                            : null,
+                      ),
+                      Positioned(
+                        right: -3,
+                        bottom: -3,
+                        child: Container(
+                          width: 24,
+                          height: 24,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1877F2),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: bg, width: 2),
+                          ),
+                          child: const Icon(
+                            Icons.camera_alt_rounded,
+                            color: Colors.white,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -302,17 +458,30 @@ class _CreateGroupChatScreenState extends State<CreateGroupChatScreen> {
                         }
                       });
                     },
-                    leading: CircleAvatar(
-                      backgroundImage: user.avatarUrl.trim().isNotEmpty
-                          ? NetworkImage(user.avatarUrl)
-                          : null,
-                      child: user.avatarUrl.trim().isEmpty
-                          ? Text(
-                              user.name.isNotEmpty
-                                  ? user.name[0].toUpperCase()
-                                  : 'U',
-                            )
-                          : null,
+                    leading: Builder(
+                      builder: (_) {
+                        final avatarUrl = _cleanImageUrl(user.avatarUrl);
+
+                        return CircleAvatar(
+                          backgroundImage: avatarUrl.isNotEmpty
+                              ? NetworkImage(avatarUrl)
+                              : null,
+                          onBackgroundImageError: avatarUrl.isNotEmpty
+                              ? (Object error, StackTrace? stackTrace) {
+                                  debugPrint(
+                                    'CREATE GROUP USER AVATAR ERROR: $error',
+                                  );
+                                }
+                              : null,
+                          child: avatarUrl.isEmpty
+                              ? Text(
+                                  user.name.isNotEmpty
+                                      ? user.name[0].toUpperCase()
+                                      : 'U',
+                                )
+                              : null,
+                        );
+                      },
                     ),
                     title: Text(
                       user.name,

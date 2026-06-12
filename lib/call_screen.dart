@@ -1,3 +1,5 @@
+// lib/call_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
@@ -5,6 +7,8 @@ import 'package:simple_pip_mode/simple_pip.dart';
 
 import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_models.dart';
+import 'package:messaging_app/call_waiting.dart';
+import 'package:messaging_app/core/call/call_overlay_controller.dart';
 import 'package:messaging_app/core/call/call_provider.dart';
 import 'package:messaging_app/core/call/call_state.dart';
 
@@ -21,6 +25,9 @@ class CallScreen extends ConsumerStatefulWidget {
   final bool isCaller;
   final Map<String, dynamic>? incomingOffer;
   final String? conversationId;
+  final String? callId;
+
+  final bool resumeExistingCall;
 
   const CallScreen({
     super.key,
@@ -33,8 +40,10 @@ class CallScreen extends ConsumerStatefulWidget {
     required this.isCaller,
     this.incomingOffer,
     this.conversationId,
+    this.callId,
     required this.currentUserName,
     required this.currentUserAvatar,
+    this.resumeExistingCall = false,
   });
 
   @override
@@ -50,10 +59,191 @@ class _CallScreenState extends ConsumerState<CallScreen>
 
   ProviderSubscription<CallState>? _callListener;
 
+  String _getDisplayName(CallState callState) {
+    final stateName = callState.name;
+
+    if (stateName != null && stateName.trim().isNotEmpty) {
+      return stateName.trim();
+    }
+
+    final widgetName = widget.name.trim();
+
+    if (widgetName.isNotEmpty) {
+      return widgetName;
+    }
+
+    return 'Unknown';
+  }
+
+  String _getDisplayAvatarUrl(CallState callState) {
+    final stateAvatar = callState.avatarUrl;
+
+    if (stateAvatar != null && stateAvatar.trim().isNotEmpty) {
+      return stateAvatar.trim();
+    }
+
+    return widget.avatarUrl.trim();
+  }
+
+  Map<String, dynamic>? _normalizedIncomingOffer() {
+    final raw = widget.incomingOffer;
+
+    if (raw == null) {
+      return null;
+    }
+
+    final rawPayload = raw['payload'];
+
+    if (rawPayload is Map) {
+      final payload = Map<String, dynamic>.from(rawPayload);
+      final nestedPayloadOffer = payload['offer'];
+
+      if (nestedPayloadOffer is Map) {
+        final offer = Map<String, dynamic>.from(nestedPayloadOffer);
+
+        final type = offer['type']?.toString() ?? '';
+        final sdp = offer['sdp']?.toString() ?? '';
+
+        if (type.trim().isNotEmpty && sdp.trim().isNotEmpty) {
+          return offer;
+        }
+      }
+
+      final payloadType = payload['type']?.toString() ?? '';
+      final payloadSdp = payload['sdp']?.toString() ?? '';
+
+      if (payloadType.trim().isNotEmpty && payloadSdp.trim().isNotEmpty) {
+        return {
+          'type': payloadType,
+          'sdp': payloadSdp,
+        };
+      }
+    }
+
+    final nestedOffer = raw['offer'];
+
+    if (nestedOffer is Map) {
+      final offer = Map<String, dynamic>.from(nestedOffer);
+
+      final type = offer['type']?.toString() ?? '';
+      final sdp = offer['sdp']?.toString() ?? '';
+
+      if (type.trim().isNotEmpty && sdp.trim().isNotEmpty) {
+        return offer;
+      }
+    }
+
+    final type = raw['type']?.toString() ?? '';
+    final sdp = raw['sdp']?.toString() ?? '';
+
+    if (type.trim().isNotEmpty && sdp.trim().isNotEmpty) {
+      return {
+        'type': type,
+        'sdp': sdp,
+      };
+    }
+
+    return null;
+  }
+
+  bool _receiverHasValidOffer() {
+    if (widget.isCaller) {
+      return true;
+    }
+
+    final offer = _normalizedIncomingOffer();
+
+    if (offer == null) {
+      return false;
+    }
+
+    final type = offer['type']?.toString() ?? '';
+    final sdp = offer['sdp']?.toString() ?? '';
+
+    return type.trim().isNotEmpty && sdp.trim().isNotEmpty;
+  }
+
+  void _safePopOrLog(String reason) {
+    if (!mounted) return;
+
+    final navigator = Navigator.of(context);
+
+    if (navigator.canPop()) {
+      debugPrint('$reason: popping call route');
+      navigator.pop();
+      return;
+    }
+
+    debugPrint('$reason: navigator cannot pop, staying in app');
+  }
+
+  void _closeInvalidReceiverCall() {
+    if (!mounted || _didPop) return;
+
+    debugPrint(
+      'CALL SCREEN BLOCKED: receiver opened without valid WebRTC SDP offer.',
+    );
+    debugPrint('CALL SCREEN incomingOffer: ${widget.incomingOffer}');
+    debugPrint('CALL SCREEN conversationId: ${widget.conversationId}');
+    debugPrint('CALL SCREEN callId: ${widget.callId}');
+    debugPrint('CALL SCREEN receiverId: ${widget.receiverId}');
+
+    final conversationId = widget.conversationId ?? widget.chat?.id;
+
+    if (conversationId == null || conversationId.toString().trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Call connection not ready. Conversation missing.'),
+        ),
+      );
+
+      Future.delayed(const Duration(milliseconds: 700), () {
+        if (!mounted || _didPop) return;
+
+        _didPop = true;
+        _safePopOrLog('CALL SCREEN INVALID RECEIVER');
+      });
+
+      return;
+    }
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Waiting for caller offer...'),
+      ),
+    );
+
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (!mounted || _didPop) return;
+
+      _didPop = true;
+
+      Navigator.of(context).pushReplacement(
+        MaterialPageRoute(
+          builder: (_) => CallWaitingScreen(
+            currentUserId: widget.currentUserId,
+            currentUserName: widget.currentUserName,
+            currentUserAvatar: widget.currentUserAvatar,
+            callerId: widget.receiverId,
+            callerName: widget.name,
+            callerAvatar: widget.avatarUrl,
+            isVideoCall: widget.isVideoCall,
+            conversationId: conversationId.toString(),
+            callId: widget.callId,
+            chat: widget.chat,
+            emitAcceptOnOpen: false,
+          ),
+        ),
+      );
+    });
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    ref.read(callScreenMinimizedProvider.notifier).state = false;
 
     _callListener = ref.listenManual<CallState>(
       callProvider,
@@ -62,14 +252,17 @@ class _CallScreenState extends ConsumerState<CallScreen>
 
         if (next.hasPendingVideoUpgrade &&
             previous?.hasPendingVideoUpgrade != true) {
-          _showVideoUpgradeRequestDialog();
+          _showVideoUpgradeRequestDialog(next);
         }
 
         if (next.isVideoUpgradeRejected &&
             previous?.isVideoUpgradeRejected != true) {
+          if (!mounted) return;
+
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Video request declined')),
           );
+
           ref.read(callProvider.notifier).clearVideoUpgradeRejectedFlag();
         }
       },
@@ -80,6 +273,22 @@ class _CallScreenState extends ConsumerState<CallScreen>
 
       _didStart = true;
 
+      debugPrint('CALL SCREEN BACKEND CALL ID: ${widget.callId}');
+      debugPrint('CALL SCREEN IS CALLER: ${widget.isCaller}');
+      debugPrint('CALL SCREEN RESUME EXISTING: ${widget.resumeExistingCall}');
+      debugPrint('CALL SCREEN RAW INCOMING OFFER: ${widget.incomingOffer}');
+
+      if (widget.resumeExistingCall) {
+        return;
+      }
+
+      if (!_receiverHasValidOffer()) {
+        _closeInvalidReceiverCall();
+        return;
+      }
+
+      final offer = widget.isCaller ? null : _normalizedIncomingOffer();
+
       ref.read(callProvider.notifier).startCall(
             currentUserId: widget.currentUserId,
             currentUserName: widget.currentUserName,
@@ -89,8 +298,9 @@ class _CallScreenState extends ConsumerState<CallScreen>
             avatarUrl: widget.avatarUrl,
             isVideoCall: widget.isVideoCall,
             isCaller: widget.isCaller,
-            incomingOffer: widget.incomingOffer,
+            incomingOffer: offer,
             conversationId: widget.conversationId ?? widget.chat?.id,
+            callId: widget.callId,
           );
     });
   }
@@ -100,15 +310,6 @@ class _CallScreenState extends ConsumerState<CallScreen>
     WidgetsBinding.instance.removeObserver(this);
     _callListener?.close();
     _callListener = null;
-
-    final callState = ref.read(callProvider);
-
-    if (_isFinalStatus(callState.status)) {
-      try {
-        ref.read(callProvider.notifier).disposeCall();
-      } catch (_) {}
-    }
-
     super.dispose();
   }
 
@@ -127,10 +328,12 @@ class _CallScreenState extends ConsumerState<CallScreen>
     }
   }
 
-  Future<void> _showVideoUpgradeRequestDialog() async {
+  Future<void> _showVideoUpgradeRequestDialog(CallState callState) async {
     if (!mounted || _upgradeDialogShowing) return;
 
     _upgradeDialogShowing = true;
+
+    final displayName = _getDisplayName(callState);
 
     final accepted = await showDialog<bool>(
       context: context,
@@ -138,7 +341,7 @@ class _CallScreenState extends ConsumerState<CallScreen>
       builder: (context) {
         return AlertDialog(
           title: const Text('Switch to video call?'),
-          content: Text('${widget.name} wants to turn on video.'),
+          content: Text('$displayName wants to turn on video.'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -168,21 +371,24 @@ class _CallScreenState extends ConsumerState<CallScreen>
     final callState = ref.read(callProvider);
 
     if (_isFinalStatus(callState.status)) {
-      await _endCall();
+      if (mounted) {
+        _safePopOrLog('CALL SCREEN MINIMIZE FINAL STATUS');
+      }
       return;
     }
+
+    ref.read(callScreenMinimizedProvider.notifier).state = true;
 
     if (callState.isVideoCall) {
       try {
         await SimplePip().enterPipMode();
-        return;
       } catch (e) {
         debugPrint('PiP minimize error: $e');
       }
     }
 
-    if (mounted && Navigator.canPop(context)) {
-      Navigator.pop(context);
+    if (mounted) {
+      _safePopOrLog('CALL SCREEN MINIMIZE');
     }
   }
 
@@ -282,25 +488,30 @@ class _CallScreenState extends ConsumerState<CallScreen>
   Future<void> _endCall() async {
     if (_didPop || !mounted) return;
 
+    final notifier = ref.read(callProvider.notifier);
     final callState = ref.read(callProvider);
+
+    ref.read(callScreenMinimizedProvider.notifier).state = false;
+
     _saveCallResultIfNeeded(callState);
 
     try {
-      await ref.read(callProvider.notifier).endCall(emitSocket: true);
-    } catch (_) {}
+      await notifier.endCall(emitSocket: true);
+    } catch (e) {
+      debugPrint('END CALL ERROR: $e');
+    }
 
-    if (!mounted) return;
+    if (!mounted || _didPop) return;
 
     _didPop = true;
-
-    if (Navigator.canPop(context)) {
-      Navigator.pop(context);
-    }
+    _safePopOrLog('CALL SCREEN END');
   }
 
   void _listenForAutoClose(CallState callState) {
     if (!_isFinalStatus(callState.status)) return;
-    if (_didPop) return;
+    if (_didPop || !mounted) return;
+
+    ref.read(callScreenMinimizedProvider.notifier).state = false;
 
     _saveCallResultIfNeeded(callState);
 
@@ -308,35 +519,36 @@ class _CallScreenState extends ConsumerState<CallScreen>
       if (!mounted || _didPop) return;
 
       _didPop = true;
-
-      if (Navigator.canPop(context)) {
-        Navigator.pop(context);
-      }
+      _safePopOrLog('CALL SCREEN AUTO CLOSE');
     });
   }
 
-  Future<void> _switchAudioVideo(CallState callState) async {
+  Future<void> _handleVideoCameraButton(CallState callState) async {
     if (!mounted) return;
     if (_isFinalStatus(callState.status)) return;
     if (callState.status != CallStatus.connected) return;
+    if (callState.hasPendingVideoUpgrade) return;
 
     try {
       final notifier = ref.read(callProvider.notifier);
 
-      if (callState.isVideoCall || callState.isVideoUpgradeRequesting) {
-        await notifier.switchToAudioCall();
-      } else {
+      if (callState.isVideoCall) {
+        notifier.toggleCamera();
+      } else if (!callState.isVideoUpgradeRequesting) {
         await notifier.requestVideoUpgrade();
       }
     } catch (e) {
-      debugPrint('Switch audio/video UI error: $e');
+      debugPrint('Video/camera button UI error: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final callState = ref.watch(callProvider);
-    final hasAvatar = widget.avatarUrl.trim().isNotEmpty;
+
+    final displayName = _getDisplayName(callState);
+    final displayAvatarUrl = _getDisplayAvatarUrl(callState);
+    final hasAvatar = displayAvatarUrl.trim().isNotEmpty;
     final isVideoCall = callState.isVideoCall;
 
     return PopScope(
@@ -352,8 +564,13 @@ class _CallScreenState extends ConsumerState<CallScreen>
           children: [
             Positioned.fill(
               child: isVideoCall
-                  ? _buildRemoteVideoBackground(callState, hasAvatar)
-                  : _buildVoiceCallBackground(hasAvatar),
+                  ? _buildRemoteVideoBackground(
+                      callState,
+                      hasAvatar,
+                      displayName,
+                      displayAvatarUrl,
+                    )
+                  : _buildVoiceCallBackground(hasAvatar, displayAvatarUrl),
             ),
             Positioned.fill(
               child: Container(
@@ -402,16 +619,16 @@ class _CallScreenState extends ConsumerState<CallScreen>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (!isVideoCall || callState.isCameraOff) ...[
+                  if (!isVideoCall) ...[
                     CircleAvatar(
                       radius: 52,
                       backgroundColor: const Color(0xFF1F2937),
                       backgroundImage:
-                          hasAvatar ? NetworkImage(widget.avatarUrl) : null,
+                          hasAvatar ? NetworkImage(displayAvatarUrl) : null,
                       child: !hasAvatar
                           ? Text(
-                              widget.name.isNotEmpty
-                                  ? widget.name[0].toUpperCase()
+                              displayName.isNotEmpty
+                                  ? displayName[0].toUpperCase()
                                   : '?',
                               style: const TextStyle(
                                 color: Colors.white,
@@ -424,7 +641,7 @@ class _CallScreenState extends ConsumerState<CallScreen>
                     const SizedBox(height: 18),
                   ],
                   Text(
-                    widget.name,
+                    displayName,
                     textAlign: TextAlign.center,
                     style: const TextStyle(
                       color: Colors.white,
@@ -500,13 +717,14 @@ class _CallScreenState extends ConsumerState<CallScreen>
                           asyncOnTap: _endCall,
                         ),
                         _MessengerCallButton(
-                          icon: callState.isVideoCall ||
-                                  callState.isVideoUpgradeRequesting
-                              ? Icons.call_rounded
+                          icon: callState.isVideoCall
+                              ? (callState.isCameraOff
+                                  ? Icons.videocam_off_rounded
+                                  : Icons.videocam_rounded)
                               : Icons.videocam_rounded,
                           bgColor: const Color(0x33FFFFFF),
                           asyncOnTap: () async {
-                            await _switchAudioVideo(callState);
+                            await _handleVideoCameraButton(callState);
                           },
                         ),
                       ],
@@ -521,45 +739,91 @@ class _CallScreenState extends ConsumerState<CallScreen>
     );
   }
 
-  Widget _buildRemoteVideoBackground(CallState callState, bool hasAvatar) {
+  Widget _buildRemoteVideoBackground(
+    CallState callState,
+    bool hasAvatar,
+    String displayName,
+    String displayAvatarUrl,
+  ) {
     final remoteRenderer = callState.remoteRenderer;
 
     if (callState.isVideoCall &&
-    !callState.isRemoteCameraOff &&
-    !_isFinalStatus(callState.status) &&
-    remoteRenderer != null &&
-    remoteRenderer.srcObject != null) {
-  return RTCVideoView(
-    remoteRenderer,
-    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-  );
-}
-
-    if (hasAvatar) {
-      return Image.network(
-        widget.avatarUrl,
-        fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _emptyVideoBackground(),
+        !callState.isRemoteCameraOff &&
+        !_isFinalStatus(callState.status) &&
+        remoteRenderer != null &&
+        remoteRenderer.srcObject != null) {
+      return RTCVideoView(
+        remoteRenderer,
+        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
       );
     }
 
-    return _emptyVideoBackground();
+    return _remoteCameraOffBackground(
+      hasAvatar,
+      displayName,
+      displayAvatarUrl,
+    );
   }
 
-  Widget _emptyVideoBackground() {
+  Widget _remoteCameraOffBackground(
+    bool hasAvatar,
+    String displayName,
+    String displayAvatarUrl,
+  ) {
     return Container(
       color: const Color(0xFF111827),
-      child: const Center(
-        child: Icon(
-          Icons.person,
-          color: Colors.white54,
-          size: 90,
-        ),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (hasAvatar)
+            Opacity(
+              opacity: 0.25,
+              child: Image.network(
+                displayAvatarUrl,
+                fit: BoxFit.cover,
+                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+              ),
+            ),
+          Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                CircleAvatar(
+                  radius: 46,
+                  backgroundColor: const Color(0xFF1F2937),
+                  backgroundImage:
+                      hasAvatar ? NetworkImage(displayAvatarUrl) : null,
+                  child: !hasAvatar
+                      ? Text(
+                          displayName.isNotEmpty
+                              ? displayName[0].toUpperCase()
+                              : '?',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        )
+                      : null,
+                ),
+                const SizedBox(height: 14),
+                const Text(
+                  'Camera is off',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildVoiceCallBackground(bool hasAvatar) {
+  Widget _buildVoiceCallBackground(bool hasAvatar, String displayAvatarUrl) {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -577,7 +841,7 @@ class _CallScreenState extends ConsumerState<CallScreen>
               child: Opacity(
                 opacity: 0.12,
                 child: Image.network(
-                  widget.avatarUrl,
+                  displayAvatarUrl,
                   fit: BoxFit.cover,
                   width: double.infinity,
                   height: double.infinity,

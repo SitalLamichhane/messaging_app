@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_detail.dart';
 import 'package:messaging_app/chat_models.dart';
+import 'package:messaging_app/core/chat/chat_provider.dart';
 import 'package:messaging_app/dashboard.dart';
-import 'package:messaging_app/pages.dart';
+// import 'package:messaging_app/pages.dart'; // PagesScreen temporarily commented
 import 'package:messaging_app/profile_page.dart';
+import 'package:provider/provider.dart';
 
 class CallHistoryScreen extends StatefulWidget {
   final String currentUserId;
@@ -28,167 +29,95 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
 
-  final List<QuickDialContact> _quickDialContacts = [
-    QuickDialContact(
-      id: 'q1',
-      name: 'Sarah Johnson',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&q=80',
-      isOnline: true,
-    ),
-    QuickDialContact(
-      id: 'q2',
-      name: 'Michael Chen',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80',
-      isOnline: true,
-    ),
-    QuickDialContact(
-      id: 'q3',
-      name: 'Emily',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1517841905240-472988babdf9?w=300&q=80',
-      isOnline: true,
-    ),
-    QuickDialContact(
-      id: 'q4',
-      name: 'James',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1506794778202-cad84cf45f1d?w=300&q=80',
-      isOnline: true,
-    ),
-    QuickDialContact(
-      id: 'q5',
-      name: 'Lisa Anderson',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?w=300&q=80',
-      isOnline: true,
-    ),
-  ];
+  @override
+  void initState() {
+    super.initState();
 
-  List<CallEntry> get _recentCalls => AppChatData.allCalls;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<ChatProvider>().loadConversations();
+    });
+  }
 
-  List<CallEntry> get _filteredRecentCalls {
-    if (_searchQuery.trim().isEmpty) return _recentCalls;
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
 
+  List<ChatItem> _filteredChats(List<ChatItem> chats) {
     final q = _searchQuery.toLowerCase().trim();
+    if (q.isEmpty) return chats;
 
-    return _recentCalls.where((call) {
-      return call.name.toLowerCase().contains(q) ||
-          call.relativeTime.toLowerCase().contains(q) ||
-          call.type.name.toLowerCase().contains(q);
+    return chats.where((chat) {
+      return chat.name.toLowerCase().contains(q) ||
+          chat.phone.toLowerCase().contains(q) ||
+          chat.message.toLowerCase().contains(q) ||
+          chat.groupSubtitle.toLowerCase().contains(q);
     }).toList();
   }
 
-  List<QuickDialContact> get _filteredQuickDial {
-    if (_searchQuery.trim().isEmpty) return _quickDialContacts;
-
-    final q = _searchQuery.toLowerCase().trim();
-
-    return _quickDialContacts
-        .where((contact) => contact.name.toLowerCase().contains(q))
-        .toList();
+  void _handleVoiceCall(ChatItem chat) {
+    _openCall(chat: chat, isVideoCall: false);
   }
 
-  void _handleVoiceCall(
-    String name,
-    String avatarUrl, {
-    bool isGroup = false,
-  }) {
-    final chat = AppChatData.getOrCreateChat(
-      name: name,
-      avatarUrl: avatarUrl,
-      isGroup: isGroup,
-    );
+  void _handleVideoCall(ChatItem chat) {
+    _openCall(chat: chat, isVideoCall: true);
+  }
 
-    AppChatData.addCallLog(
-      chat: chat,
-      type: CallEntryType.voice,
-      status: CallEntryStatus.outgoing,
-    );
+  void _openCall({
+    required ChatItem chat,
+    required bool isVideoCall,
+  }) {
+    if (chat.id.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Conversation is not ready'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+      return;
+    }
 
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CallScreen(
-          name: name,
-          avatarUrl: avatarUrl,
-          isVideoCall: false,
+          name: chat.name,
+          avatarUrl: chat.avatarUrl,
+          isVideoCall: isVideoCall,
           chat: chat,
-
           currentUserId: widget.currentUserId,
           currentUserName: widget.currentUserName,
           currentUserAvatar: widget.currentUserAvatar,
-
-          receiverId: chat.id,
+          receiverId: _receiverIdFromChat(chat),
           isCaller: true,
           conversationId: chat.id,
         ),
       ),
-    ).then((_) {
-      if (mounted) setState(() {});
-    });
+    );
   }
 
-  void _handleVideoCall(
-    String name,
-    String avatarUrl, {
-    bool isGroup = false,
-  }) {
-    final chat = AppChatData.getOrCreateChat(
-      name: name,
-      avatarUrl: avatarUrl,
-      isGroup: isGroup,
-    );
+  String _receiverIdFromChat(ChatItem chat) {
+    if (chat.isGroup) return chat.id;
 
-    AppChatData.addCallLog(
-      chat: chat,
-      type: CallEntryType.video,
-      status: CallEntryStatus.outgoing,
-    );
+    for (final member in chat.members) {
+      final memberId = member.id.trim();
+      if (memberId.isNotEmpty && memberId != widget.currentUserId) {
+        return memberId;
+      }
+    }
 
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CallScreen(
-          name: name,
-          avatarUrl: avatarUrl,
-          isVideoCall: true,
-          chat: chat,
-
-          currentUserId: widget.currentUserId,
-          currentUserName: widget.currentUserName,
-          currentUserAvatar: widget.currentUserAvatar,
-
-          receiverId: chat.id,
-          isCaller: true,
-          conversationId: chat.id,
-        ),
-      ),
-    ).then((_) {
-      if (mounted) setState(() {});
-    });
+    return chat.id;
   }
 
-  void _openChat(
-    String name,
-    String avatarUrl, {
-    bool isGroup = false,
-  }) {
-    final chat = AppChatData.getOrCreateChat(
-      name: name,
-      avatarUrl: avatarUrl,
-      isGroup: isGroup,
-    );
-
+  void _openChat(ChatItem chat) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ChatDetailScreen(chat: chat),
       ),
-    ).then((_) {
-      if (mounted) setState(() {});
-    });
+    );
   }
 
   void _handleBottomNavTap(int index) {
@@ -197,13 +126,25 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
     Widget? page;
 
     if (index == 0) {
-      page = const ChatListScreen();
-    } else if (index == 2) {
-      page = const PagesScreen();
-    } else if (index == 3) {
-      page = const ProfileScreen(
+      page = ChatListScreen(
+        currentUserId: widget.currentUserId,
+        currentUserName: widget.currentUserName,
+        currentUserAvatar: widget.currentUserAvatar,
+      );
+    }
+
+    // PagesScreen temporarily commented
+    // else if (index == 2) {
+    //   page = const PagesScreen();
+    // }
+
+    else if (index == 2) {
+      page = ProfileScreen(
         chatId: '',
         chatName: '',
+        currentUserId: widget.currentUserId,
+        currentUserName: widget.currentUserName,
+        currentUserAvatar: widget.currentUserAvatar,
       );
     }
 
@@ -220,37 +161,39 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
     });
   }
 
-  void _handleQuickDialTap(QuickDialContact contact) {
-    _openChat(contact.name, contact.avatarUrl);
-  }
+  IconData _callTypeIcon(ChatItem chat) {
+    final latestCall =
+        chat.messages.where((m) => m.type == MessageType.call).toList();
 
-  IconData _callTypeIcon(CallEntryType type) {
-    return type == CallEntryType.video
-        ? Icons.videocam_outlined
-        : Icons.call_outlined;
-  }
-
-  String _callSubtitle(CallEntry call) {
-    final type = call.type == CallEntryType.video ? 'Video' : 'Voice';
-
-    switch (call.status) {
-      case CallEntryStatus.outgoing:
-        return '$type • Outgoing • ${call.relativeTime}';
-      case CallEntryStatus.incoming:
-        return '$type • Incoming • ${call.relativeTime}';
-      case CallEntryStatus.missed:
-        return '$type • Missed • ${call.relativeTime}';
+    if (latestCall.isNotEmpty &&
+        latestCall.last.callType == CallEntryType.video) {
+      return Icons.videocam_outlined;
     }
+
+    return Icons.call_outlined;
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  String _subtitle(ChatItem chat) {
+    final latestCall =
+        chat.messages.where((m) => m.type == MessageType.call).toList();
+
+    if (latestCall.isNotEmpty) {
+      final call = latestCall.last;
+      final type =
+          call.callType == CallEntryType.video ? 'Video call' : 'Voice call';
+      return '$type • ${chat.time}';
+    }
+
+    if (chat.isGroup) return chat.groupSubtitle;
+    if (chat.phone.trim().isNotEmpty) return chat.phone.trim();
+    return chat.isOnline ? 'Active now' : 'Offline';
   }
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ChatProvider>();
+    final chats = _filteredChats(provider.conversations);
+
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? const Color(0xFF0F172A) : const Color(0xFFF7F8FC);
     final borderColor =
@@ -266,315 +209,201 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
         child: Column(
           children: [
             Expanded(
-              child: ValueListenableBuilder<int>(
-                valueListenable: AppChatData.refresh,
-                builder: (_, __, ___) {
-                  return CustomScrollView(
-                    slivers: [
-                      SliverToBoxAdapter(
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Calls',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .headlineSmall
-                                    ?.copyWith(fontWeight: FontWeight.w800),
-                              ),
-                              const SizedBox(height: 14),
-                              Container(
-                                height: 40,
-                                decoration: BoxDecoration(
-                                  color: searchBg,
-                                  borderRadius: BorderRadius.circular(28),
-                                  border: Border.all(color: borderColor),
-                                ),
-                                child: TextField(
-                                  controller: _searchController,
-                                  style: TextStyle(
-                                    color: textColor,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  onChanged: (value) {
-                                    setState(() {
-                                      _searchQuery = value;
-                                    });
-                                  },
-                                  decoration: InputDecoration(
-                                    hintText: 'Search calls',
-                                    hintStyle: TextStyle(color: hintColor),
-                                    prefixIcon: Icon(
-                                      Icons.search_rounded,
-                                      color: hintColor,
-                                    ),
-                                    border: InputBorder.none,
+              child: RefreshIndicator(
+                onRefresh: () => provider.loadConversations(),
+                child: CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 16, 16, 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    'Calls',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .headlineSmall
+                                        ?.copyWith(fontWeight: FontWeight.w800),
                                   ),
                                 ),
+                                IconButton(
+                                  onPressed: provider.isLoading
+                                      ? null
+                                      : () => provider.loadConversations(),
+                                  icon: const Icon(Icons.refresh_rounded),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 14),
+                            Container(
+                              height: 40,
+                              decoration: BoxDecoration(
+                                color: searchBg,
+                                borderRadius: BorderRadius.circular(28),
+                                border: Border.all(color: borderColor),
                               ),
-                              const SizedBox(height: 18),
-                              Text(
-                                'Quick dial',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
+                              child: TextField(
+                                controller: _searchController,
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                onChanged: (value) {
+                                  setState(() {
+                                    _searchQuery = value;
+                                  });
+                                },
+                                decoration: InputDecoration(
+                                  hintText: 'Search conversations',
+                                  hintStyle: TextStyle(color: hintColor),
+                                  prefixIcon: Icon(
+                                    Icons.search_rounded,
+                                    color: hintColor,
+                                  ),
+                                  border: InputBorder.none,
+                                ),
                               ),
-                              const SizedBox(height: 12),
-                              SizedBox(
-                                height: 96,
-                                child: _filteredQuickDial.isEmpty
-                                    ? Center(
-                                        child: Text(
-                                          'No contacts found',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .bodyMedium
-                                              ?.copyWith(color: hintColor),
-                                        ),
-                                      )
-                                    : ListView.separated(
-                                        scrollDirection: Axis.horizontal,
-                                        itemCount: _filteredQuickDial.length,
-                                        separatorBuilder: (_, __) =>
-                                            const SizedBox(width: 14),
-                                        itemBuilder: (context, index) {
-                                          final contact =
-                                              _filteredQuickDial[index];
-
-                                          return InkWell(
-                                            onTap: () =>
-                                                _handleQuickDialTap(contact),
-                                            borderRadius:
-                                                BorderRadius.circular(18),
-                                            child: SizedBox(
-                                              width: 72,
-                                              child: Column(
-                                                children: [
-                                                  Stack(
-                                                    clipBehavior: Clip.none,
-                                                    children: [
-                                                      CircleAvatar(
-                                                        radius: 28,
-                                                        backgroundImage:
-                                                            contact.avatarUrl
-                                                                    .trim()
-                                                                    .isNotEmpty
-                                                                ? NetworkImage(
-                                                                    contact
-                                                                        .avatarUrl,
-                                                                  )
-                                                                : null,
-                                                        child: contact.avatarUrl
-                                                                .trim()
-                                                                .isEmpty
-                                                            ? Text(
-                                                                contact.name
-                                                                        .isNotEmpty
-                                                                    ? contact
-                                                                        .name[0]
-                                                                        .toUpperCase()
-                                                                    : 'U',
-                                                              )
-                                                            : null,
-                                                      ),
-                                                      if (contact.isOnline)
-                                                        Positioned(
-                                                          right: -1,
-                                                          bottom: -1,
-                                                          child: Container(
-                                                            width: 14,
-                                                            height: 14,
-                                                            decoration:
-                                                                BoxDecoration(
-                                                              color: const Color(
-                                                                0xFF22C55E,
-                                                              ),
-                                                              shape: BoxShape
-                                                                  .circle,
-                                                              border: Border.all(
-                                                                color:
-                                                                    Colors.white,
-                                                                width: 2,
-                                                              ),
-                                                            ),
-                                                          ),
-                                                        ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(height: 8),
-                                                  Text(
-                                                    contact.name,
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    textAlign: TextAlign.center,
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodySmall
-                                                        ?.copyWith(
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                        ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          );
-                                        },
-                                      ),
-                              ),
-                              const SizedBox(height: 18),
-                              Text(
-                                'Recent',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 18),
+                            Text(
+                              'People and groups',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w700),
+                            ),
+                          ],
                         ),
                       ),
-                      if (_filteredRecentCalls.isEmpty)
-                        SliverToBoxAdapter(
+                    ),
+                    if (provider.isLoading && chats.isEmpty)
+                      const SliverFillRemaining(
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (chats.isEmpty)
+                      SliverFillRemaining(
+                        hasScrollBody: false,
+                        child: Center(
                           child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 30,
-                            ),
-                            child: Center(
-                              child: Text(
-                                'No recent calls',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .bodyLarge
-                                    ?.copyWith(
-                                      color: hintColor,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                              ),
-                            ),
-                          ),
-                        )
-                      else
-                        SliverList(
-                          delegate: SliverChildBuilderDelegate(
-                            (context, index) {
-                              final call = _filteredRecentCalls[index];
-                              final subtitleColor =
-                                  call.status == CallEntryStatus.missed
-                                      ? const Color(0xFFEF4444)
-                                      : hintColor;
-
-                              return InkWell(
-                                onTap: () => _openChat(
-                                  call.name,
-                                  call.avatarUrl,
-                                  isGroup: call.isGroup,
-                                ),
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 16,
-                                    vertical: 8,
+                            padding: const EdgeInsets.all(24),
+                            child: Text(
+                              _searchQuery.trim().isEmpty
+                                  ? 'No conversations found'
+                                  : 'No matching conversations',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                                    color: hintColor,
+                                    fontWeight: FontWeight.w600,
                                   ),
-                                  child: Row(
-                                    children: [
-                                      CircleAvatar(
-                                        radius: 28,
-                                        backgroundImage:
-                                            call.avatarUrl.trim().isNotEmpty
-                                                ? NetworkImage(call.avatarUrl)
-                                                : null,
-                                        child: call.avatarUrl.trim().isEmpty
-                                            ? Text(
-                                                call.name.isNotEmpty
-                                                    ? call.name[0].toUpperCase()
-                                                    : 'U',
-                                              )
-                                            : null,
-                                      ),
-                                      const SizedBox(width: 14),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Text(
-                                              call.name,
-                                              maxLines: 1,
-                                              overflow: TextOverflow.ellipsis,
-                                              style: Theme.of(context)
-                                                  .textTheme
-                                                  .titleMedium
-                                                  ?.copyWith(
-                                                    fontWeight: FontWeight.w700,
-                                                  ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            Row(
-                                              children: [
-                                                Icon(
-                                                  _callTypeIcon(call.type),
-                                                  size: 15,
-                                                  color: subtitleColor,
-                                                ),
-                                                const SizedBox(width: 4),
-                                                Expanded(
-                                                  child: Text(
-                                                    _callSubtitle(call),
-                                                    maxLines: 1,
-                                                    overflow:
-                                                        TextOverflow.ellipsis,
-                                                    style: Theme.of(context)
-                                                        .textTheme
-                                                        .bodyMedium
-                                                        ?.copyWith(
-                                                          color: subtitleColor,
-                                                          fontWeight:
-                                                              FontWeight.w500,
-                                                        ),
-                                                  ),
-                                                ),
-                                              ],
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      IconButton(
-                                        onPressed: () => _handleVoiceCall(
-                                          call.name,
-                                          call.avatarUrl,
-                                          isGroup: call.isGroup,
-                                        ),
-                                        icon: const Icon(Icons.call_outlined),
-                                      ),
-                                      IconButton(
-                                        onPressed: () => _handleVideoCall(
-                                          call.name,
-                                          call.avatarUrl,
-                                          isGroup: call.isGroup,
-                                        ),
-                                        icon:
-                                            const Icon(Icons.videocam_outlined),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            },
-                            childCount: _filteredRecentCalls.length,
+                            ),
                           ),
                         ),
-                      const SliverToBoxAdapter(
-                        child: SizedBox(height: 12),
+                      )
+                    else
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate(
+                          (context, index) {
+                            final chat = chats[index];
+
+                            return InkWell(
+                              onTap: () => _openChat(chat),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 8,
+                                ),
+                                child: Row(
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 28,
+                                      backgroundImage:
+                                          chat.avatarUrl.trim().isNotEmpty
+                                              ? NetworkImage(chat.avatarUrl)
+                                              : null,
+                                      child: chat.avatarUrl.trim().isEmpty
+                                          ? Text(
+                                              chat.isGroup
+                                                  ? (chat.groupInitials.isEmpty
+                                                      ? '?'
+                                                      : chat.groupInitials)
+                                                  : chat.name.trim().isNotEmpty
+                                                      ? chat.name
+                                                          .trim()[0]
+                                                          .toUpperCase()
+                                                      : '?',
+                                            )
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            chat.name,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium
+                                                ?.copyWith(
+                                                  fontWeight: FontWeight.w700,
+                                                ),
+                                          ),
+                                          const SizedBox(height: 4),
+                                          Row(
+                                            children: [
+                                              Icon(
+                                                _callTypeIcon(chat),
+                                                size: 15,
+                                                color: hintColor,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Expanded(
+                                                child: Text(
+                                                  _subtitle(chat),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodyMedium
+                                                      ?.copyWith(
+                                                        color: hintColor,
+                                                        fontWeight:
+                                                            FontWeight.w500,
+                                                      ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    IconButton(
+                                      onPressed: () => _handleVoiceCall(chat),
+                                      icon: const Icon(Icons.call_outlined),
+                                    ),
+                                    IconButton(
+                                      onPressed: () => _handleVideoCall(chat),
+                                      icon: const Icon(Icons.videocam_outlined),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          },
+                          childCount: chats.length,
+                        ),
                       ),
-                    ],
-                  );
-                },
+                    const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                  ],
+                ),
               ),
             ),
             _buildBottomNavigation(
@@ -600,7 +429,10 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
     final items = [
       _BottomNavItemData(Icons.chat_bubble_outline, 'Chats'),
       _BottomNavItemData(Icons.call_outlined, 'Calls'),
-      _BottomNavItemData(Icons.description_outlined, 'Pages'),
+
+      // PagesScreen temporarily commented
+      // _BottomNavItemData(Icons.description_outlined, 'Pages'),
+
       _BottomNavItemData(Icons.person_outline, 'Profile'),
     ];
 
@@ -660,5 +492,5 @@ class _BottomNavItemData {
   final IconData icon;
   final String label;
 
-  _BottomNavItemData(this.icon, this.label);
+  const _BottomNavItemData(this.icon, this.label);
 }

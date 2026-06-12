@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1056534237344",
+    "project_id": "chatapp-dfda3",
+    "storage_bucket": "chatapp-dfda3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1056534237344:android:dc93e182805d3dd86079c5",
+        "android_client_info": {
+          "package_name": "com.example.messaging_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtSj5_rWmdKCwH4ScjbxaP7szURaRh9Z4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -1,6 +1,3 @@
-// Replace your full AppChatData file with this.
-// This is only fallback/mock data, but it will not break your production app.
-
 import 'package:flutter/foundation.dart';
 import 'package:messaging_app/chat_models.dart';
 
@@ -23,140 +20,31 @@ class QuickDialContact {
 class AppChatData {
   static final ValueNotifier<int> refresh = ValueNotifier<int>(0);
 
-  static final List<ChatItem> chats = [
-    ChatItem(
-      id: 'c1',
-      name: 'Sarah Johnson',
-      phone: '+9779800000001',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&q=80',
-      isOnline: true,
-      message: 'Hey, are you free tonight?',
-      time: '2:34 PM',
-      unreadCount: 2,
-      messages: [
-        ChatMessage(
-          id: 'm1',
-          type: MessageType.text,
-          text: 'Hey 👋',
-          isMe: false,
-          sentAt: DateTime.now().subtract(const Duration(minutes: 18)),
-        ),
-        ChatMessage(
-          id: 'm2',
-          type: MessageType.text,
-          text: 'Hi, yes. What happened?',
-          isMe: true,
-          sentAt: DateTime.now().subtract(const Duration(minutes: 16)),
-          isSeen: true,
-        ),
-        ChatMessage(
-          id: 'm3',
-          type: MessageType.text,
-          text: 'Are you free tonight?',
-          isMe: false,
-          sentAt: DateTime.now().subtract(const Duration(minutes: 14)),
-        ),
-      ],
-    ),
-    ChatItem(
-      id: 'c2',
-      name: 'Michael Chen',
-      phone: '+9779800000002',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80',
-      isOnline: true,
-      message: 'Let’s test the new call UI.',
-      time: '1:20 PM',
-      unreadCount: 0,
-      messages: [
-        ChatMessage(
-          id: 'm4',
-          type: MessageType.text,
-          text: 'Let’s test the new call UI.',
-          isMe: false,
-          sentAt: DateTime.now().subtract(const Duration(hours: 1)),
-        ),
-      ],
-    ),
-    ChatItem(
-      id: 'c3',
-      name: 'Design Team',
-      phone: '',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1524504388940-b1c1722653e1?w=300&q=80',
-      isOnline: false,
-      isGroup: true,
-      message: 'Updated the Messenger layout preview.',
-      time: 'Yesterday',
-      unreadCount: 4,
-      messages: [
-        ChatMessage(
-          id: 'm5',
-          type: MessageType.text,
-          text: 'Updated the Messenger layout preview.',
-          isMe: false,
-          sentAt: DateTime.now().subtract(const Duration(days: 1)),
-        ),
-      ],
-    ),
-  ];
-
-  static final List<CallEntry> allCalls = [
-    CallEntry(
-      id: 'call1',
-      chatId: 'c1',
-      name: 'Sarah Johnson',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=300&q=80',
-      isGroup: false,
-      relativeTime: '10 min ago',
-      type: CallEntryType.voice,
-      status: CallEntryStatus.outgoing,
-    ),
-    CallEntry(
-      id: 'call2',
-      chatId: 'c2',
-      name: 'Michael Chen',
-      avatarUrl:
-          'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=300&q=80',
-      isGroup: false,
-      relativeTime: '1 hour ago',
-      type: CallEntryType.video,
-      status: CallEntryStatus.incoming,
-    ),
-  ];
+  static final List<ChatItem> chats = [];
+  static final List<CallEntry> allCalls = [];
 
   static void notify() {
     refresh.value++;
   }
 
-  static ChatItem getOrCreateChat({
-    required String name,
-    required String avatarUrl,
-    String phone = '',
-    bool isGroup = false,
-  }) {
+  static ChatItem? findChatById(String id) {
     try {
-      return chats.firstWhere((c) => c.name == name && c.isGroup == isGroup);
+      return chats.firstWhere((chat) => chat.id == id);
     } catch (_) {
-      final chat = ChatItem(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
-        name: name,
-        phone: phone,
-        avatarUrl: avatarUrl,
-        isGroup: isGroup,
-        isOnline: true,
-        message: 'Start chatting',
-        time: 'Now',
-        unreadCount: 0,
-        messages: [],
-      );
-
-      chats.insert(0, chat);
-      notify();
-      return chat;
+      return null;
     }
+  }
+
+  static void upsertChat(ChatItem chat) {
+    final index = chats.indexWhere((c) => c.id == chat.id);
+
+    if (index >= 0) {
+      chats[index] = chat;
+    } else {
+      chats.insert(0, chat);
+    }
+
+    notify();
   }
 
   static void addMessage(ChatItem chat, ChatMessage message) {
@@ -213,31 +101,25 @@ class AppChatData {
   }
 
   static String _chatPreview(ChatMessage message) {
-  switch (message.type) {
-    case MessageType.text:
-      return message.text;
-
-    case MessageType.image:
-      return '📷 Photo';
-
-    case MessageType.mediaAlbum:
-      return '📷 ${message.mediaUrls?.length ?? 0} Photos';
-
-    case MessageType.video:
-      return '🎥 Video';
-
-    case MessageType.file:
-      return '📎 ${message.fileName ?? "File"}';
-
-    case MessageType.call:
-      return message.callType == CallEntryType.video
-          ? '📹 Video call'
-          : '📞 Voice call';
-
-    case MessageType.audio:
-      return '🎤 Voice message';
+    switch (message.type) {
+      case MessageType.text:
+        return message.text;
+      case MessageType.image:
+        return '📷 Photo';
+      case MessageType.mediaAlbum:
+        return '📷 ${message.mediaUrls?.length ?? 0} Photos';
+      case MessageType.video:
+        return '🎥 Video';
+      case MessageType.file:
+        return '📎 ${message.fileName ?? "File"}';
+      case MessageType.call:
+        return message.callType == CallEntryType.video
+            ? '📹 Video call'
+            : '📞 Voice call';
+      case MessageType.audio:
+        return '🎤 Voice message';
+    }
   }
-}
 
   static String _formatChatTime(DateTime time) {
     final hour = time.hour > 12

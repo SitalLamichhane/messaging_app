@@ -1,4 +1,8 @@
+// lib/features/auth/auth_provider.dart
+
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/features/auth/auth_api.dart';
 
@@ -12,27 +16,42 @@ class AuthProvider extends ChangeNotifier {
 
   Map<String, dynamic>? user;
 
-Future<void> checkLogin() async {
-  accessToken = await ApiClient.storage.read(key: 'access');
-  refreshToken = await ApiClient.storage.read(key: 'refresh');
+  Future<void> checkLogin() async {
+    accessToken = await ApiClient.storage.read(key: 'access');
+    refreshToken = await ApiClient.storage.read(key: 'refresh');
 
-  final storedUserId = await ApiClient.storage.read(key: 'user_id');
-  final storedFullName = await ApiClient.storage.read(key: 'full_name');
-  final storedPhone = await ApiClient.storage.read(key: 'phone');
-  final storedBio = await ApiClient.storage.read(key: 'bio');
+    final storedUserId = await ApiClient.storage.read(key: 'user_id');
+    final storedFullName = await ApiClient.storage.read(key: 'full_name');
+    final storedPhone = await ApiClient.storage.read(key: 'phone');
+    final storedBio = await ApiClient.storage.read(key: 'bio');
+    final storedAvatar =
+        await ApiClient.storage.read(key: 'avatar_url') ??
+        await ApiClient.storage.read(key: 'image_url') ??
+        '';
 
-  if (storedUserId != null && storedUserId.trim().isNotEmpty) {
-    user = {
-      'id': storedUserId,
-      'full_name': storedFullName ?? '',
-      'phone': storedPhone ?? '',
-      'bio': storedBio ?? '',
-    };
+    if (storedUserId != null && storedUserId.trim().isNotEmpty) {
+      user = {
+        'id': storedUserId,
+        'full_name': storedFullName ?? '',
+        'phone': storedPhone ?? '',
+        'bio': storedBio ?? '',
+        'profile_picture': storedAvatar,
+      };
+
+      await _saveUserToSharedPreferences(
+        id: storedUserId,
+        fullName: storedFullName ?? '',
+        avatar: storedAvatar,
+      );
+    }
+
+    isLoggedIn = accessToken != null && accessToken!.trim().isNotEmpty;
+
+    debugPrint('AUTH CHECK LOGIN: $isLoggedIn');
+    debugPrint('AUTH CHECK USER ID: ${user?['id'] ?? ''}');
+
+    notifyListeners();
   }
-
-  isLoggedIn = accessToken != null && accessToken!.trim().isNotEmpty;
-  notifyListeners();
-}
 
   Future<bool> sendOtp(String phone) async {
     isLoading = true;
@@ -63,7 +82,7 @@ Future<void> checkLogin() async {
         code: code.trim(),
       );
 
-      final data = response.data;
+      final data = Map<String, dynamic>.from(response.data);
 
       if (data['type'] == 'login') {
         await _saveLoginData(data);
@@ -120,7 +139,7 @@ Future<void> checkLogin() async {
         bio: bio.trim(),
       );
 
-      await _saveLoginData(response.data);
+      await _saveLoginData(Map<String, dynamic>.from(response.data));
 
       await ApiClient.storage.delete(key: 'signup_token');
       signupToken = null;
@@ -136,12 +155,29 @@ Future<void> checkLogin() async {
   }
 
   Future<void> _saveLoginData(Map<String, dynamic> data) async {
-    accessToken = data['tokens']['access']?.toString();
-    refreshToken = data['tokens']['refresh']?.toString();
-    user = data['user'];
+    final tokens = data['tokens'];
 
-    if (accessToken == null || refreshToken == null) {
-      throw Exception('Login token missing from server response');
+    if (tokens is! Map) {
+      throw Exception('Tokens missing from server response');
+    }
+
+    accessToken = tokens['access']?.toString();
+    refreshToken = tokens['refresh']?.toString();
+
+    if (accessToken == null || accessToken!.trim().isEmpty) {
+      throw Exception('Access token missing from server response');
+    }
+
+    if (refreshToken == null || refreshToken!.trim().isEmpty) {
+      throw Exception('Refresh token missing from server response');
+    }
+
+    final rawUser = data['user'];
+
+    if (rawUser is Map) {
+      user = Map<String, dynamic>.from(rawUser);
+    } else {
+      user = null;
     }
 
     await ApiClient.storage.write(
@@ -155,33 +191,120 @@ Future<void> checkLogin() async {
     );
 
     if (user != null) {
+      final id = _readUserValue(user!, [
+        'id',
+        'user_id',
+      ]);
+
+      final fullName = _readUserValue(user!, [
+        'full_name',
+        'name',
+        'username',
+        'display_name',
+      ]);
+
+      final phone = _readUserValue(user!, [
+        'phone',
+        'phone_number',
+      ]);
+
+      final bio = _readUserValue(user!, [
+        'bio',
+      ]);
+
+      final avatar = _readUserValue(user!, [
+        'profile_picture',
+        'profile_image',
+        'avatar',
+        'avatar_url',
+        'image_url',
+      ]);
+
+      if (id.trim().isEmpty) {
+        throw Exception('User id missing from server response');
+      }
+
       await ApiClient.storage.write(
         key: 'user_id',
-        value: user!['id'].toString(),
+        value: id,
       );
 
       await ApiClient.storage.write(
         key: 'full_name',
-        value: user!['full_name']?.toString() ?? '',
+        value: fullName,
       );
 
       await ApiClient.storage.write(
         key: 'phone',
-        value: user!['phone']?.toString() ?? '',
+        value: phone,
       );
 
       await ApiClient.storage.write(
         key: 'bio',
-        value: user!['bio']?.toString() ?? '',
+        value: bio,
       );
+
+      await ApiClient.storage.write(
+        key: 'avatar_url',
+        value: avatar,
+      );
+
+      await ApiClient.storage.write(
+        key: 'image_url',
+        value: avatar,
+      );
+
+      await _saveUserToSharedPreferences(
+        id: id,
+        fullName: fullName,
+        avatar: avatar,
+      );
+
+      debugPrint('AUTH SAVED USER ID: $id');
+      debugPrint('AUTH SAVED USER NAME: $fullName');
+      debugPrint('AUTH SAVED USER AVATAR: $avatar');
+    } else {
+      debugPrint('AUTH WARNING: user object missing from login response');
     }
 
     isLoggedIn = true;
     notifyListeners();
   }
 
+  String _readUserValue(Map<String, dynamic> data, List<String> keys) {
+    for (final key in keys) {
+      final value = data[key];
+      if (value != null && value.toString().trim().isNotEmpty) {
+        return value.toString();
+      }
+    }
+
+    return '';
+  }
+
+  Future<void> _saveUserToSharedPreferences({
+    required String id,
+    required String fullName,
+    required String avatar,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setString('user_id', id);
+    await prefs.setString('user_name', fullName);
+    await prefs.setString('user_avatar', avatar);
+
+    debugPrint('AUTH SAVED TO SHARED PREF USER ID: $id');
+    debugPrint('AUTH SAVED TO SHARED PREF USER NAME: $fullName');
+  }
+
   Future<void> logout() async {
     await ApiClient.storage.deleteAll();
+
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.remove('user_id');
+    await prefs.remove('user_name');
+    await prefs.remove('user_avatar');
 
     accessToken = null;
     refreshToken = null;

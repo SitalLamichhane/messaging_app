@@ -3,9 +3,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:messaging_app/chat_models.dart';
+import 'package:messaging_app/core/config/app_config.dart';
 import 'package:video_player/video_player.dart';
 
-const String baseServerUrl = 'http://192.168.1.77:8000';
+String get baseServerUrl => AppConfig.serverUrl;
 
 String fixedMediaUrl(String? url) {
   if (url == null || url.trim().isEmpty) return '';

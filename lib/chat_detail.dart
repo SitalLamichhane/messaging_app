@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:messaging_app/core/api_client.dart';
+import 'package:messaging_app/core/config/app_config.dart';
 import 'package:saver_gallery/saver_gallery.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -20,7 +21,9 @@ import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/inside_chat/chat_settingScreen.dart';
 import 'package:messaging_app/core/chat/chat_provider.dart';
+import 'package:messaging_app/core/block/block_provider.dart';
 import 'package:messaging_app/core/call/global_call_handler.dart';
+import 'package:messaging_app/core/call/call_api.dart';
 import 'package:messaging_app/widgets/dynamic_message_media.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
@@ -52,6 +55,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isRecording = false;
   bool _isSendingText = false;
   bool _isSendingLike = false;
+  bool _isStartingCall = false;
 
   final Map<String, String> _messageReactions = {};
   final Set<String> _pinnedMessageIds = {};
@@ -65,6 +69,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   int _lastRenderedMessageCount = 0;
 
   ChatMessage? _replyingTo;
+
+  String _blockTargetUserId = '';
+  bool _blockedByMe = false;
+  bool _blockedMe = false;
+  bool _canUnblock = false;
+
+  String _currentUserId = '';
 
   final List<String> _messengerReactions = const [
     '❤️',
@@ -81,6 +92,477 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       provider.getMessagesForChat(widget.chat.id),
     )..sort((a, b) => a.sentAt.compareTo(b.sentAt));
   }
+
+  String _cleanImageUrl(String value) {
+    final cleanValue = value.trim();
+
+    if (cleanValue.isEmpty) return '';
+
+    if (cleanValue.startsWith('http://') || cleanValue.startsWith('https://')) {
+      return cleanValue;
+    }
+
+    final mediaBaseUrl = AppConfig.apiBaseUrl.replaceFirst('/api', '');
+
+    if (cleanValue.startsWith('/media/')) {
+      return '$mediaBaseUrl$cleanValue';
+    }
+
+    if (cleanValue.startsWith('media/')) {
+      return '$mediaBaseUrl/$cleanValue';
+    }
+
+    return cleanValue;
+  }
+
+
+  ChatItem _freshChat() {
+    try {
+      return AppChatData.chats.firstWhere(
+        (chat) => chat.id.toString() == widget.chat.id.toString(),
+        orElse: () => widget.chat,
+      );
+    } catch (_) {
+      return widget.chat;
+    }
+  }
+
+  ChatUser? _otherMemberForDisplay(ChatItem chat) {
+    if (chat.isGroup) return null;
+
+    final currentUserId = _currentUserId.trim();
+
+    for (final member in chat.members) {
+      final memberId = member.id.toString().trim();
+      if (memberId.isEmpty) continue;
+
+      if (currentUserId.isNotEmpty && memberId == currentUserId) {
+        continue;
+      }
+
+      return member;
+    }
+
+    return null;
+  }
+
+  String _chatDisplayName() {
+    final chat = _freshChat();
+
+    if (chat.isGroup) {
+      final groupName = chat.name.trim();
+      return groupName.isEmpty ? 'Group' : groupName;
+    }
+
+    final otherMember = _otherMemberForDisplay(chat);
+
+    if (otherMember != null) {
+      final otherUserId = otherMember.id.toString().trim();
+
+      final nickname = chat.memberNicknames[otherUserId]?.trim() ?? '';
+      if (nickname.isNotEmpty) {
+        return nickname;
+      }
+
+      final latestRealName = otherMember.name.trim();
+      if (latestRealName.isNotEmpty) {
+        return latestRealName;
+      }
+    }
+
+    final fallbackName = chat.name.trim();
+    return fallbackName.isEmpty ? 'User' : fallbackName;
+  }
+
+  String _displayNameForChatItem(ChatItem chat) {
+    if (chat.isGroup) {
+      final groupName = chat.name.trim();
+      return groupName.isEmpty ? 'Group' : groupName;
+    }
+
+    final currentUserId = _currentUserId.trim();
+
+    for (final member in chat.members) {
+      final memberId = member.id.toString().trim();
+
+      if (memberId.isEmpty) continue;
+
+      if (currentUserId.isNotEmpty && memberId == currentUserId) {
+        continue;
+      }
+
+      // Messenger rule:
+      // nickname first, otherwise latest real profile name.
+      final nickname = chat.memberNicknames[memberId]?.trim() ?? '';
+      if (nickname.isNotEmpty) {
+        return nickname;
+      }
+
+      final latestRealName = member.name.trim();
+      if (latestRealName.isNotEmpty) {
+        return latestRealName;
+      }
+    }
+
+    final fallbackName = chat.name.trim();
+    return fallbackName.isEmpty ? 'User' : fallbackName;
+  }
+
+  String _resolvedChatAvatarUrl() {
+    final chat = _freshChat();
+
+    final directAvatar = _cleanImageUrl(chat.avatarUrl);
+
+    if (directAvatar.isNotEmpty) {
+      return directAvatar;
+    }
+
+    final currentUserId = _currentUserId.trim();
+
+    // For private chat, prefer the other user's latest avatar.
+    if (!chat.isGroup) {
+      for (final member in chat.members) {
+        final memberId = member.id.toString().trim();
+
+        if (memberId.isEmpty) continue;
+
+        if (currentUserId.isNotEmpty && memberId == currentUserId) {
+          continue;
+        }
+
+        final memberAvatar = _cleanImageUrl(member.avatarUrl);
+
+        if (memberAvatar.isNotEmpty) {
+          return memberAvatar;
+        }
+      }
+    }
+
+    for (final member in chat.members) {
+      final memberAvatar = _cleanImageUrl(member.avatarUrl);
+
+      if (memberAvatar.isNotEmpty) {
+        return memberAvatar;
+      }
+    }
+
+    return '';
+  }
+
+
+  String _targetUserIdForBlock({String currentUserId = ''}) {
+    if (widget.chat.isGroup) return '';
+
+    final cleanCurrentUserId = currentUserId.trim();
+
+    for (final member in widget.chat.members) {
+      final memberId = member.id.toString().trim();
+      if (memberId.isEmpty) continue;
+
+      if (cleanCurrentUserId.isNotEmpty && memberId == cleanCurrentUserId) {
+        continue;
+      }
+
+      return memberId;
+    }
+
+    return '';
+  }
+
+
+  Future<ChatItem> _latestChatForBlock({
+    required String currentUserId,
+    bool forceRefresh = false,
+  }) async {
+    ChatItem latestChat = widget.chat;
+
+    try {
+      latestChat = AppChatData.chats.firstWhere(
+        (chat) => chat.id.toString() == widget.chat.id.toString(),
+        orElse: () => widget.chat,
+      );
+    } catch (_) {
+      latestChat = widget.chat;
+    }
+
+    final hasUsableBlockData = latestChat.members.any(
+      (member) => member.isBlocked == true || member.blockedBy != null,
+    );
+
+    if (!forceRefresh && hasUsableBlockData) {
+      return latestChat;
+    }
+
+    /*
+      IMPORTANT:
+      After app restart the chat passed into ChatDetailScreen can be stale.
+      So we refresh from the same conversations API that already returns:
+      members[].is_blocked
+      members[].blocked_by
+      members[].blocked_by_name
+
+      This is NOT a separate block status API.
+      It is the same /chat/conversations/ list API.
+    */
+    try {
+      debugPrint('BLOCK REFRESH: fetching /chat/conversations/ for latest block state');
+
+      final response = await ApiClient.dio.get('/chat/conversations/');
+      final data = response.data;
+
+      if (data is! List) {
+        debugPrint('BLOCK REFRESH SKIPPED: conversations response is not List');
+        return latestChat;
+      }
+
+      for (final item in data) {
+        if (item is! Map) continue;
+
+        final map = Map<String, dynamic>.from(item);
+        final conversationId = map['id']?.toString() ?? '';
+
+        if (conversationId != widget.chat.id.toString()) continue;
+
+        final freshChat = ChatItem.fromJson(
+          map,
+          currentUserId: currentUserId,
+        );
+
+        final index = AppChatData.chats.indexWhere(
+          (chat) => chat.id.toString() == freshChat.id.toString(),
+        );
+
+        if (index >= 0) {
+          AppChatData.chats[index] = freshChat;
+        } else {
+          AppChatData.chats.add(freshChat);
+        }
+
+        AppChatData.notify();
+
+        debugPrint('BLOCK REFRESH FOUND CONVERSATION: ${freshChat.id}');
+        debugPrint('BLOCK REFRESH MEMBERS: ${freshChat.members.length}');
+
+        return freshChat;
+      }
+
+      debugPrint('BLOCK REFRESH SKIPPED: conversation ${widget.chat.id} not found');
+      return latestChat;
+    } catch (e) {
+      debugPrint('BLOCK REFRESH ERROR: $e');
+      return latestChat;
+    }
+  }
+
+  Future<void> _reloadBlockStatus({bool forceRefresh = false}) async {
+  if (widget.chat.isGroup) return;
+
+  final currentUserId =
+      (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
+
+  if (currentUserId.isEmpty) {
+    debugPrint('BLOCK STATUS ERROR: currentUserId is empty');
+    return;
+  }
+
+  final latestChat = await _latestChatForBlock(
+    currentUserId: currentUserId,
+    forceRefresh: forceRefresh,
+  );
+
+  ChatUser? myMember;
+  ChatUser? targetMember;
+
+  for (final member in latestChat.members) {
+    final memberUserId = member.id.toString().trim();
+
+    debugPrint(
+      'BLOCK MEMBER CHECK => '
+      'memberId=$memberUserId, '
+      'name=${member.name}, '
+      'isBlocked=${member.isBlocked}, '
+      'blockedBy=${member.blockedBy}, '
+      'blockedByName=${member.blockedByName}',
+    );
+
+    if (memberUserId == currentUserId) {
+      myMember = member;
+    } else if (targetMember == null) {
+      targetMember = member;
+    }
+  }
+
+  if (myMember == null) {
+    debugPrint('BLOCK STATUS ERROR: myMember not found');
+    return;
+  }
+
+  if (targetMember == null) {
+    debugPrint('BLOCK STATUS ERROR: target member not found');
+    return;
+  }
+
+  final targetUserId = targetMember.id.toString().trim();
+
+  /*
+    Messenger exact logic:
+
+    Person who blocked:
+    targetMember.isBlocked == true
+    targetMember.blockedBy == currentUserId
+
+    Receiver / blocked user:
+    myMember.isBlocked == true
+    myMember.blockedBy == targetUserId
+
+    IMPORTANT:
+    Do NOT OR this with provider state.
+    Provider can be stale after restart/login and can make receiver
+    wrongly see the sender/blocker UI.
+  */
+  final blockedByMe =
+      targetMember.isBlocked == true &&
+      targetMember.blockedBy?.toString() == currentUserId;
+
+  final blockedMe =
+      myMember.isBlocked == true &&
+      myMember.blockedBy?.toString() == targetUserId;
+
+  final blockProvider = context.read<BlockProvider>();
+
+  // Store the API truth in provider only after deciding the role.
+  blockProvider.setLocalBlocked(
+    conversationId: latestChat.id,
+    targetUserId: targetUserId,
+    value: blockedByMe,
+  );
+
+  blockProvider.setLocalBlockedMe(
+    conversationId: latestChat.id,
+    targetUserId: targetUserId,
+    value: blockedMe,
+  );
+
+  if (!mounted) return;
+
+  setState(() {
+    _blockTargetUserId = targetUserId;
+    _blockedByMe = blockedByMe;
+    _blockedMe = blockedMe;
+
+    // Only the real blocker can see/call Unblock.
+    // Receiver side must only see "This user is unavailable".
+    _canUnblock = blockedByMe;
+  });
+
+  debugPrint('========== BLOCK FINAL CHECK ==========');
+  debugPrint('currentUserId: $currentUserId');
+  debugPrint('conversationId: ${latestChat.id}');
+  debugPrint('targetUserId: $targetUserId');
+
+  debugPrint('myMember id: ${myMember.id}');
+  debugPrint('myMember isBlocked: ${myMember.isBlocked}');
+  debugPrint('myMember blockedBy: ${myMember.blockedBy}');
+
+  debugPrint('targetMember id: ${targetMember.id}');
+  debugPrint('targetMember isBlocked: ${targetMember.isBlocked}');
+  debugPrint('targetMember blockedBy: ${targetMember.blockedBy}');
+
+  debugPrint('BLOCK FINAL blockedByMe: $blockedByMe');
+  debugPrint('BLOCK FINAL blockedMe: $blockedMe');
+  debugPrint('=======================================');
+}
+
+  bool _isBlockedForMessaging() {
+  // Messenger rule:
+  // If I blocked them OR they blocked me, I cannot send.
+  // Do not read provider here because provider may be stale after restart.
+  return _blockedByMe || _blockedMe;
+}
+
+  void _showBlockedNotice() {
+  _showMessengerPop(
+    _blockedByMe
+        ? 'You blocked this user. Unblock to send messages.'
+        : 'This user is unavailable.',
+    icon: Icons.block_rounded,
+  );
+}
+
+  Future<void> _unblockFromBlockedComposer() async {
+  /*
+    Messenger rule:
+    Only the person who blocked can unblock.
+    Receiver side must never call unblock API.
+  */
+  if (!_canUnblock || !_blockedByMe) {
+    _showMessengerPop(
+      'This user is unavailable.',
+      icon: Icons.block_rounded,
+    );
+    return;
+  }
+
+  final targetUserId = _blockTargetUserId.trim();
+
+  if (targetUserId.isEmpty) {
+    _showMessengerPop(
+      'User not found',
+      icon: Icons.error_rounded,
+    );
+    return;
+  }
+
+  final blockProvider = context.read<BlockProvider>();
+
+  final success = await blockProvider.unblockUser(
+    conversationId: widget.chat.id,
+    targetUserId: targetUserId,
+    isGroupChat: false,
+  );
+
+  if (!mounted) return;
+
+  if (!success) {
+    _showMessengerPop(
+      blockProvider.error.trim().isNotEmpty
+          ? blockProvider.error
+          : 'Could not unblock user',
+      icon: Icons.error_rounded,
+    );
+    return;
+  }
+
+  // Unblock successful: local UI must return to normal immediately.
+  blockProvider.setLocalBlocked(
+    conversationId: widget.chat.id,
+    targetUserId: targetUserId,
+    value: false,
+  );
+
+  blockProvider.setLocalBlockedMe(
+    conversationId: widget.chat.id,
+    targetUserId: targetUserId,
+    value: false,
+  );
+
+  if (!mounted) return;
+
+  setState(() {
+    _blockedByMe = false;
+    _blockedMe = false;
+    _canUnblock = false;
+    _blockTargetUserId = targetUserId;
+  });
+
+  _showMessengerPop(
+    'User unblocked',
+    icon: Icons.check_circle_rounded,
+  );
+
+  // Force refresh because AppChatData may still contain stale blocked members.
+  await _reloadBlockStatus(forceRefresh: true);
+}
 
 
   @override
@@ -105,6 +587,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       if (!mounted) return;
 
+      await _reloadBlockStatus();
+
+      if (!mounted) return;
+
       final provider = _chatProvider;
       await provider.loadMessages(conversationId);
 
@@ -112,21 +598,26 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       await provider.connectSocket(
         conversationId: conversationId,
-        // myUserId: 1, // TODO: replace with real logged-in user id
       );
 
       final accessToken = await ApiClient.storage.read(key: 'access');
       final currentUserId = await ApiClient.storage.read(key: 'user_id');
+
+      if (mounted) {
+        setState(() {
+          _currentUserId = (currentUserId ?? '').trim();
+        });
+      }
 
       if (accessToken != null &&
           accessToken.trim().isNotEmpty &&
           currentUserId != null &&
           currentUserId.trim().isNotEmpty) {
         GlobalCallHandler.connectCallSocket(
-          url:
-              'ws://192.168.1.97:8000/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
-          currentUserId: currentUserId,
-        );
+  url:
+      '${AppConfig.wsBaseUrl}/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
+  currentUserId: currentUserId,
+);
       } else {
         debugPrint('CALL SOCKET ERROR: token/user missing in ChatDetailScreen');
       }
@@ -225,17 +716,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
   }
 
-  void _append(ChatMessage message) {
-    setState(() {
-      _messages.add(message);
-      _replyingTo = null;
-      _showEmoji = false;
-    });
-
-    AppChatData.addMessage(widget.chat, message);
-    _smartScrollToBottom();
-  }
-
   String _previewForReply(ChatMessage msg) {
     switch (msg.type) {
       case MessageType.text:
@@ -296,27 +776,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
     setState(() {
       _isSendingText = true;
     });
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _append(
-        ChatMessage(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          type: MessageType.text,
-          text: text,
-          isMe: true,
-          sentAt: DateTime.now(),
-          isSeen: true,
-          replyToMessageId: _replyingTo?.id,
-          replyPreview:
-              _replyingTo == null ? null : _previewForReply(_replyingTo!),
-          replyToMe: _replyingTo?.isMe,
-        ),
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
       );
-      _messageController.clear();
 
       if (mounted) {
         setState(() {
@@ -375,21 +849,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Future<void> _sendLike() async {
     if (_isSendingLike) return;
 
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
     setState(() {
       _isSendingLike = true;
     });
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _append(
-        ChatMessage(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          type: MessageType.text,
-          text: '👍',
-          isMe: true,
-          sentAt: DateTime.now(),
-          isSeen: true,
-        ),
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
       );
 
       if (mounted) {
@@ -485,13 +958,18 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         size: 20,
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        text,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.none,
+                      Flexible(
+                        child: Text(
+                          text,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                            decoration: TextDecoration.none,
+                          ),
                         ),
                       ),
                     ],
@@ -1083,23 +1561,31 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                     itemBuilder: (context, index) {
                       final chat = availableChats[index];
+                      final forwardDisplayName = _displayNameForChatItem(chat);
 
                       return ListTile(
                         onTap: () => Navigator.pop(context, chat),
-                        leading: CircleAvatar(
-                          backgroundImage: chat.avatarUrl.trim().isNotEmpty
-                              ? NetworkImage(chat.avatarUrl)
-                              : null,
-                          child: chat.avatarUrl.trim().isEmpty
-                              ? Text(
-                                  chat.name.isNotEmpty
-                                      ? chat.name[0].toUpperCase()
-                                      : 'U',
-                                )
-                              : null,
+                        leading: Builder(
+                          builder: (_) {
+                            final forwardAvatarUrl =
+                                _cleanImageUrl(chat.avatarUrl);
+
+                            return CircleAvatar(
+                              backgroundImage: forwardAvatarUrl.isNotEmpty
+                                  ? NetworkImage(forwardAvatarUrl)
+                                  : null,
+                              child: forwardAvatarUrl.isEmpty
+                                  ? Text(
+                                      forwardDisplayName.isNotEmpty
+                                          ? forwardDisplayName[0].toUpperCase()
+                                          : 'U',
+                                    )
+                                  : null,
+                            );
+                          },
                         ),
                         title: Text(
-                          chat.name,
+                          forwardDisplayName,
                           style: TextStyle(
                             color: textColor,
                             fontWeight: FontWeight.w700,
@@ -1130,7 +1616,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Forwarded to ${selectedChat.name}'),
+        content: Text('Forwarded to ${_displayNameForChatItem(selectedChat)}'),
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -1923,6 +2409,11 @@ void _openReactionPicker(
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
     final file = await _picker.pickImage(
       source: source,
       imageQuality: 85,
@@ -1933,21 +2424,9 @@ void _openReactionPicker(
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _append(
-        ChatMessage(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          type: MessageType.image,
-          text: '',
-          isMe: true,
-          sentAt: DateTime.now(),
-          isSeen: true,
-          filePath: file.path,
-          fileName: file.name,
-          replyToMessageId: _replyingTo?.id,
-          replyPreview:
-              _replyingTo == null ? null : _previewForReply(_replyingTo!),
-          replyToMe: _replyingTo?.isMe,
-        ),
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
       );
       return;
     }
@@ -1973,6 +2452,11 @@ void _openReactionPicker(
   }
 
   Future<void> _pickMultipleImages() async {
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
     final files = await _picker.pickMultiImage(
       imageQuality: 85,
       maxWidth: 1800,
@@ -1983,30 +2467,10 @@ void _openReactionPicker(
     final conversationId = int.tryParse(widget.chat.id);
 
     if (conversationId == null) {
-      final message = ChatMessage(
-        id: DateTime.now().microsecondsSinceEpoch.toString(),
-        type: MessageType.mediaAlbum,
-        text: '',
-        isMe: true,
-        sentAt: DateTime.now(),
-        isSeen: true,
-        mediaUrls: files.map((file) => file.path).toList(),
-        replyToMessageId: _replyingTo?.id,
-        replyPreview:
-            _replyingTo == null ? null : _previewForReply(_replyingTo!),
-        replyToMe: _replyingTo?.isMe,
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
       );
-
-      setState(() {
-        _messages.add(message);
-        _replyingTo = null;
-        _showEmoji = false;
-      });
-
-      AppChatData.addMessage(widget.chat, message);
-
-      AppChatData.notify();
-      _smartScrollToBottom();
       return;
     }
 
@@ -2042,6 +2506,11 @@ void _openReactionPicker(
   }
 
   Future<void> _pickMultipleFiles() async {
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
     final result = await FilePicker.platform.pickFiles(
       allowMultiple: true,
       withData: false,
@@ -2064,35 +2533,10 @@ void _openReactionPicker(
     final conversationId = int.tryParse(widget.chat.id);
 
     if (conversationId == null) {
-      setState(() {
-        for (final pickedFile in selectedFiles) {
-          final path = pickedFile.path!;
-          final message = ChatMessage(
-            id: DateTime.now().microsecondsSinceEpoch.toString(),
-            type: MessageType.file,
-            text: '',
-            isMe: true,
-            sentAt: DateTime.now(),
-            isSeen: true,
-            filePath: path,
-            fileName: pickedFile.name,
-            fileSizeBytes: pickedFile.size,
-            replyToMessageId: _replyingTo?.id,
-            replyPreview:
-                _replyingTo == null ? null : _previewForReply(_replyingTo!),
-            replyToMe: _replyingTo?.isMe,
-          );
-
-          _messages.add(message);
-          AppChatData.addMessage(widget.chat, message);
-        }
-
-        _replyingTo = null;
-        _showEmoji = false;
-      });
-
-      AppChatData.notify();
-      _smartScrollToBottom();
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
+      );
       return;
     }
 
@@ -2130,6 +2574,11 @@ void _openReactionPicker(
   Future<void> _startRecording() async {
     if (_isRecording) return;
 
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
     final hasPermission = await _recorder.hasPermission();
     if (!hasPermission) return;
 
@@ -2161,6 +2610,12 @@ void _openReactionPicker(
 
     if (!_isRecording) return;
 
+    if (_isBlockedForMessaging()) {
+      await _cancelRecording();
+      _showBlockedNotice();
+      return;
+    }
+
     final duration = _recordDuration.inMilliseconds <= 0
         ? const Duration(seconds: 1)
         : _recordDuration;
@@ -2183,21 +2638,9 @@ void _openReactionPicker(
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _append(
-        ChatMessage(
-          id: DateTime.now().microsecondsSinceEpoch.toString(),
-          type: MessageType.audio,
-          text: 'Voice message',
-          isMe: true,
-          sentAt: DateTime.now(),
-          isSeen: true,
-          audioPath: path,
-          audioDuration: duration,
-          replyToMessageId: _replyingTo?.id,
-          replyPreview:
-              _replyingTo == null ? null : _previewForReply(_replyingTo!),
-          replyToMe: _replyingTo?.isMe,
-        ),
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
       );
       setState(() {
         _recordDuration = Duration.zero;
@@ -2246,89 +2689,194 @@ void _openReactionPicker(
   }
 
 Future<void> _startCall(bool isVideo) async {
-  final currentUserId = await ApiClient.storage.read(key: 'user_id');
-  final accessToken = await ApiClient.storage.read(key: 'access');
-  final currentUserName =
-      (await ApiClient.storage.read(key: 'user_name'))?.trim().isNotEmpty == true
-          ? (await ApiClient.storage.read(key: 'user_name'))!.trim()
-          : 'You';
-  final currentUserAvatar =
-      (await ApiClient.storage.read(key: 'user_avatar'))?.trim() ?? '';
+  if (_isStartingCall) return;
 
-  if (currentUserId == null || currentUserId.trim().isEmpty) {
-    debugPrint('CALL ERROR: currentUserId missing');
+  if (widget.chat.isGroup) {
+    _showMessengerPop(
+      'Calling is only available for private chat',
+      icon: Icons.call_rounded,
+    );
     return;
   }
 
-  if (accessToken == null || accessToken.trim().isEmpty) {
-    debugPrint('CALL ERROR: accessToken missing');
+  if (_isBlockedForMessaging()) {
+    _showBlockedNotice();
     return;
   }
 
-  final conversationId = int.tryParse(widget.chat.id);
+  setState(() {
+    _isStartingCall = true;
+  });
 
-  if (conversationId == null) {
-    debugPrint('CALL ERROR: invalid conversation id ${widget.chat.id}');
-    return;
-  }
+  try {
+    final currentUserId = await ApiClient.storage.read(key: 'user_id');
+    final accessToken = await ApiClient.storage.read(key: 'access');
 
-  String? receiverId;
+    final storedUserName =
+        (await ApiClient.storage.read(key: 'user_name'))?.trim();
+    final storedFullName =
+        (await ApiClient.storage.read(key: 'full_name'))?.trim();
 
-  for (final member in widget.chat.members) {
-    final memberId = member.id.toString();
-    if (memberId != currentUserId.toString()) {
-      receiverId = memberId;
-      break;
+    final currentUserName = storedUserName?.isNotEmpty == true
+        ? storedUserName!
+        : storedFullName?.isNotEmpty == true
+            ? storedFullName!
+            : 'You';
+
+    final storedUserAvatar =
+        (await ApiClient.storage.read(key: 'user_avatar'))?.trim();
+    final storedProfilePicture =
+        (await ApiClient.storage.read(key: 'profile_picture'))?.trim();
+
+    final currentUserAvatar = storedUserAvatar?.isNotEmpty == true
+        ? storedUserAvatar!
+        : storedProfilePicture ?? '';
+
+    if (currentUserId == null || currentUserId.trim().isEmpty) {
+      debugPrint('CALL ERROR: currentUserId missing');
+      _showMessengerPop(
+        'User not ready',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    if (accessToken == null || accessToken.trim().isEmpty) {
+      debugPrint('CALL ERROR: accessToken missing');
+      _showMessengerPop(
+        'Login token missing',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final conversationId = int.tryParse(widget.chat.id);
+
+    if (conversationId == null) {
+      debugPrint('CALL ERROR: invalid conversation id ${widget.chat.id}');
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final latestChat = await _latestChatForBlock(
+      currentUserId: currentUserId.trim(),
+    );
+
+    String? receiverId;
+
+    for (final member in latestChat.members) {
+      final memberId = member.id.toString().trim();
+
+      if (memberId.isEmpty) continue;
+
+      if (memberId != currentUserId.toString().trim()) {
+        receiverId = memberId;
+        break;
+      }
+    }
+
+    debugPrint('======================');
+    debugPrint('CURRENT USER: $currentUserId');
+    debugPrint('RECEIVER: $receiverId');
+    debugPrint('CONVERSATION: $conversationId');
+    debugPrint('CHAT MEMBERS: ${latestChat.members.length}');
+    debugPrint('======================');
+
+    if (receiverId == null || receiverId.trim().isEmpty) {
+      debugPrint('CALL ERROR: receiver id not found');
+      _showMessengerPop(
+        'Receiver not found',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    GlobalCallHandler.connectCallSocket(
+      url:
+          '${AppConfig.wsBaseUrl}/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
+      currentUserId: currentUserId.trim(),
+      currentUserName: currentUserName,
+      currentUserAvatar: currentUserAvatar,
+    );
+
+    final response = await CallApi.startCall(
+      receiverId: receiverId,
+      conversationId: conversationId.toString(),
+      isVideoCall: isVideo,
+    );
+
+    final data = response.data is Map
+        ? Map<String, dynamic>.from(response.data)
+        : <String, dynamic>{};
+
+    final callId = data['call_id']?.toString();
+
+    if (callId == null || callId.trim().isEmpty) {
+      debugPrint('CALL ERROR: backend did not return call_id. DATA: $data');
+      _showMessengerPop(
+        'Could not start call',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    debugPrint('BACKEND CALL STARTED: $data');
+
+    AppChatData.addCallLog(
+      chat: widget.chat,
+      type: isVideo ? CallEntryType.video : CallEntryType.voice,
+      status: CallEntryStatus.outgoing,
+    );
+
+    if (!mounted) return;
+
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CallScreen(
+          name: _chatDisplayName(),
+          avatarUrl: _resolvedChatAvatarUrl(),
+          isVideoCall: isVideo,
+          chat: widget.chat,
+          currentUserId: currentUserId.trim(),
+          currentUserName: currentUserName,
+          currentUserAvatar: currentUserAvatar,
+          receiverId: receiverId!,
+          isCaller: true,
+          conversationId: widget.chat.id,
+          callId: callId,
+        ),
+      ),
+    );
+  } catch (e) {
+    debugPrint('START CALL API ERROR: $e');
+
+    if (!mounted) return;
+
+    _showMessengerPop(
+      'Could not start call',
+      icon: Icons.error_rounded,
+    );
+  } finally {
+    if (mounted) {
+      setState(() {
+        _isStartingCall = false;
+      });
     }
   }
-
-  debugPrint('======================');
-  debugPrint('CURRENT USER: $currentUserId');
-  debugPrint('RECEIVER: $receiverId');
-  debugPrint('CONVERSATION: $conversationId');
-  debugPrint('CHAT MEMBERS: ${widget.chat.members.length}');
-  debugPrint('======================');
-
-  if (receiverId == null || receiverId.trim().isEmpty) {
-    debugPrint('CALL ERROR: receiver id not found');
-    return;
-  }
-
-  GlobalCallHandler.connectCallSocket(
-    url:
-        'ws://192.168.1.97:8000/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
-    currentUserId: currentUserId.trim(),
-  );
-
-  AppChatData.addCallLog(
-    chat: widget.chat,
-    type: isVideo ? CallEntryType.video : CallEntryType.voice,
-    status: CallEntryStatus.outgoing,
-  );
-
-  if (!mounted) return;
-
-  Navigator.push(
-    context,
-    MaterialPageRoute(
-      builder: (_) => CallScreen(
-        name: widget.chat.name,
-        avatarUrl: widget.chat.avatarUrl,
-        isVideoCall: isVideo,
-        chat: widget.chat,
-        currentUserId: currentUserId.trim(),
-        currentUserName: currentUserName,
-        currentUserAvatar: currentUserAvatar,
-        receiverId: receiverId!,
-        isCaller: true,
-        conversationId: widget.chat.id,
-      ),
-    ),
-  );
 }
 
   Future<void> _openProfile() async {
     final currentUserId = (await ApiClient.storage.read(key: 'user_id')) ?? '';
+
+    if (mounted && currentUserId.trim() != _currentUserId) {
+      setState(() {
+        _currentUserId = currentUserId.trim();
+      });
+    }
     final storedName = (await ApiClient.storage.read(key: 'user_name')) ?? '';
     final currentUserName = storedName.trim().isEmpty ? 'You' : storedName.trim();
     final currentUserAvatar =
@@ -2340,11 +2888,22 @@ Future<void> _startCall(bool isVideo) async {
       context,
       MaterialPageRoute(
         builder: (_) => ChatSettingsScreen(
-          chat: widget.chat,
+          chat: _freshChat(),
           themeColor: const Color(0xFF1877F2),
+          currentUserId: currentUserId,
+          currentUserName: currentUserName,
+          currentUserAvatar: currentUserAvatar,
         ),
       ),
     );
+
+    if (!mounted) return;
+
+    await _reloadBlockStatus(forceRefresh: true);
+
+    if (mounted) {
+      await context.read<ChatProvider>().loadConversations();
+    }
 
     if (!mounted) return;
 
@@ -2462,6 +3021,12 @@ Future<void> _startCall(bool isVideo) async {
   }
 
   Widget _buildCustomAppBar(bool isDark) {
+    final chatAvatarUrl = _resolvedChatAvatarUrl();
+    final chatDisplayName = _chatDisplayName();
+
+    debugPrint('DETAIL CHAT AVATAR: $chatAvatarUrl');
+    debugPrint('DETAIL CHAT NAME: $chatDisplayName');
+
     return Container(
       color: isDark ? const Color(0xFF0B1220) : Colors.white,
       padding: const EdgeInsets.fromLTRB(8, 8, 8, 10),
@@ -2482,8 +3047,10 @@ Future<void> _startCall(bool isVideo) async {
                 borderRadius: BorderRadius.circular(18),
                 onTap: _openProfile,
                 child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 4,
+                  ),
                   child: Row(
                     children: [
                       Stack(
@@ -2491,15 +3058,27 @@ Future<void> _startCall(bool isVideo) async {
                         children: [
                           CircleAvatar(
                             radius: 21,
-                            backgroundImage:
-                                widget.chat.avatarUrl.trim().isNotEmpty
-                                    ? NetworkImage(widget.chat.avatarUrl)
-                                    : null,
-                            child: widget.chat.avatarUrl.trim().isEmpty
+                            backgroundColor: const Color(0xFFE5E7EB),
+                            backgroundImage: chatAvatarUrl.isNotEmpty
+                                ? NetworkImage(chatAvatarUrl)
+                                : null,
+                            onBackgroundImageError: chatAvatarUrl.isNotEmpty
+                                ? (Object error, StackTrace? stackTrace) {
+                                    debugPrint(
+                                      'CHAT APPBAR AVATAR LOAD ERROR: $error',
+                                    );
+                                  }
+                                : null,
+                            child: chatAvatarUrl.isEmpty
                                 ? Text(
-                                    widget.chat.name.isNotEmpty
-                                        ? widget.chat.name[0].toUpperCase()
+                                    chatDisplayName.trim().isNotEmpty
+                                        ? chatDisplayName
+                                            .trim()[0]
+                                            .toUpperCase()
                                         : 'U',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
                                   )
                                 : null,
                           ),
@@ -2528,7 +3107,7 @@ Future<void> _startCall(bool isVideo) async {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              widget.chat.name,
+                              chatDisplayName,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -2554,21 +3133,20 @@ Future<void> _startCall(bool isVideo) async {
                 ),
               ),
             ),
-IconButton(
-  onPressed: () => _startCall(false),
-  icon: const Icon(
-    Icons.call_rounded,
-    color: Color(0xFF1877F2),
-  ),
-),
-
-IconButton(
-  onPressed: () => _startCall(true),
-  icon: const Icon(
-    Icons.videocam_rounded,
-    color: Color(0xFF1877F2),
-  ),
-),
+            IconButton(
+              onPressed: _isStartingCall ? null : () => _startCall(false),
+              icon: const Icon(
+                Icons.call_rounded,
+                color: Color(0xFF1877F2),
+              ),
+            ),
+            IconButton(
+              onPressed: _isStartingCall ? null : () => _startCall(true),
+              icon: const Icon(
+                Icons.videocam_rounded,
+                color: Color(0xFF1877F2),
+              ),
+            ),
           ],
         ),
       ),
@@ -2622,7 +3200,7 @@ IconButton(
                           Text(
                             _replyingTo!.isMe
                                 ? 'Replying to yourself'
-                                : 'Replying to ${widget.chat.name}',
+                                : 'Replying to ${_chatDisplayName()}',
                             style: const TextStyle(
                               color: Color(0xFF1877F2),
                               fontWeight: FontWeight.w700,
@@ -2791,6 +3369,111 @@ IconButton(
     );
   }
 
+  Widget _buildBlockedComposer({
+    required bool isDark,
+    required bool blockedByMe,
+  }) {
+    if (_isRecording) {
+      Future.microtask(_cancelRecording);
+    }
+
+    if (_showEmoji) {
+      Future.microtask(() {
+        if (!mounted) return;
+        setState(() => _showEmoji = false);
+      });
+    }
+
+    return SafeArea(
+      top: false,
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF0B1220) : Colors.white,
+          border: Border(
+            top: BorderSide(
+              color: isDark ? const Color(0xFF243041) : const Color(0xFFE5E7EB),
+            ),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 38,
+              height: 38,
+              decoration: const BoxDecoration(
+                color: Color(0x14EF4444),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.block_rounded,
+                color: Color(0xFFEF4444),
+                size: 21,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    blockedByMe
+                        ? 'You blocked this user.'
+                        : 'This user is unavailable.',
+                    style: TextStyle(
+                      color: isDark ? Colors.white : Colors.black87,
+                      fontSize: 14.5,
+                      height: 1.25,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    blockedByMe
+                        ? 'Unblock to send messages.'
+                        : 'You can’t send messages to this person.',
+                    style: TextStyle(
+                      color: isDark
+                          ? const Color(0xFF94A3B8)
+                          : const Color(0xFF65676B),
+                      fontSize: 12.5,
+                      height: 1.25,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (_canUnblock) ...[
+              const SizedBox(width: 10),
+              TextButton(
+                onPressed: _unblockFromBlockedComposer,
+                style: TextButton.styleFrom(
+                  foregroundColor: const Color(0xFF1877F2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                ),
+                child: const Text(
+                  'Unblock',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildEmojiPicker(bool isDark) {
     return SizedBox(
       height: 320,
@@ -2906,8 +3589,8 @@ IconButton(
                                       : null,
                                   child: widget.chat.avatarUrl.trim().isEmpty
                                       ? Text(
-                                          widget.chat.name.isNotEmpty
-                                              ? widget.chat.name[0].toUpperCase()
+                                          _chatDisplayName().isNotEmpty
+                                              ? _chatDisplayName()[0].toUpperCase()
                                               : 'U',
                                           style: const TextStyle(fontSize: 12),
                                         )
@@ -3081,12 +3764,31 @@ IconButton(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                _buildComposer(isDark),
-                AnimatedSize(
-                  duration: const Duration(milliseconds: 260),
-                  curve: Curves.easeOutCubic,
-                  child: (_showEmoji && keyboardHeight == 0)
-                      ? AnimatedSlide(
+                Consumer<BlockProvider>(
+                  builder: (context, blockProvider, _) {
+                    final blocked = _blockedByMe || _blockedMe;
+
+                    if (blocked) {
+                      return _buildBlockedComposer(
+                        isDark: isDark,
+                        blockedByMe: _blockedByMe,
+                      );
+                    }
+
+                    return _buildComposer(isDark);
+                  },
+                ),
+                Consumer<BlockProvider>(
+                  builder: (context, blockProvider, _) {
+                    final blocked = _blockedByMe || _blockedMe;
+
+                    if (blocked) return const SizedBox(height: 0);
+
+                    return AnimatedSize(
+                      duration: const Duration(milliseconds: 260),
+                      curve: Curves.easeOutCubic,
+                      child: (_showEmoji && keyboardHeight == 0)
+                          ? AnimatedSlide(
                           offset: Offset.zero,
                           duration: const Duration(milliseconds: 260),
                           curve: Curves.easeOutCubic,
@@ -3095,8 +3797,10 @@ IconButton(
                             duration: const Duration(milliseconds: 180),
                             child: _buildEmojiPicker(isDark),
                           ),
-                        )
-                      : const SizedBox(height: 0),
+                            )
+                          : const SizedBox(height: 0),
+                    );
+                  },
                 ),
               ],
             ),

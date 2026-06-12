@@ -1,12 +1,20 @@
+import 'package:messaging_app/core/api_client.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:dio/dio.dart';
+import 'dart:io';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:messaging_app/profile_data/block_page.dart';
+import 'package:provider/provider.dart';
 import 'package:messaging_app/call_screen.dart';
 import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_models.dart';
+import 'package:messaging_app/core/config/app_config.dart';
+import 'package:messaging_app/core/block/block_provider.dart';
 import 'package:messaging_app/group/create_group_chat_screen.dart';
 import 'package:messaging_app/profile_data/conversation_search_page.dart';
 import 'package:messaging_app/profile_data/photos_media_page.dart';
-import 'package:messaging_app/profile_data/profile_data_page.dart';
+// import 'package:messaging_app/profile_data/profile_data_page.dart';
 import 'package:messaging_app/theme_controller.dart';
 
 class ChatSettingsScreen extends StatefulWidget {
@@ -34,7 +42,12 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     with TickerProviderStateMixin {
   bool isPinned = false;
   bool isBlocked = false;
+  bool _blockedMe = false;
   bool isMuted = false;
+
+  final ImagePicker _imagePicker = ImagePicker();
+  String _localGroupImagePath = '';
+  String _updatedGroupImageUrl = '';
 
   bool get isGroupChat => widget.chat.isGroup == true;
 
@@ -68,7 +81,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
   Color get sheetColor => isDark ? const Color(0xFF1E293B) : Colors.white;
 
-  Color get inputColor => isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
+  Color get inputColor =>
+      isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
 
   Map<String, dynamic> get _settings {
     return _chatSettingsStore.putIfAbsent(widget.chat.id, () {
@@ -78,7 +92,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         'isMuted': false,
         'muteLabel': 'Off',
         'myNickname': 'You',
-        'otherNickname': widget.chat.name,
+        'otherNickname': '',
         'emoji': '👍',
         'selectedThemeName': 'Blue',
         'themeColor': widget.themeColor,
@@ -93,8 +107,379 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         .toList();
   }
 
-  String get _displayChatName =>
-      otherNickname.trim().isEmpty ? widget.chat.name : otherNickname.trim();
+  // Messenger-style display rule:
+  // 1) If nickname exists for this conversation member, show nickname.
+  // 2) If nickname is empty/removed, show the latest real profile name.
+  // 3) Never save the real profile name as nickname automatically.
+  String get _displayChatName {
+    if (isGroupChat) return widget.chat.name;
+
+    final targetUserId = _targetUserIdForBlock();
+
+    return _displayNameForUser(
+      userId: targetUserId,
+      fallbackRealName: widget.chat.name,
+    );
+  }
+
+  String get _mediaBaseUrl {
+    return AppConfig.apiBaseUrl.replaceFirst('/api', '');
+  }
+
+  String _cleanImageUrl(String value) {
+    final cleanValue = value.trim();
+
+    if (cleanValue.isEmpty) return '';
+
+    if (cleanValue.startsWith('http://') || cleanValue.startsWith('https://')) {
+      return cleanValue.replaceFirst('/api/media/', '/media/');
+    }
+
+    if (cleanValue.startsWith('/media/')) {
+      return '$_mediaBaseUrl$cleanValue';
+    }
+
+    if (cleanValue.startsWith('media/')) {
+      return '$_mediaBaseUrl/$cleanValue';
+    }
+
+    return cleanValue;
+  }
+
+  String _resolvedChatAvatarUrl() {
+    if (_localGroupImagePath.trim().isNotEmpty) {
+      return _localGroupImagePath.trim();
+    }
+
+    final updatedGroupImage = _cleanImageUrl(_updatedGroupImageUrl);
+
+    if (updatedGroupImage.isNotEmpty) {
+      return updatedGroupImage;
+    }
+
+    final directAvatar = _cleanImageUrl(widget.chat.avatarUrl);
+
+    if (directAvatar.isNotEmpty) {
+      return directAvatar;
+    }
+
+    for (final member in widget.chat.members) {
+      final memberAvatar = _cleanImageUrl(member.avatarUrl);
+
+      if (memberAvatar.isEmpty) continue;
+
+      if (member.name.trim().toLowerCase() ==
+          widget.chat.name.trim().toLowerCase()) {
+        return memberAvatar;
+      }
+    }
+
+    for (final member in widget.chat.members) {
+      final memberAvatar = _cleanImageUrl(member.avatarUrl);
+
+      if (memberAvatar.isNotEmpty) {
+        return memberAvatar;
+      }
+    }
+
+    return '';
+  }
+
+  String _targetUserIdForBlock() {
+    if (isGroupChat) return '';
+
+    final currentUserId = widget.currentUserId.trim();
+
+    for (final member in widget.chat.members) {
+      final memberId = member.id.toString().trim();
+
+      if (memberId.isEmpty) continue;
+
+      if (currentUserId.isNotEmpty && memberId == currentUserId) {
+        continue;
+      }
+
+      return memberId;
+    }
+
+    return '';
+  }
+
+
+  ChatUser? _memberByUserId(String userId) {
+    final cleanUserId = userId.trim();
+
+    if (cleanUserId.isEmpty) return null;
+
+    for (final member in widget.chat.members) {
+      if (member.id.toString().trim() == cleanUserId) {
+        return member;
+      }
+    }
+
+    return null;
+  }
+
+  String _realNameForUser({
+    required String userId,
+    required String fallbackRealName,
+  }) {
+    final cleanUserId = userId.trim();
+
+    if (cleanUserId.isNotEmpty) {
+      final member = _memberByUserId(cleanUserId);
+      final memberName = member?.name.trim() ?? '';
+
+      if (memberName.isNotEmpty && memberName.toLowerCase() != 'unknown') {
+        return memberName;
+      }
+    }
+
+    final cleanFallback = fallbackRealName.trim();
+    if (cleanFallback.isNotEmpty && cleanFallback.toLowerCase() != 'unknown') {
+      return cleanFallback;
+    }
+
+    return 'Unknown';
+  }
+
+  String _nicknameForUser(String userId) {
+    final cleanUserId = userId.trim();
+
+    if (cleanUserId.isEmpty) return '';
+
+    final localNickname = widget.chat.memberNicknames[cleanUserId];
+
+    if (localNickname != null && localNickname.trim().isNotEmpty) {
+      return localNickname.trim();
+    }
+
+    return '';
+  }
+
+  String _displayNameForUser({
+    required String userId,
+    required String fallbackRealName,
+  }) {
+    final cleanUserId = userId.trim();
+    final nickname = _nicknameForUser(cleanUserId);
+
+    if (nickname.trim().isNotEmpty) {
+      return nickname.trim();
+    }
+
+    return _realNameForUser(
+      userId: cleanUserId,
+      fallbackRealName: fallbackRealName,
+    );
+  }
+
+  String _initialNicknameForEditor(String userId) {
+    return _nicknameForUser(userId);
+  }
+
+  void _applyNicknameLocally({
+    required String userId,
+    required String nickname,
+  }) {
+    final cleanUserId = userId.trim();
+    final cleanNickname = nickname.trim();
+
+    if (cleanUserId.isEmpty) return;
+
+    final updatedNicknames = Map<String, String>.from(
+      widget.chat.memberNicknames,
+    );
+
+    if (cleanNickname.isEmpty) {
+      updatedNicknames.remove(cleanUserId);
+    } else {
+      updatedNicknames[cleanUserId] = cleanNickname;
+    }
+
+    widget.chat.memberNicknames = updatedNicknames;
+
+    final index = AppChatData.chats.indexWhere(
+      (chat) => chat.id.toString() == widget.chat.id.toString(),
+    );
+
+    if (index != -1) {
+      AppChatData.chats[index].memberNicknames = updatedNicknames;
+    }
+
+    AppChatData.notify();
+  }
+
+  Future<bool> _updateMemberNicknameApi({
+    required String conversationId,
+    required String userId,
+    required String nickname,
+  }) async {
+    try {
+      final response = await ApiClient.dio.patch(
+        '/chat/conversations/$conversationId/members/$userId/nickname/',
+        data: {
+          'nickname': nickname.trim(),
+        },
+      );
+
+      debugPrint('NICKNAME UPDATE STATUS: ${response.statusCode}');
+      debugPrint('NICKNAME UPDATE DATA: ${response.data}');
+
+      return response.statusCode == 200 || response.statusCode == 204;
+    } on DioException catch (e) {
+      debugPrint('NICKNAME UPDATE DIO STATUS: ${e.response?.statusCode}');
+      debugPrint('NICKNAME UPDATE DIO DATA: ${e.response?.data}');
+      debugPrint('NICKNAME UPDATE DIO MESSAGE: ${e.message}');
+      return false;
+    } catch (e) {
+      debugPrint('NICKNAME UPDATE ERROR: $e');
+      return false;
+    }
+  }
+
+  Future<ChatItem> _latestChatForSettings({
+    required String currentUserId,
+  }) async {
+    ChatItem latestChat = widget.chat;
+
+    try {
+      latestChat = AppChatData.chats.firstWhere(
+        (chat) => chat.id.toString() == widget.chat.id.toString(),
+        orElse: () => widget.chat,
+      );
+    } catch (_) {
+      latestChat = widget.chat;
+    }
+
+    try {
+      debugPrint('SETTINGS BLOCK REFRESH: fetching /chat/conversations/');
+
+      final response = await ApiClient.dio.get('/chat/conversations/');
+      final data = response.data;
+
+      if (data is! List) {
+        debugPrint('SETTINGS BLOCK REFRESH SKIPPED: response is not List');
+        return latestChat;
+      }
+
+      for (final item in data) {
+        if (item is! Map) continue;
+
+        final map = Map<String, dynamic>.from(item);
+        final conversationId = map['id']?.toString() ?? '';
+
+        if (conversationId != widget.chat.id.toString()) continue;
+
+        final freshChat = ChatItem.fromJson(
+          map,
+          currentUserId: currentUserId,
+        );
+
+        final index = AppChatData.chats.indexWhere(
+          (chat) => chat.id.toString() == freshChat.id.toString(),
+        );
+
+        if (index >= 0) {
+          AppChatData.chats[index] = freshChat;
+        } else {
+          AppChatData.chats.add(freshChat);
+        }
+
+        AppChatData.notify();
+
+        debugPrint('SETTINGS BLOCK REFRESH FOUND: ${freshChat.id}');
+        return freshChat;
+      }
+
+      return latestChat;
+    } catch (e) {
+      debugPrint('SETTINGS BLOCK REFRESH ERROR: $e');
+      return latestChat;
+    }
+  }
+
+  Future<void> _loadBlockStatus() async {
+    if (isGroupChat) return;
+
+    final currentUserId = widget.currentUserId.trim();
+
+    if (currentUserId.isEmpty) {
+      debugPrint('SETTINGS BLOCK ERROR: currentUserId is empty');
+      return;
+    }
+
+    final latestChat = await _latestChatForSettings(
+      currentUserId: currentUserId,
+    );
+
+    ChatUser? myMember;
+    ChatUser? targetMember;
+
+    for (final member in latestChat.members) {
+      final memberId = member.id.toString().trim();
+
+      debugPrint(
+        'SETTINGS BLOCK MEMBER CHECK => '
+        'memberId=$memberId, '
+        'name=${member.name}, '
+        'isBlocked=${member.isBlocked}, '
+        'blockedBy=${member.blockedBy}, '
+        'blockedByName=${member.blockedByName}',
+      );
+
+      if (memberId == currentUserId) {
+        myMember = member;
+      } else if (targetMember == null) {
+        targetMember = member;
+      }
+    }
+
+    if (myMember == null || targetMember == null) {
+      debugPrint('SETTINGS BLOCK ERROR: members not found');
+      return;
+    }
+
+    final targetUserId = targetMember.id.toString().trim();
+
+    final blockedByMe =
+        targetMember.isBlocked == true &&
+        targetMember.blockedBy?.toString() == currentUserId;
+
+    final blockedMe =
+        myMember.isBlocked == true &&
+        myMember.blockedBy?.toString() == targetUserId;
+
+    final blockProvider = context.read<BlockProvider>();
+
+    blockProvider.setLocalBlocked(
+      conversationId: latestChat.id,
+      targetUserId: targetUserId,
+      value: blockedByMe,
+    );
+
+    blockProvider.setLocalBlockedMe(
+      conversationId: latestChat.id,
+      targetUserId: targetUserId,
+      value: blockedMe,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      isBlocked = blockedByMe;
+      _blockedMe = blockedMe;
+    });
+
+    _saveSettings();
+
+    debugPrint('========== SETTINGS BLOCK FINAL ==========');
+    debugPrint('currentUserId: $currentUserId');
+    debugPrint('targetUserId: $targetUserId');
+    debugPrint('SETTINGS FINAL isBlocked/blockByMe: $blockedByMe');
+    debugPrint('SETTINGS FINAL blockedMe: $blockedMe');
+    debugPrint('==========================================');
+  }
 
   @override
   void initState() {
@@ -102,6 +487,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
     themeColor = widget.themeColor;
     _loadSettings();
+    Future.microtask(_loadBlockStatus);
 
     _headerScaleController = AnimationController(
       vsync: this,
@@ -126,12 +512,12 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     final s = _settings;
 
     isPinned = s['isPinned'] as bool? ?? false;
-    isBlocked = s['isBlocked'] as bool? ?? false;
+    isBlocked = false;
+    _blockedMe = false;
     isMuted = s['isMuted'] as bool? ?? false;
     muteLabel = s['muteLabel'] as String? ?? 'Off';
     myNickname = s['myNickname'] as String? ?? 'You';
-    otherNickname =
-        s['otherNickname'] as String? ?? (isGroupChat ? 'Group' : widget.chat.name);
+    otherNickname = s['otherNickname'] as String? ?? '';
     emoji = s['emoji'] as String? ?? '👍';
     selectedThemeName = s['selectedThemeName'] as String? ?? 'Blue';
     themeColor = s['themeColor'] as Color? ?? widget.themeColor;
@@ -140,7 +526,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
   void _saveSettings() {
     _settings['isPinned'] = isPinned;
-    _settings['isBlocked'] = isBlocked;
+    _settings['isBlocked'] = false;
     _settings['isMuted'] = isMuted;
     _settings['muteLabel'] = muteLabel;
     _settings['myNickname'] = myNickname;
@@ -175,15 +561,192 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     await _headerScaleController.reverse();
   }
 
+  Future<void> _changeGroupImage() async {
+    if (!isGroupChat) {
+      await _bounceHeader();
+      return;
+    }
+
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: sheetColor,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Change group image',
+                    style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.w800,
+                      color: mainTextColor,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.photo_camera_rounded, color: themeColor),
+                  title: Text(
+                    'Take photo',
+                    style: TextStyle(color: mainTextColor),
+                  ),
+                  onTap: () => Navigator.pop(context, ImageSource.camera),
+                ),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Icon(Icons.photo_library_rounded, color: themeColor),
+                  title: Text(
+                    'Choose from gallery',
+                    style: TextStyle(color: mainTextColor),
+                  ),
+                  onTap: () => Navigator.pop(context, ImageSource.gallery),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+
+    if (source == null) return;
+
+    final picked = await _imagePicker.pickImage(
+      source: source,
+      imageQuality: 85,
+      maxWidth: 1800,
+    );
+
+    if (picked == null) return;
+
+    final conversationId = int.tryParse(widget.chat.id);
+
+    if (conversationId == null) {
+      _showSnackBar('Invalid group');
+      return;
+    }
+
+    setState(() {
+      _localGroupImagePath = picked.path;
+    });
+
+    final uploadedUrl = await _uploadGroupImage(
+      conversationId: conversationId,
+      imageFile: File(picked.path),
+    );
+
+    if (uploadedUrl == null) {
+      setState(() {
+        _localGroupImagePath = '';
+      });
+      _showSnackBar('Could not update group image');
+      return;
+    }
+
+    if (uploadedUrl.trim().isNotEmpty) {
+      final cleanUploadedUrl = _cleanImageUrl(uploadedUrl.trim());
+
+      setState(() {
+        _localGroupImagePath = '';
+        _updatedGroupImageUrl = cleanUploadedUrl;
+      });
+
+      final updatedChat = widget.chat.copyWith(
+        avatarUrl: cleanUploadedUrl,
+      );
+
+      final index = AppChatData.chats.indexWhere((c) => c.id == widget.chat.id);
+
+      if (index != -1) {
+        AppChatData.chats[index] = updatedChat;
+      }
+    }
+
+    debugPrint('UPDATED GROUP IMAGE URL: $_updatedGroupImageUrl');
+
+    _notifyDataChanged();
+    _showSnackBar('Group image updated');
+  }
+
+  Future<String?> _uploadGroupImage({
+    required int conversationId,
+    required File imageFile,
+  }) async {
+    try {
+      final formData = FormData.fromMap({
+        'image': await MultipartFile.fromFile(
+          imageFile.path,
+          filename: imageFile.path.split('/').last,
+        ),
+      });
+
+      final response = await ApiClient.dio.patch(
+        '/chat/groups/$conversationId/update/',
+        data: formData,
+        options: Options(
+          contentType: 'multipart/form-data',
+        ),
+      );
+
+      debugPrint('GROUP IMAGE UPDATE STATUS: ${response.statusCode}');
+      debugPrint('GROUP IMAGE UPDATE DATA: ${response.data}');
+
+      final data = response.data;
+
+      if (data is Map) {
+        final conversation = data['conversation'];
+
+        if (conversation is Map) {
+          final imageUrl = conversation['image'] ??
+              conversation['group_image'] ??
+              conversation['avatar'] ??
+              conversation['avatar_url'];
+
+          if (imageUrl != null && imageUrl.toString().trim().isNotEmpty) {
+            return imageUrl.toString();
+          }
+        }
+
+        final imageUrl = data['image'] ??
+            data['group_image'] ??
+            data['avatar'] ??
+            data['avatar_url'];
+
+        if (imageUrl != null && imageUrl.toString().trim().isNotEmpty) {
+          return imageUrl.toString();
+        }
+      }
+
+      return '';
+    } on DioException catch (e) {
+      debugPrint('UPDATE GROUP IMAGE DIO ERROR STATUS: ${e.response?.statusCode}');
+      debugPrint('UPDATE GROUP IMAGE DIO ERROR DATA: ${e.response?.data}');
+      debugPrint('UPDATE GROUP IMAGE DIO ERROR MESSAGE: ${e.message}');
+      return null;
+    } catch (e) {
+      debugPrint('UPDATE GROUP IMAGE ERROR: $e');
+      return null;
+    }
+  }
+
   void _createGroupWithThisUser() {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CreateGroupChatScreen(
           preSelectedUser: ChatUser(
-            id: widget.chat.id,
+            id: _targetUserIdForBlock(),
             name: widget.chat.name,
-            avatarUrl: widget.chat.avatarUrl,
+            avatarUrl: _resolvedChatAvatarUrl(),
             isOnline: widget.chat.isOnline,
           ),
         ),
@@ -191,22 +754,15 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     );
   }
 
-  void _moveChatForPin() {
-    final index = AppChatData.chats.indexWhere((c) => c.id == widget.chat.id);
-    if (index == -1) return;
-
-    final chat = AppChatData.chats.removeAt(index);
-
-    if (isPinned) {
-      AppChatData.chats.insert(0, chat);
-    } else {
-      AppChatData.chats.add(chat);
-    }
-  }
-
   void _startCall(bool isVideo) {
-    if (isBlocked) {
-      _showSnackBar('You blocked this chat');
+    final targetUserId = _targetUserIdForBlock();
+
+    if (isBlocked || _blockedMe) {
+      _showSnackBar(
+        isBlocked
+            ? 'You blocked this user. Unblock to send messages.'
+            : 'This user is unavailable.',
+      );
       return;
     }
 
@@ -223,13 +779,13 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       MaterialPageRoute(
         builder: (_) => CallScreen(
           name: _displayChatName,
-          avatarUrl: widget.chat.avatarUrl,
+          avatarUrl: _resolvedChatAvatarUrl(),
           isVideoCall: isVideo,
           chat: widget.chat,
           currentUserId: widget.currentUserId,
           currentUserName: widget.currentUserName,
           currentUserAvatar: widget.currentUserAvatar,
-          receiverId: widget.chat.id,
+          receiverId: targetUserId,
           isCaller: true,
           conversationId: widget.chat.id,
         ),
@@ -238,6 +794,15 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       if (mounted) _notifyDataChanged();
     });
   }
+
+  // void _viewProfile() {
+  //   Navigator.push(
+  //     context,
+  //     MaterialPageRoute(
+  //       builder: (_) => const ProfileDataPage(),
+  //     ),
+  //   );
+  // }
 
   @override
   Widget build(BuildContext context) {
@@ -328,41 +893,22 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 ],
               ),
 
-              const SizedBox(height: 22),
-              _buildSectionTitle('More actions'),
-              _buildSettingsCard(
-                children: [
-                  if (!isGroupChat)
+              if (!isGroupChat) ...[
+                const SizedBox(height: 22),
+                _buildSectionTitle('More actions'),
+                _buildSettingsCard(
+                  children: [
                     _SettingsTile(
                       icon: Icons.group_add_rounded,
                       iconColor: const Color(0xFF1877F2),
                       title: 'Create group with ${widget.chat.name}',
                       subtitle: 'Add more people to this chat',
-                      showDivider: true,
+                      showDivider: false,
                       onTap: _createGroupWithThisUser,
                     ),
-                  _SettingsTile(
-                    icon: Icons.delete_outline_rounded,
-                    iconColor: const Color(0xFF22C55E),
-                    title: 'Clear chat',
-                    showDivider: true,
-                    onTap: _clearChat,
-                  ),
-                  _SettingsSwitchTile(
-                    icon: Icons.push_pin_outlined,
-                    iconColor: const Color(0xFFF97316),
-                    title: 'Pin chat',
-                    value: isPinned,
-                    showDivider: false,
-                    onChanged: (value) {
-                      isPinned = value;
-                      _moveChatForPin();
-                      _notifyDataChanged();
-                      _showSnackBar(value ? 'Chat pinned' : 'Chat unpinned');
-                    },
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
 
               const SizedBox(height: 18),
               _buildDangerCard(
@@ -374,11 +920,23 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                     onTap: _deleteChat,
                   ),
                   if (!isGroupChat)
-                    _DangerTile(
-                      icon: Icons.block_rounded,
-                      title: isBlocked ? 'Unblock' : 'Block',
-                      showDivider: false,
-                      onTap: _openBlockOptions,
+                    Consumer<BlockProvider>(
+                      builder: (context, blockProvider, _) {
+                        if (_blockedMe) {
+                          return const SizedBox.shrink();
+                        }
+
+                        return _DangerTile(
+                          icon: Icons.block_rounded,
+                          title: blockProvider.isLoading
+                              ? 'Please wait...'
+                              : isBlocked
+                                  ? 'Unblock'
+                                  : 'Block',
+                          showDivider: false,
+                          onTap: blockProvider.isLoading ? () {} : _openBlockOptions,
+                        );
+                      },
                     ),
                 ],
               ),
@@ -421,23 +979,11 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
               size: 28,
             ),
             onSelected: (value) {
-              if (value == 'profile' && !isGroupChat) {
-                _viewProfile();
-              } else if (value == 'mute') {
+              if (value == 'mute') {
                 _openMuteSheet();
-              } else if (value == 'block' && !isGroupChat) {
-                _openBlockOptions();
               }
             },
             itemBuilder: (context) => [
-              if (!isGroupChat)
-                PopupMenuItem(
-                  value: 'profile',
-                  child: Text(
-                    'View profile',
-                    style: TextStyle(color: mainTextColor),
-                  ),
-                ),
               PopupMenuItem(
                 value: 'mute',
                 child: Text(
@@ -445,14 +991,6 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                   style: TextStyle(color: mainTextColor),
                 ),
               ),
-              if (!isGroupChat)
-                PopupMenuItem(
-                  value: 'block',
-                  child: Text(
-                    'Block',
-                    style: TextStyle(color: mainTextColor),
-                  ),
-                ),
             ],
           ),
         ],
@@ -461,13 +999,15 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
   }
 
   Widget _buildProfileHeader() {
+    debugPrint('SETTINGS CHAT AVATAR: ${_resolvedChatAvatarUrl()}');
+
     return ScaleTransition(
       scale: _headerScaleAnimation,
       child: Column(
         children: [
           Center(
             child: GestureDetector(
-              onTap: _bounceHeader,
+              onTap: isGroupChat ? _changeGroupImage : _bounceHeader,
               child: Stack(
                 clipBehavior: Clip.none,
                 children: [
@@ -475,10 +1015,21 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                     radius: 59,
                     backgroundColor:
                         isDark ? const Color(0xFF334155) : const Color(0xFFE5E7EB),
-                    backgroundImage: widget.chat.avatarUrl.trim().isNotEmpty
-                        ? NetworkImage(widget.chat.avatarUrl)
+                    backgroundImage: _resolvedChatAvatarUrl().isNotEmpty
+                        ? (_resolvedChatAvatarUrl().startsWith('http://') ||
+                                _resolvedChatAvatarUrl().startsWith('https://')
+                            ? NetworkImage(_resolvedChatAvatarUrl())
+                            : FileImage(File(_resolvedChatAvatarUrl()))
+                                as ImageProvider)
                         : null,
-                    child: widget.chat.avatarUrl.trim().isEmpty
+                    onBackgroundImageError: _resolvedChatAvatarUrl().isNotEmpty
+                        ? (Object error, StackTrace? stackTrace) {
+                            debugPrint(
+                              'SETTINGS PROFILE AVATAR ERROR: $error',
+                            );
+                          }
+                        : null,
+                    child: _resolvedChatAvatarUrl().isEmpty
                         ? Text(
                             widget.chat.name.isNotEmpty
                                 ? widget.chat.name[0].toUpperCase()
@@ -491,7 +1042,26 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                           )
                         : null,
                   ),
-                  if (widget.chat.isOnline)
+                  if (isGroupChat)
+                    Positioned(
+                      right: -2,
+                      bottom: 6,
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: themeColor,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: bgColor, width: 3),
+                        ),
+                        child: const Icon(
+                          Icons.camera_alt_rounded,
+                          color: Colors.white,
+                          size: 18,
+                        ),
+                      ),
+                    )
+                  else if (widget.chat.isOnline)
                     Positioned(
                       right: 2,
                       bottom: 8,
@@ -522,11 +1092,13 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
           ),
           const SizedBox(height: 6),
           Text(
-            isBlocked
-                ? 'Blocked'
-                : widget.chat.isOnline
-                    ? 'Active now'
-                    : 'Offline',
+            _blockedMe
+                ? 'Unavailable'
+                : isBlocked
+                    ? 'Blocked'
+                    : widget.chat.isOnline
+                        ? 'Active now'
+                        : 'Offline',
             style: TextStyle(
               fontSize: 14,
               color: secondaryTextColor,
@@ -538,35 +1110,34 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     );
   }
 
-  Widget _buildQuickCallActions() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 18),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: [
-          _CircleActionButton(
-            icon: Icons.call_rounded,
-            iconColor: themeColor,
-            label: 'Audio call',
-            onTap: () => _startCall(false),
-          ),
-          _CircleActionButton(
-            icon: Icons.videocam_rounded,
-            iconColor: themeColor,
-            label: 'Video call',
-            onTap: () => _startCall(true),
-          ),
-          if (!isGroupChat)
-            _CircleActionButton(
-              icon: Icons.person_rounded,
-              iconColor: themeColor,
-              label: 'View profile',
-              onTap: _viewProfile,
-            ),
-        ],
-      ),
-    );
-  }
+ Widget _buildQuickCallActions() {
+  return Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 18),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+      children: [
+        _CircleActionButton(
+          icon: Icons.call_rounded,
+          iconColor: themeColor,
+          label: 'Audio call',
+          onTap: () => _startCall(false),
+        ),
+        _CircleActionButton(
+          icon: Icons.videocam_rounded,
+          iconColor: themeColor,
+          label: 'Video call',
+          onTap: () => _startCall(true),
+        ),
+        // _CircleActionButton(
+        //   icon: Icons.person_rounded,
+        //   iconColor: themeColor,
+        //   label: 'View profile',
+        //   onTap: _viewProfile,
+        // ),
+      ],
+    ),
+  );
+}
 
   Widget _buildSectionTitle(String title) {
     return Padding(
@@ -742,6 +1313,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 const SizedBox(height: 14),
                 ...themes.map((theme) {
                   final isSelected = selectedThemeName == theme['name'];
+
                   return ListTile(
                     contentPadding: EdgeInsets.zero,
                     leading: CircleAvatar(
@@ -752,8 +1324,9 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                       theme['name'] as String,
                       style: TextStyle(color: mainTextColor),
                     ),
-                    trailing:
-                        isSelected ? Icon(Icons.check_rounded, color: themeColor) : null,
+                    trailing: isSelected
+                        ? Icon(Icons.check_rounded, color: themeColor)
+                        : null,
                     onTap: () => Navigator.pop(context, theme),
                   );
                 }),
@@ -892,10 +1465,32 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         return SafeArea(
           child: StatefulBuilder(
             builder: (context, setModalState) {
-              final displayOtherNickname =
-                  otherNickname.trim().isEmpty ? widget.chat.name : otherNickname;
-              final displayMyNickname =
-                  myNickname.trim().isEmpty ? 'You' : myNickname;
+              final targetUserId = _targetUserIdForBlock();
+
+              final latestOtherName = _realNameForUser(
+                userId: targetUserId,
+                fallbackRealName: widget.chat.name,
+              );
+
+              final latestMyName = _realNameForUser(
+                userId: widget.currentUserId,
+                fallbackRealName: widget.currentUserName.isNotEmpty
+                    ? widget.currentUserName
+                    : 'You',
+              );
+
+              final displayOtherNickname = _displayNameForUser(
+                userId: targetUserId,
+                fallbackRealName: latestOtherName,
+              );
+
+              final displayMyNickname = _displayNameForUser(
+                userId: widget.currentUserId,
+                fallbackRealName: latestMyName,
+              );
+
+              final actualOtherNickname = _initialNicknameForEditor(targetUserId);
+              final actualMyNickname = _initialNicknameForEditor(widget.currentUserId);
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 18),
@@ -948,7 +1543,6 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                     ),
                     Divider(height: 1, thickness: 1, color: borderColor),
                     const SizedBox(height: 16),
-
                     if (isGroupChat)
                       if (widget.chat.members.isEmpty)
                         Padding(
@@ -968,9 +1562,13 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                           child: ListView(
                             shrinkWrap: true,
                             children: widget.chat.members.map((member) {
-                              final nickname =
-                                  widget.chat.memberNicknames[member.id] ??
-                                      member.name;
+                              final memberId = member.id.toString();
+                              final nickname = _displayNameForUser(
+                                userId: memberId,
+                                fallbackRealName: member.name,
+                              );
+                              final actualNickname =
+                                  _initialNicknameForEditor(memberId);
 
                               return _NicknameRowTile(
                                 avatarUrl: member.avatarUrl,
@@ -982,31 +1580,38 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                                 onEdit: () async {
                                   final value = await _showNicknameEditSheet(
                                     title: member.name,
-                                    initialValue:
-                                        nickname == member.name ? '' : nickname,
+                                    initialValue: actualNickname,
                                   );
 
                                   if (value == null) return;
 
+                                  final cleanedValue = value.trim();
+
+                                  final success = await _updateMemberNicknameApi(
+                                    conversationId: widget.chat.id.toString(),
+                                    userId: memberId,
+                                    nickname: cleanedValue,
+                                  );
+
+                                  if (!success) {
+                                    _showSnackBar('Could not update nickname');
+                                    return;
+                                  }
+
                                   setState(() {
-                                    widget.chat.memberNicknames =
-                                        Map<String, String>.from(
-                                      widget.chat.memberNicknames,
+                                    _applyNicknameLocally(
+                                      userId: memberId,
+                                      nickname: cleanedValue,
                                     );
-
-                                    final cleanedValue = value.trim();
-
-                                    if (cleanedValue.isEmpty) {
-                                      widget.chat.memberNicknames.remove(member.id);
-                                    } else {
-                                      widget.chat.memberNicknames[member.id] =
-                                          cleanedValue;
-                                    }
                                   });
 
                                   setModalState(() {});
                                   _notifyDataChanged();
-                                  _showSnackBar('Nickname updated');
+                                  _showSnackBar(
+                                    cleanedValue.isEmpty
+                                        ? 'Nickname removed'
+                                        : 'Nickname updated',
+                                  );
                                 },
                               );
                             }).toList(),
@@ -1014,60 +1619,112 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                         )
                     else ...[
                       _NicknameRowTile(
-                        avatarUrl: widget.chat.avatarUrl,
-                        fallbackLetter: widget.chat.name.isNotEmpty
-                            ? widget.chat.name[0].toUpperCase()
+                        avatarUrl: _resolvedChatAvatarUrl(),
+                        fallbackLetter: latestOtherName.isNotEmpty
+                            ? latestOtherName[0].toUpperCase()
                             : 'U',
                         nickname: displayOtherNickname,
-                        realName: widget.chat.name,
+                        realName: latestOtherName,
                         onEdit: () async {
                           final value = await _showNicknameEditSheet(
-                            title: widget.chat.name,
-                            initialValue: displayOtherNickname == widget.chat.name
-                                ? ''
-                                : displayOtherNickname,
+                            title: latestOtherName,
+                            initialValue: actualOtherNickname,
                           );
 
                           if (value == null) return;
 
+                          final targetUserId = _targetUserIdForBlock();
+
+                          if (targetUserId.isEmpty) {
+                            _showSnackBar('Could not find user');
+                            return;
+                          }
+
+                          final cleanedValue = value.trim();
+
+                          final success = await _updateMemberNicknameApi(
+                            conversationId: widget.chat.id.toString(),
+                            userId: targetUserId,
+                            nickname: cleanedValue,
+                          );
+
+                          if (!success) {
+                            _showSnackBar('Could not update nickname');
+                            return;
+                          }
+
                           setState(() {
-                            otherNickname = value.trim().isEmpty
-                                ? widget.chat.name
-                                : value.trim();
+                            otherNickname = '';
+
+                            _applyNicknameLocally(
+                              userId: targetUserId,
+                              nickname: cleanedValue,
+                            );
                           });
 
                           setModalState(() {});
                           _notifyDataChanged();
+                          _showSnackBar(
+                            cleanedValue.isEmpty
+                                ? 'Nickname removed'
+                                : 'Nickname updated',
+                          );
                         },
                       ),
                       _NicknameRowTile(
                         avatarUrl: widget.currentUserAvatar,
-                        fallbackLetter: widget.currentUserName.isNotEmpty
-                            ? widget.currentUserName[0].toUpperCase()
+                        fallbackLetter: latestMyName.isNotEmpty
+                            ? latestMyName[0].toUpperCase()
                             : 'Y',
                         nickname: displayMyNickname,
-                        realName: widget.currentUserName.isNotEmpty
-                            ? widget.currentUserName
-                            : 'You',
+                        realName: latestMyName,
                         avatarBackgroundColor: isDark
                             ? const Color(0xFF334155)
                             : const Color(0xFFE4E6EB),
                         onEdit: () async {
                           final value = await _showNicknameEditSheet(
                             title: 'You',
-                            initialValue:
-                                displayMyNickname == 'You' ? '' : displayMyNickname,
+                            initialValue: actualMyNickname,
                           );
 
                           if (value == null) return;
 
+                          final currentUserId = widget.currentUserId.trim();
+
+                          if (currentUserId.isEmpty) {
+                            _showSnackBar('Current user not found');
+                            return;
+                          }
+
+                          final cleanedValue = value.trim();
+
+                          final success = await _updateMemberNicknameApi(
+                            conversationId: widget.chat.id.toString(),
+                            userId: currentUserId,
+                            nickname: cleanedValue,
+                          );
+
+                          if (!success) {
+                            _showSnackBar('Could not update nickname');
+                            return;
+                          }
+
                           setState(() {
-                            myNickname =
-                                value.trim().isEmpty ? 'You' : value.trim();
+                            myNickname = 'You';
+
+                            _applyNicknameLocally(
+                              userId: currentUserId,
+                              nickname: cleanedValue,
+                            );
                           });
 
                           setModalState(() {});
                           _notifyDataChanged();
+                          _showSnackBar(
+                            cleanedValue.isEmpty
+                                ? 'Nickname removed'
+                                : 'Nickname updated',
+                          );
                         },
                       ),
                     ],
@@ -1206,123 +1863,78 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
   Future<void> _openBlockOptions() async {
     if (isGroupChat) return;
 
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: sheetColor,
-      showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+    if (_blockedMe) {
+      _showSnackBar('This user is unavailable.');
+      return;
+    }
+
+    final targetUserId = _targetUserIdForBlock();
+
+    if (targetUserId.isEmpty) {
+      _showSnackBar('Could not find user to block');
+      return;
+    }
+
+    final result = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute(
+        builder: (_) => MessengerBlockPage(
+          name: widget.chat.name,
+          isBlocked: isBlocked,
+        ),
       ),
-      builder: (context) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 10, 20, 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  isBlocked ? 'Manage block' : 'Block ${widget.chat.name}',
-                  style: TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                    color: mainTextColor,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Choose what you want to block.',
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: secondaryTextColor,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.message_outlined, color: mainTextColor),
-                  title: Text(
-                    isBlocked ? 'Unblock messages' : 'Block messages',
-                    style: TextStyle(color: mainTextColor),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _confirmBlockAction('messages');
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: Icon(Icons.call_outlined, color: mainTextColor),
-                  title: Text(
-                    isBlocked ? 'Unblock calls' : 'Block calls',
-                    style: TextStyle(color: mainTextColor),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _confirmBlockAction('calls');
-                  },
-                ),
-                ListTile(
-                  contentPadding: EdgeInsets.zero,
-                  leading: const Icon(
-                    Icons.block_rounded,
-                    color: Color(0xFFEF4444),
-                  ),
-                  title: Text(
-                    isBlocked ? 'Unblock everything' : 'Block everything',
-                    style: const TextStyle(color: Color(0xFFEF4444)),
-                  ),
-                  onTap: () {
-                    Navigator.pop(context);
-                    _confirmBlockAction('everything');
-                  },
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Future<void> _confirmBlockAction(String type) async {
-    final enabling = !isBlocked;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: sheetColor,
-          title: Text(
-            enabling ? 'Confirm block' : 'Confirm unblock',
-            style: TextStyle(color: mainTextColor),
-          ),
-          content: Text(
-            enabling
-                ? 'Are you sure you want to block $type for ${widget.chat.name}?'
-                : 'Do you want to remove the block for $type?',
-            style: TextStyle(color: secondaryTextColor),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(enabling ? 'Block' : 'Unblock'),
-            ),
-          ],
-        );
-      },
     );
 
-    if (confirmed != true) return;
+    if (result == null) return;
 
-    isBlocked = enabling;
+    final blockProvider = context.read<BlockProvider>();
+
+    final success = await blockProvider.setBlockStatus(
+      conversationId: widget.chat.id,
+      targetUserId: targetUserId,
+      blocked: result,
+      isGroupChat: false,
+    );
+
+    if (!mounted) return;
+
+    if (!success) {
+      _showSnackBar(
+        blockProvider.error.isNotEmpty
+            ? blockProvider.error
+            : result
+                ? 'Could not block ${widget.chat.name}'
+                : 'Could not unblock ${widget.chat.name}',
+      );
+      return;
+    }
+
+    blockProvider.setLocalBlocked(
+      conversationId: widget.chat.id,
+      targetUserId: targetUserId,
+      value: result,
+    );
+
+    blockProvider.setLocalBlockedMe(
+      conversationId: widget.chat.id,
+      targetUserId: targetUserId,
+      value: false,
+    );
+
+    setState(() {
+      isBlocked = result;
+      _blockedMe = false;
+    });
+
     _notifyDataChanged();
+
     _showSnackBar(
-      enabling ? '${widget.chat.name} blocked' : '${widget.chat.name} unblocked',
+      isBlocked
+          ? '${widget.chat.name} blocked'
+          : '${widget.chat.name} unblocked',
     );
+
+    Navigator.pop(context, true);
   }
 
   Future<void> _openConversationSearch() async {
@@ -1353,49 +1965,6 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         ),
       ),
     );
-  }
-
-  void _viewProfile() {
-    if (isGroupChat) return;
-
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => ProfileDataPage(chat: widget.chat),
-      ),
-    );
-  }
-
-  Future<void> _clearChat() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        return AlertDialog(
-          backgroundColor: sheetColor,
-          title: Text('Clear chat', style: TextStyle(color: mainTextColor)),
-          content: Text(
-            'This will remove all messages in this chat from the local app view.',
-            style: TextStyle(color: secondaryTextColor),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Clear'),
-            ),
-          ],
-        );
-      },
-    );
-
-    if (confirmed != true) return;
-
-    widget.chat.messages.clear();
-    _notifyDataChanged();
-    _showSnackBar('Chat cleared');
   }
 
   Future<void> _deleteChat() async {
@@ -1694,6 +2263,28 @@ class _NicknameRowTile extends StatelessWidget {
     this.avatarBackgroundColor,
   });
 
+  String _cleanNicknameAvatarUrl(String value) {
+    final cleanValue = value.trim();
+
+    if (cleanValue.isEmpty) return '';
+
+    final mediaBaseUrl = AppConfig.apiBaseUrl.replaceFirst('/api', '');
+
+    if (cleanValue.startsWith('http://') || cleanValue.startsWith('https://')) {
+      return cleanValue.replaceFirst('/api/media/', '/media/');
+    }
+
+    if (cleanValue.startsWith('/media/')) {
+      return '$mediaBaseUrl$cleanValue';
+    }
+
+    if (cleanValue.startsWith('media/')) {
+      return '$mediaBaseUrl/$cleanValue';
+    }
+
+    return cleanValue;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1704,22 +2295,35 @@ class _NicknameRowTile extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 28,
-            backgroundColor: avatarBackgroundColor ??
-                (isDark ? const Color(0xFF334155) : const Color(0xFFE4E6EB)),
-            backgroundImage:
-                avatarUrl.trim().isNotEmpty ? NetworkImage(avatarUrl) : null,
-            child: avatarUrl.trim().isEmpty
-                ? Text(
-                    fallbackLetter,
-                    style: TextStyle(
-                      fontSize: 22,
-                      fontWeight: FontWeight.w700,
-                      color: textColor,
-                    ),
-                  )
-                : null,
+          Builder(
+            builder: (_) {
+              final cleanAvatarUrl = _cleanNicknameAvatarUrl(avatarUrl);
+
+              return CircleAvatar(
+                radius: 28,
+                backgroundColor: avatarBackgroundColor ??
+                    (isDark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFFE4E6EB)),
+                backgroundImage:
+                    cleanAvatarUrl.isNotEmpty ? NetworkImage(cleanAvatarUrl) : null,
+                onBackgroundImageError: cleanAvatarUrl.isNotEmpty
+                    ? (Object error, StackTrace? stackTrace) {
+                        debugPrint('NICKNAME AVATAR ERROR: $error');
+                      }
+                    : null,
+                child: cleanAvatarUrl.isEmpty
+                    ? Text(
+                        fallbackLetter,
+                        style: TextStyle(
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: textColor,
+                        ),
+                      )
+                    : null,
+              );
+            },
           ),
           const SizedBox(width: 14),
           Expanded(

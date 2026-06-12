@@ -1,83 +1,98 @@
-// lib/core/chat/chat_socket_service.dart
+// core/chat/chat_socket_service.dart
 
 import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:messaging_app/core/api_client.dart';
+import 'package:messaging_app/core/config/app_config.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ChatSocketService {
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
 
-  bool isConnected = false;
-  int? _connectedConversationId;
+  bool _connected = false;
+  bool _connecting = false;
+
+  int? _conversationId;
+
+  bool get isConnected => _connected;
 
   Future<void> connect({
     required int conversationId,
-    required void Function(Map<String, dynamic> data) onMessage,
-    void Function()? onConnected,
-    void Function()? onDisconnected,
-    void Function(Object error)? onError,
+    required FutureOr<void> Function(Map<String, dynamic> data) onMessage,
+    required void Function(Object error) onError,
+    required void Function() onDisconnected,
   }) async {
-    if (isConnected && _connectedConversationId == conversationId) {
-      debugPrint('SOCKET ALREADY CONNECTED TO: $conversationId');
+    if (_connecting) return;
+
+    if (_connected && _conversationId == conversationId && _channel != null) {
+      debugPrint('CHAT WS ALREADY CONNECTED');
       return;
     }
 
-    disconnect();
+    _connecting = true;
 
     try {
+      await disconnect();
+
+      _conversationId = conversationId;
+
       final token = await ApiClient.storage.read(key: 'access');
 
       if (token == null || token.trim().isEmpty) {
-        debugPrint('SOCKET ERROR: No access token found');
-        return;
+        throw Exception('Access token missing');
       }
 
-      final uri = Uri.parse(
-        'ws://192.168.1.97:8000/ws/chat/$conversationId/?token=${Uri.encodeComponent(token.trim())}',
-      );
+      final baseWsUrl = AppConfig.wsBaseUrl;
 
-      debugPrint('SOCKET CONNECTING: $uri');
+      final url =
+          '$baseWsUrl/ws/chat/$conversationId/?token=${Uri.encodeComponent(token.trim())}';
 
-      _channel = WebSocketChannel.connect(uri);
-      _connectedConversationId = conversationId;
-      isConnected = true;
+      debugPrint('CHAT WS CONNECTING: $url');
+
+      _channel = WebSocketChannel.connect(Uri.parse(url));
+      _connected = true;
 
       _subscription = _channel!.stream.listen(
-        (event) {
-          debugPrint('SOCKET RECEIVED: $event');
+        (message) async {
+          debugPrint('CHAT WS RAW: $message');
 
           try {
-            final decoded = jsonDecode(event.toString());
+            final decoded = jsonDecode(message.toString());
 
-            if (decoded is Map) {
-              onMessage(Map<String, dynamic>.from(decoded));
+            if (decoded is! Map) {
+              debugPrint('CHAT WS INVALID MESSAGE');
+              return;
             }
+
+            await onMessage(Map<String, dynamic>.from(decoded));
           } catch (e) {
-            debugPrint('SOCKET JSON DECODE ERROR: $e');
+            debugPrint('CHAT WS PARSE ERROR: $e');
           }
         },
         onError: (error) {
-          debugPrint('SOCKET ERROR: $error');
-          _markDisconnected();
-          onError?.call(error);
+          debugPrint('CHAT WS ERROR: $error');
+          _connected = false;
+          onError(error);
         },
         onDone: () {
-          debugPrint('SOCKET DISCONNECTED');
-          _markDisconnected();
-          onDisconnected?.call();
+          debugPrint('CHAT WS CLOSED');
+          _connected = false;
+          _channel = null;
+          _subscription = null;
+          onDisconnected();
         },
-        cancelOnError: true,
+        cancelOnError: false,
       );
-
-      onConnected?.call();
     } catch (e) {
-      debugPrint('SOCKET CONNECTION FAILED: $e');
-      _markDisconnected();
-      onError?.call(e);
+      debugPrint('CHAT WS CONNECT ERROR: $e');
+      _connected = false;
+      _channel = null;
+      onError(e);
+    } finally {
+      _connecting = false;
     }
   }
 
@@ -85,53 +100,46 @@ class ChatSocketService {
     required int senderId,
     required bool isTyping,
   }) {
-    if (!_canSend) return;
-
-    _channel!.sink.add(
-      jsonEncode({
-        'type': 'typing',
-        'action': 'typing',
-        'sender_id': senderId,
-        'is_typing': isTyping,
-      }),
-    );
+    send({
+      'type': 'typing',
+      'action': 'typing',
+      'sender_id': senderId,
+      'is_typing': isTyping,
+    });
   }
 
-  void sendSeen({
-    required int senderId,
-    required String messageId,
-  }) {
-    if (messageId.trim().isEmpty) return;
-    if (!_canSend) return;
+  void send(Map<String, dynamic> data) {
+    if (_channel == null || !_connected) {
+      debugPrint('CHAT WS NOT CONNECTED');
+      return;
+    }
 
-    _channel!.sink.add(
-      jsonEncode({
-        'type': 'seen',
-        'action': 'seen',
-        'sender_id': senderId,
-        'message_id': messageId,
-      }),
-    );
+    try {
+      final encoded = jsonEncode(data);
+      debugPrint('CHAT WS SEND: $encoded');
+      _channel!.sink.add(encoded);
+    } catch (e) {
+      debugPrint('CHAT WS SEND ERROR: $e');
+      _connected = false;
+    }
   }
 
-  bool get _canSend => _channel != null && isConnected;
+  Future<void> disconnect() async {
+    try {
+      await _subscription?.cancel();
+    } catch (_) {}
 
-  void _markDisconnected() {
-    isConnected = false;
-    _connectedConversationId = null;
-  }
-
-  void disconnect() {
-    debugPrint('SOCKET DISCONNECT CALLED');
-
-    _subscription?.cancel();
     _subscription = null;
 
     try {
-      _channel?.sink.close();
+      await _channel?.sink.close();
     } catch (_) {}
 
     _channel = null;
-    _markDisconnected();
+    _connected = false;
+    _connecting = false;
+    _conversationId = null;
+
+    debugPrint('CHAT WS DISCONNECTED');
   }
 }

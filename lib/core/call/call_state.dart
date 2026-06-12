@@ -16,10 +16,12 @@ enum CallStatus {
 
 class CallState {
   final CallStatus status;
+
   final bool isMicOff;
   final bool isSpeakerOn;
   final bool isCameraOff;
   final bool isRemoteCameraOff;
+
   final bool isVideoCall;
   final bool isCaller;
 
@@ -29,6 +31,8 @@ class CallState {
 
   final String? currentUserId;
   final String? receiverId;
+
+  // Always OTHER user's info
   final String? name;
   final String? avatarUrl;
 
@@ -79,19 +83,21 @@ class CallState {
     String? avatarUrl,
     Map<String, dynamic>? incomingOffer,
     Map<String, dynamic>? pendingVideoOffer,
-    bool clearPendingVideoOffer = false,
     Duration? duration,
     RTCVideoRenderer? localRenderer,
     RTCVideoRenderer? remoteRenderer,
+
+    bool clearIncomingOffer = false,
+    bool clearPendingVideoOffer = false,
     bool clearRenderers = false,
+    bool clearUserInfo = false,
   }) {
     return CallState(
       status: status ?? this.status,
       isMicOff: isMicOff ?? this.isMicOff,
       isSpeakerOn: isSpeakerOn ?? this.isSpeakerOn,
       isCameraOff: isCameraOff ?? this.isCameraOff,
-      isRemoteCameraOff:
-          isRemoteCameraOff ?? this.isRemoteCameraOff,
+      isRemoteCameraOff: isRemoteCameraOff ?? this.isRemoteCameraOff,
       isVideoCall: isVideoCall ?? this.isVideoCall,
       isCaller: isCaller ?? this.isCaller,
       hasPendingVideoUpgrade:
@@ -100,21 +106,21 @@ class CallState {
           isVideoUpgradeRequesting ?? this.isVideoUpgradeRequesting,
       isVideoUpgradeRejected:
           isVideoUpgradeRejected ?? this.isVideoUpgradeRejected,
-      currentUserId: currentUserId ?? this.currentUserId,
-      receiverId: receiverId ?? this.receiverId,
-      name: name ?? this.name,
-      avatarUrl: avatarUrl ?? this.avatarUrl,
-      incomingOffer: incomingOffer ?? this.incomingOffer,
+      currentUserId: clearUserInfo ? null : currentUserId ?? this.currentUserId,
+      receiverId: clearUserInfo ? null : receiverId ?? this.receiverId,
+      name: clearUserInfo ? null : name ?? this.name,
+      avatarUrl: clearUserInfo ? null : avatarUrl ?? this.avatarUrl,
+      incomingOffer:
+          clearIncomingOffer ? null : incomingOffer ?? this.incomingOffer,
       pendingVideoOffer: clearPendingVideoOffer
           ? null
           : pendingVideoOffer ?? this.pendingVideoOffer,
       duration: duration ?? this.duration,
-      localRenderer: clearRenderers
-          ? null
-          : localRenderer ?? this.localRenderer,
-      remoteRenderer: clearRenderers
-          ? null
-          : remoteRenderer ?? this.remoteRenderer,
+      localRenderer: clearRenderers ? null : localRenderer ?? this.localRenderer,
+      remoteRenderer:
+          clearRenderers ? null : remoteRenderer ?? this.remoteRenderer,
     );
   }
-}// This file defines the CallState class, which represents the state of a call in a Flutter application using WebRTC. It includes various properties to track the call status, media settings, user information, and offers. The copyWith method allows for creating a new instance of CallState with updated values while keeping the existing ones unchanged.  
+
+  static const CallState initial = CallState();
+}

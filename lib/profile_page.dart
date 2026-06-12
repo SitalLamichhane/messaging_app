@@ -1,12 +1,17 @@
+// lib/profile_page.dart
+
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:messaging_app/calls.dart';
-import 'package:messaging_app/chat_data.dart';
-import 'package:messaging_app/chat_models.dart';
+import 'package:messaging_app/core/profile/profile_provider.dart';
 import 'package:messaging_app/dashboard.dart';
 import 'package:messaging_app/login_page.dart';
-import 'package:messaging_app/pages.dart';
 import 'package:messaging_app/profile_data/profile_data_page.dart';
 import 'package:messaging_app/theme_controller.dart';
+// import 'package:messaging_app/pages.dart'; // PagesScreen temporarily commented
+import 'package:provider/provider.dart';
 
 class ProfileScreen extends StatefulWidget {
   final String chatId;
@@ -21,7 +26,7 @@ class ProfileScreen extends StatefulWidget {
     required this.chatId,
     required this.chatName,
     this.currentUserId = '',
-    this.currentUserName = 'You',
+    this.currentUserName = '',
     this.currentUserAvatar = '',
   });
 
@@ -30,87 +35,190 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int _selectedBottomIndex = 3;
+  int _selectedBottomIndex = 2;
   bool _notificationsEnabled = true;
 
-  String _name = '';
-  String _phone = '';
-  String _business = '';
-  String _bio = '';
-  String _profileImageUrl = '';
-
-  static const String _defaultImage =
-      'https://images.unsplash.com/photo-1494790108377-be9c29b29330?w=500&q=80';
+  final ImagePicker _picker = ImagePicker();
+  File? _selectedImage;
 
   @override
   void initState() {
     super.initState();
 
-    _name = widget.currentUserName.trim().isNotEmpty
-        ? widget.currentUserName.trim()
-        : widget.chatName.trim().isEmpty
-            ? 'User Name'
-            : widget.chatName.trim();
-
-    _profileImageUrl = widget.currentUserAvatar.trim().isNotEmpty
-        ? widget.currentUserAvatar.trim()
-        : _defaultImage;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      context.read<ProfileProvider>().loadProfile();
+    });
   }
 
-  Future<void> _openProfileDataPage() async {
-    final ChatItem profileChat = AppChatData.getOrCreateChat(
-      name: _name.trim().isEmpty ? 'User Name' : _name.trim(),
-      avatarUrl: _profileImageUrl.trim().isEmpty
-          ? _defaultImage
-          : _profileImageUrl.trim(),
-    );
-
-    final result = await Navigator.push<Map<String, dynamic>>(
+  Future<void> _openProfileDataPage(UserProfile profile) async {
+    final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => ProfileDataPage(chat: profileChat),
+        builder: (_) => const ProfileDataPage(),
       ),
     );
 
-    if (!mounted || result == null) return;
+    if (!mounted) return;
 
-    setState(() {
-      _name = (result['name'] ?? _name).toString();
-      _phone = (result['phone'] ?? _phone).toString();
-      _business = (result['business'] ?? _business).toString();
-      _bio = (result['bio'] ?? _bio).toString();
+    if (result == true) {
+      await context.read<ProfileProvider>().loadProfile();
 
-      final updatedImage =
-          (result['profileImageUrl'] ?? _profileImageUrl).toString().trim();
+      if (!mounted) return;
 
-      _profileImageUrl = updatedImage.isEmpty ? _defaultImage : updatedImage;
-    });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Profile updated'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _pickAndUploadImage(ImageSource source) async {
+    try {
+      final picked = await _picker.pickImage(
+        source: source,
+        imageQuality: 75,
+        maxWidth: 1200,
+        maxHeight: 1200,
+      );
+
+      if (picked == null) return;
+
+      final file = File(picked.path);
+
+      setState(() {
+        _selectedImage = file;
+      });
+
+      final ok = await context.read<ProfileProvider>().updateProfileImage(file);
+
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok ? 'Profile image updated' : 'Image upload failed'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      if (!ok) {
+        setState(() {
+          _selectedImage = null;
+        });
+      }
+    } catch (e) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Image picker error: $e'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    }
+  }
+
+  Future<void> _showImagePickerSheet() async {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: isDark ? const Color(0xFF111827) : Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(18, 14, 18, 18),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: isDark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFFE5E7EB),
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Text(
+                  'Update profile image',
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+                const SizedBox(height: 16),
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Color(0x141877F2),
+                    child: Icon(
+                      Icons.camera_alt_rounded,
+                      color: Color(0xFF1877F2),
+                    ),
+                  ),
+                  title: const Text('Take photo'),
+                  subtitle: const Text('Use camera instantly'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndUploadImage(ImageSource.camera);
+                  },
+                ),
+                ListTile(
+                  leading: const CircleAvatar(
+                    backgroundColor: Color(0x141877F2),
+                    child: Icon(
+                      Icons.photo_library_rounded,
+                      color: Color(0xFF1877F2),
+                    ),
+                  ),
+                  title: const Text('Choose from gallery'),
+                  subtitle: const Text('Upload image from phone'),
+                  onTap: () {
+                    Navigator.pop(sheetContext);
+                    _pickAndUploadImage(ImageSource.gallery);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   void _onBottomNavTap(int index) {
     if (_selectedBottomIndex == index) return;
 
+    final profile = context.read<ProfileProvider>().profile;
+
     Widget? page;
 
     if (index == 0) {
-      page = const ChatListScreen();
+      page = ChatListScreen(
+        currentUserId: profile.id,
+        currentUserName: profile.fullName,
+        currentUserAvatar: profile.imageUrl,
+      );
     } else if (index == 1) {
       page = CallHistoryScreen(
-        currentUserId: widget.currentUserId,
-        currentUserName: _name.trim().isEmpty ? widget.currentUserName : _name,
-        currentUserAvatar: _profileImageUrl.trim().isEmpty
-            ? widget.currentUserAvatar
-            : _profileImageUrl,
+        currentUserId: profile.id,
+        currentUserName: profile.fullName,
+        currentUserAvatar: profile.imageUrl,
       );
-    } else if (index == 2) {
-      page = PagesScreen(
-        currentUserId: widget.currentUserId,
-        currentUserName: _name.trim().isEmpty ? widget.currentUserName : _name,
-        currentUserAvatar: _profileImageUrl.trim().isEmpty
-            ? widget.currentUserAvatar
-            : _profileImageUrl,
-      );
-    } else if (index == 3) {
+    }
+
+    // PagesScreen temporarily commented.
+    // else if (index == 2) {
+    //   page = const PagesScreen();
+    // }
+
+    else if (index == 2) {
       return;
     }
 
@@ -159,6 +267,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
 
     if (result == true && mounted) {
+      await context.read<ProfileProvider>().logoutLocal();
+
+      if (!mounted) return;
+
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => const WelcomeScreen()),
@@ -167,8 +279,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  String _displayName(UserProfile profile) {
+    if (profile.fullName.trim().isNotEmpty) return profile.fullName.trim();
+    if (widget.currentUserName.trim().isNotEmpty) {
+      return widget.currentUserName.trim();
+    }
+    if (widget.chatName.trim().isNotEmpty) return widget.chatName.trim();
+    return 'User';
+  }
+
+  String _initial(UserProfile profile) {
+    final name = _displayName(profile);
+    return name.trim().isNotEmpty ? name.trim()[0].toUpperCase() : '?';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<ProfileProvider>();
+    final profile = provider.profile;
+
     final textTheme = Theme.of(context).textTheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
@@ -184,89 +313,110 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return Scaffold(
       backgroundColor: bgColor,
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: SingleChildScrollView(
-                child: Column(
-                  children: [
-                    _buildFacebookHeader(
-                      textTheme: textTheme,
-                      isDark: isDark,
-                      primaryText: primaryText,
-                      secondaryText: secondaryText,
-                      dividerColor: dividerColor,
-                      accent: accent,
-                      cardColor: cardColor,
+        child: provider.isLoading && profile.fullName.trim().isEmpty
+            ? const Center(child: CircularProgressIndicator())
+            : Column(
+                children: [
+                  if (provider.error != null)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(10),
+                      color: const Color(0xFFEF4444),
+                      child: Text(
+                        provider.error!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white),
+                      ),
                     ),
-                    const SizedBox(height: 12),
-                    _buildMenuCard(
-                      cardColor: cardColor,
-                      dividerColor: dividerColor,
-                      primaryText: primaryText,
-                      secondaryText: secondaryText,
-                      accent: accent,
-                    ),
-                    const SizedBox(height: 14),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: InkWell(
-                        borderRadius: BorderRadius.circular(20),
-                        onTap: _showLogoutDialog,
-                        child: Row(
+                  Expanded(
+                    child: RefreshIndicator(
+                      onRefresh: provider.loadProfile,
+                      child: SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: Column(
                           children: [
-                            Container(
-                              width: 50,
-                              height: 50,
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: isDark
-                                    ? const Color(0xFF2A1A1A)
-                                    : const Color(0xFFFFF1F1),
-                              ),
-                              child: const Icon(
-                                Icons.logout_rounded,
-                                color: Color(0xFFEF4444),
-                                size: 24,
-                              ),
+                            _buildFacebookHeader(
+                              profile: profile,
+                              textTheme: textTheme,
+                              isDark: isDark,
+                              primaryText: primaryText,
+                              secondaryText: secondaryText,
+                              dividerColor: dividerColor,
+                              accent: accent,
+                              cardColor: cardColor,
                             ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Text(
-                                'Logout',
-                                style: textTheme.titleLarge?.copyWith(
-                                  color: const Color(0xFFEF4444),
-                                  fontWeight: FontWeight.w700,
+                            const SizedBox(height: 12),
+                            _buildMenuCard(
+                              profile: profile,
+                              cardColor: cardColor,
+                              dividerColor: dividerColor,
+                              primaryText: primaryText,
+                              secondaryText: secondaryText,
+                              accent: accent,
+                            ),
+                            const SizedBox(height: 14),
+                            Padding(
+                              padding:
+                                  const EdgeInsets.symmetric(horizontal: 16),
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(20),
+                                onTap: _showLogoutDialog,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 50,
+                                      height: 50,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: isDark
+                                            ? const Color(0xFF2A1A1A)
+                                            : const Color(0xFFFFF1F1),
+                                      ),
+                                      child: const Icon(
+                                        Icons.logout_rounded,
+                                        color: Color(0xFFEF4444),
+                                        size: 24,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Text(
+                                        'Logout',
+                                        style: textTheme.titleLarge?.copyWith(
+                                          color: const Color(0xFFEF4444),
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                    ),
+                                    const Icon(
+                                      Icons.chevron_right_rounded,
+                                      color: Color(0xFFEF4444),
+                                      size: 26,
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
-                            const Icon(
-                              Icons.chevron_right_rounded,
-                              color: Color(0xFFEF4444),
-                              size: 26,
-                            ),
+                            const SizedBox(height: 18),
                           ],
                         ),
                       ),
                     ),
-                    const SizedBox(height: 18),
-                  ],
-                ),
+                  ),
+                  _buildBottomNavigation(
+                    bgColor: bgColor,
+                    dividerColor: dividerColor,
+                    accent: accent,
+                    secondaryText: secondaryText,
+                  ),
+                ],
               ),
-            ),
-            _buildBottomNavigation(
-              bgColor: bgColor,
-              dividerColor: dividerColor,
-              accent: accent,
-              secondaryText: secondaryText,
-            ),
-          ],
-        ),
       ),
     );
   }
 
   Widget _buildFacebookHeader({
+    required UserProfile profile,
     required TextTheme textTheme,
     required bool isDark,
     required Color primaryText,
@@ -275,6 +425,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required Color accent,
     required Color cardColor,
   }) {
+    final name = _displayName(profile);
+    final image = profile.imageUrl.trim();
+
     return Column(
       children: [
         Stack(
@@ -301,40 +454,57 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Positioned(
               bottom: -54,
               child: GestureDetector(
-                onTap: _openProfileDataPage,
-                child: Container(
-                  width: 150,
-                  height: 150,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: cardColor, width: 6),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.15),
-                        blurRadius: 22,
-                        offset: const Offset(0, 8),
-                      ),
-                    ],
-                  ),
-                  child: ClipOval(
-                    child: Image.network(
-                      _profileImageUrl.isEmpty
-                          ? _defaultImage
-                          : _profileImageUrl,
-                      fit: BoxFit.cover,
-                      errorBuilder: (context, error, stackTrace) {
-                        return Container(
-                          color: accent,
-                          alignment: Alignment.center,
-                          child: const Icon(
-                            Icons.person,
-                            color: Colors.white,
-                            size: 72,
+                onTap: _showImagePickerSheet,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    Container(
+                      width: 150,
+                      height: 150,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        border: Border.all(color: cardColor, width: 6),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.15),
+                            blurRadius: 22,
+                            offset: const Offset(0, 8),
                           ),
-                        );
-                      },
+                        ],
+                      ),
+                      child: ClipOval(
+                        child: _selectedImage != null
+                            ? Image.file(
+                                _selectedImage!,
+                                fit: BoxFit.cover,
+                              )
+                            : image.isNotEmpty
+                                ? Image.network(
+                                    image,
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return _imageFallback(accent, profile);
+                                    },
+                                  )
+                                : _imageFallback(accent, profile),
+                      ),
                     ),
-                  ),
+                    if (context.watch<ProfileProvider>().isSaving)
+                      Positioned.fill(
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.35),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.white,
+                              strokeWidth: 2.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -346,7 +516,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           child: Column(
             children: [
               Text(
-                _name.isEmpty ? 'User Name' : _name,
+                name,
                 textAlign: TextAlign.center,
                 style: textTheme.headlineMedium?.copyWith(
                   color: primaryText,
@@ -354,19 +524,19 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              if (_phone.isNotEmpty)
+              if (profile.phone.trim().isNotEmpty)
                 Text(
-                  _phone,
+                  profile.phone.trim(),
                   textAlign: TextAlign.center,
                   style: textTheme.bodyLarge?.copyWith(
                     color: secondaryText,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-              if (_business.trim().isNotEmpty) ...[
+              if (profile.businessName.trim().isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Text(
-                  _business,
+                  profile.businessName.trim(),
                   textAlign: TextAlign.center,
                   style: textTheme.bodyMedium?.copyWith(
                     color: secondaryText,
@@ -374,10 +544,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
               ],
-              if (_bio.trim().isNotEmpty) ...[
+              if (profile.bio.trim().isNotEmpty) ...[
                 const SizedBox(height: 10),
                 Text(
-                  _bio,
+                  profile.bio.trim(),
                   textAlign: TextAlign.center,
                   style: textTheme.bodyMedium?.copyWith(
                     color: primaryText.withOpacity(0.88),
@@ -386,25 +556,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ],
               const SizedBox(height: 18),
-              Row(
-                children: [
-                  Expanded(
-                    child: ElevatedButton.icon(
-                      onPressed: _openProfileDataPage,
-                      icon: const Icon(Icons.person, size: 20),
-                      label: const Text('Profile'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: accent,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        minimumSize: const Size.fromHeight(46),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                      ),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => _openProfileDataPage(profile),
+                  icon: const Icon(Icons.edit_rounded, size: 20),
+                  label: const Text('Edit Profile'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: accent,
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                ],
+                ),
               ),
               const SizedBox(height: 16),
               Divider(color: dividerColor, height: 1),
@@ -415,7 +582,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _imageFallback(Color accent, UserProfile profile) {
+    return Container(
+      color: accent,
+      alignment: Alignment.center,
+      child: Text(
+        _initial(profile),
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 56,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
+  }
+
   Widget _buildMenuCard({
+    required UserProfile profile,
     required Color cardColor,
     required Color dividerColor,
     required Color primaryText,
@@ -432,31 +615,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
         child: Column(
           children: [
-            ProfileMenuTile(
-              icon: Icons.description_outlined,
-              title: 'My Pages',
-              subtitle: 'Manage your business pages',
-              circleColor: const Color(0xFFEFF3FB),
-              iconColor: accent,
-              textColor: primaryText,
-              subtitleColor: secondaryText,
-              dividerColor: dividerColor,
-              onTap: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => PagesScreen(
-                      currentUserId: widget.currentUserId,
-                      currentUserName:
-                          _name.trim().isEmpty ? widget.currentUserName : _name,
-                      currentUserAvatar: _profileImageUrl.trim().isEmpty
-                          ? widget.currentUserAvatar
-                          : _profileImageUrl,
-                    ),
-                  ),
-                );
-              },
-            ),
+            // PagesScreen temporarily commented
+            // ProfileMenuTile(
+            //   icon: Icons.description_outlined,
+            //   title: 'My Pages',
+            //   subtitle: 'Manage your business pages',
+            //   circleColor: const Color(0xFFEFF3FB),
+            //   iconColor: accent,
+            //   textColor: primaryText,
+            //   subtitleColor: secondaryText,
+            //   dividerColor: dividerColor,
+            //   onTap: () {
+            //     Navigator.push(
+            //       context,
+            //       MaterialPageRoute(builder: (_) => const PagesScreen()),
+            //     );
+            //   },
+            // ),
             ProfileSwitchTile(
               icon: Icons.notifications_none_outlined,
               title: 'Notifications',
@@ -492,6 +667,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 );
               },
             ),
+            // Refresh Profile permanently removed.
+            // Profile image change is only available from the top circular image.
+            // ProfileMenuTile(
+            //   icon: Icons.refresh_rounded,
+            //   title: 'Refresh Profile',
+            //   subtitle: 'Reload profile from backend',
+            //   circleColor: const Color(0xFFEFF3FB),
+            //   iconColor: accent,
+            //   textColor: primaryText,
+            //   subtitleColor: secondaryText,
+            //   dividerColor: dividerColor,
+            //   onTap: () {
+            //     context.read<ProfileProvider>().loadProfile();
+            //   },
+            // ),
+            // ProfileMenuTile(
+            //   icon: Icons.image_outlined,
+            //   title: 'Change Profile Image',
+            //   subtitle: 'Camera or gallery',
+            //   circleColor: const Color(0xFFEFF3FB),
+            //   iconColor: accent,
+            //   textColor: primaryText,
+            //   subtitleColor: secondaryText,
+            //   dividerColor: dividerColor,
+            //   onTap: _showImagePickerSheet,
+            // ),
             ProfileMenuTile(
               icon: Icons.shield_outlined,
               title: 'Privacy & Security',
@@ -532,7 +733,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final items = [
       _BottomNavItemData(Icons.chat_bubble_outline, 'Chats'),
       _BottomNavItemData(Icons.call_outlined, 'Calls'),
-      _BottomNavItemData(Icons.description_outlined, 'Pages'),
+
+      // PagesScreen temporarily commented
+      // _BottomNavItemData(Icons.description_outlined, 'Pages'),
+
       _BottomNavItemData(Icons.person_outline, 'Profile'),
     ];
 

@@ -13,15 +13,139 @@ class WebRTCService {
   bool _renderersInitialized = false;
   bool _remoteDescriptionSet = false;
 
+  /*
+    Preserve mic mute state.
+    Speaker/video switching must never force mic enabled.
+  */
+  bool _micEnabled = true;
+
   final List<RTCIceCandidate> _pendingCandidates = [];
 
   RTCVideoRenderer localRenderer = RTCVideoRenderer();
   RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
 
+  /*
+  ---------------------------------------------------------------------------
+  PRODUCTION TURN ENABLED
+  ---------------------------------------------------------------------------
+
+  IMPORTANT:
+  - This is enabled directly now.
+  - Replace IP/username/password if your coturn server uses different values.
+  - Your VPS firewall must allow:
+      3478/tcp
+      3478/udp
+      49152-65535/udp
+  */
+
+  static const bool useProductionTurn = true;
+
+  static const List<String> productionTurnUrls = <String>[
+    'turn:2.25.186.109:3478?transport=udp',
+    'turn:2.25.186.109:3478?transport=tcp',
+  ];
+
+  static const String productionTurnUsername = 'webrtcuser';
+
+  static const String productionTurnPassword = 'StrongPassword123';
+
+  /*
+  ---------------------------------------------------------------------------
+  TESTING OPENRELAY DISABLED
+  ---------------------------------------------------------------------------
+
+  Do NOT use free OpenRelay for production.
+  */
+  static const bool useFreeOpenRelayForTesting = false;
+
+  /*
+  ---------------------------------------------------------------------------
+  AUDIO CALL STABILITY
+  ---------------------------------------------------------------------------
+
+  Some Android/flutter_webrtc setups behave badly with pure audio-only SDP.
+  So for audio calls we create audio + disabled video track internally.
+
+  UI still behaves like audio call because CallState.isVideoCall remains false.
+  */
+  static const bool useHiddenDisabledVideoTrackForAudioCall = true;
+
+  Map<String, dynamic> _iceConfig() {
+    final stunOnly = <Map<String, dynamic>>[
+      {
+        'urls': [
+          'stun:stun.l.google.com:19302',
+          'stun:stun1.l.google.com:19302',
+        ],
+      },
+    ];
+
+    if (useProductionTurn) {
+      final hasTurnConfig = productionTurnUrls.isNotEmpty &&
+          productionTurnUsername.trim().isNotEmpty &&
+          productionTurnPassword.trim().isNotEmpty;
+
+      if (!hasTurnConfig) {
+        debugPrint(
+          'WEBRTC TURN config enabled but missing. Falling back to STUN-only.',
+        );
+
+        return <String, dynamic>{
+          'iceServers': stunOnly,
+          'sdpSemantics': 'unified-plan',
+        };
+      }
+
+      return <String, dynamic>{
+        'iceServers': [
+          ...stunOnly,
+          {
+            'urls': productionTurnUrls,
+            'username': productionTurnUsername,
+            'credential': productionTurnPassword,
+          },
+        ],
+        'sdpSemantics': 'unified-plan',
+      };
+    }
+
+    if (useFreeOpenRelayForTesting) {
+      return <String, dynamic>{
+        'iceServers': [
+          ...stunOnly,
+          {
+            'urls': [
+              'turn:openrelay.metered.ca:80',
+              'turn:openrelay.metered.ca:443',
+              'turn:openrelay.metered.ca:443?transport=tcp',
+            ],
+            'username': 'openrelayproject',
+            'credential': 'openrelayproject',
+          },
+        ],
+        'sdpSemantics': 'unified-plan',
+      };
+    }
+
+    return <String, dynamic>{
+      'iceServers': stunOnly,
+      'sdpSemantics': 'unified-plan',
+    };
+  }
+
+  int? _toInt(dynamic value) {
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value.toString());
+  }
+
   Future<void> initRenderers() async {
     _disposed = false;
 
-    if (_renderersInitialized) return;
+    if (_renderersInitialized) {
+      return;
+    }
 
     localRenderer = RTCVideoRenderer();
     remoteRenderer = RTCVideoRenderer();
@@ -30,6 +154,8 @@ class WebRTCService {
     await remoteRenderer.initialize();
 
     _renderersInitialized = true;
+
+    debugPrint('WEBRTC RENDERERS INITIALIZED');
   }
 
   Future<void> createConnection({
@@ -41,102 +167,207 @@ class WebRTCService {
     _remoteDescriptionSet = false;
     _pendingCandidates.clear();
     _videoSender = null;
+    _remoteStream = null;
+
+    /*
+      New call starts unmuted.
+      After user mutes, toggleMic(false) preserves mute state.
+    */
+    _micEnabled = true;
 
     try {
-      final config = {
-        'iceServers': [
-          {'urls': 'stun:stun.l.google.com:19302'},
-          {
-            'urls': 'turn:openrelay.metered.ca:80',
-            'username': 'openrelayproject',
-            'credential': 'openrelayproject',
-          },
-          {
-            'urls': 'turn:openrelay.metered.ca:443',
-            'username': 'openrelayproject',
-            'credential': 'openrelayproject',
-          },
-          {
-            'urls': 'turn:openrelay.metered.ca:443?transport=tcp',
-            'username': 'openrelayproject',
-            'credential': 'openrelayproject',
-          },
-        ],
-        'sdpSemantics': 'unified-plan',
-      };
+      final config = _iceConfig();
+
+      debugPrint('WEBRTC ICE CONFIG: $config');
 
       _peerConnection = await createPeerConnection(config);
 
-      final mediaConstraints = {
+      final pc = _peerConnection;
+
+      if (pc == null) {
+        throw Exception('Peer connection creation failed');
+      }
+
+      pc.onIceCandidate = (candidate) {
+        if (_disposed) return;
+
+        if (candidate.candidate == null ||
+            candidate.candidate.toString().trim().isEmpty) {
+          debugPrint('WEBRTC EMPTY ICE CANDIDATE IGNORED');
+          return;
+        }
+
+        debugPrint(
+          'WEBRTC ICE CANDIDATE: ${candidate.candidate} '
+          'sdpMid=${candidate.sdpMid} '
+          'sdpMLineIndex=${candidate.sdpMLineIndex}',
+        );
+
+        onIceCandidate(candidate);
+      };
+
+      pc.onTrack = (event) async {
+        if (_disposed) return;
+
+        debugPrint('================ WEBRTC ON TRACK ================');
+        debugPrint(
+          'WEBRTC REMOTE TRACK RECEIVED: '
+          'kind=${event.track.kind}, id=${event.track.id}, enabled=${event.track.enabled}',
+        );
+        debugPrint('WEBRTC REMOTE EVENT STREAMS: ${event.streams.length}');
+
+        /*
+          Prefer stream from event.streams when available.
+          If not available, create one and manually add the track.
+        */
+        if (event.streams.isNotEmpty) {
+          _remoteStream = event.streams.first;
+          debugPrint('WEBRTC USING REMOTE STREAM FROM EVENT');
+        } else {
+          _remoteStream ??= await createLocalMediaStream('remote_stream');
+
+          final alreadyAdded = _remoteStream!
+              .getTracks()
+              .any((track) => track.id == event.track.id);
+
+          if (!alreadyAdded) {
+            await _remoteStream!.addTrack(event.track);
+            debugPrint('WEBRTC REMOTE TRACK ADDED: ${event.track.kind}');
+          } else {
+            debugPrint(
+              'WEBRTC REMOTE TRACK ALREADY ADDED: ${event.track.kind}',
+            );
+          }
+        }
+
+        debugPrint(
+          'WEBRTC REMOTE AUDIO TRACKS: ${_remoteStream?.getAudioTracks().length ?? 0}',
+        );
+        debugPrint(
+          'WEBRTC REMOTE VIDEO TRACKS: ${_remoteStream?.getVideoTracks().length ?? 0}',
+        );
+
+        if (!_disposed && _renderersInitialized) {
+          remoteRenderer.srcObject = _remoteStream;
+          debugPrint('WEBRTC REMOTE RENDERER ATTACHED');
+        }
+
+        await _forceAudioOn();
+        onRemoteStream();
+
+        debugPrint('==================================================');
+      };
+
+      pc.onAddStream = (stream) async {
+        if (_disposed) return;
+
+        debugPrint('================ WEBRTC ON ADD STREAM ================');
+        debugPrint(
+          'WEBRTC onAddStream: '
+          'audio=${stream.getAudioTracks().length}, '
+          'video=${stream.getVideoTracks().length}',
+        );
+
+        _remoteStream = stream;
+
+        if (!_disposed && _renderersInitialized) {
+          remoteRenderer.srcObject = _remoteStream;
+          debugPrint('WEBRTC REMOTE RENDERER ATTACHED FROM onAddStream');
+        }
+
+        await _forceAudioOn();
+        onRemoteStream();
+
+        debugPrint('=======================================================');
+      };
+
+      pc.onConnectionState = (state) {
+        debugPrint('WEBRTC CONNECTION STATE: $state');
+      };
+
+      pc.onIceConnectionState = (state) {
+        debugPrint('WEBRTC ICE STATE: $state');
+      };
+
+      pc.onSignalingState = (state) {
+        debugPrint('WEBRTC SIGNALING STATE: $state');
+      };
+
+      final shouldRequestVideo =
+          isVideoCall || useHiddenDisabledVideoTrackForAudioCall;
+
+      final mediaConstraints = <String, dynamic>{
         'audio': {
           'echoCancellation': true,
           'noiseSuppression': true,
           'autoGainControl': true,
         },
-        'video': isVideoCall
+        'video': shouldRequestVideo
             ? {
                 'facingMode': 'user',
-                'width': {'ideal': 640},
-                'height': {'ideal': 360},
-                'frameRate': {'ideal': 30},
+                'width': {'ideal': isVideoCall ? 640 : 320},
+                'height': {'ideal': isVideoCall ? 360 : 240},
+                'frameRate': {'ideal': isVideoCall ? 30 : 15},
               }
             : false,
       };
 
-      _localStream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+      _localStream = await navigator.mediaDevices.getUserMedia(
+        mediaConstraints,
+      );
 
-      await Helper.setSpeakerphoneOn(isVideoCall);
+      final localStream = _localStream;
 
-      for (final track in _localStream!.getAudioTracks()) {
-        track.enabled = true;
+      if (localStream == null) {
+        throw Exception('Local media stream is null');
       }
 
-      for (final track in _localStream!.getVideoTracks()) {
+      debugPrint('================ WEBRTC LOCAL MEDIA ================');
+      debugPrint(
+        'WEBRTC LOCAL AUDIO TRACKS: ${localStream.getAudioTracks().length}',
+      );
+      debugPrint(
+        'WEBRTC LOCAL VIDEO TRACKS: ${localStream.getVideoTracks().length}',
+      );
+
+      for (final track in localStream.getAudioTracks()) {
+        track.enabled = _micEnabled;
+        debugPrint(
+          'WEBRTC LOCAL AUDIO ENABLED: id=${track.id}, enabled=${track.enabled}',
+        );
+      }
+
+      for (final track in localStream.getVideoTracks()) {
+        /*
+          Direct video call: camera enabled.
+          Audio call hidden video track: disabled immediately.
+        */
         track.enabled = isVideoCall;
+
+        debugPrint(
+          'WEBRTC LOCAL VIDEO ENABLED: id=${track.id}, enabled=${track.enabled}, isVideoCall=$isVideoCall',
+        );
       }
+
+      debugPrint('====================================================');
 
       if (!_disposed && _renderersInitialized) {
-        localRenderer.srcObject = _localStream;
+        localRenderer.srcObject = localStream;
       }
 
-      for (final track in _localStream!.getTracks()) {
-        final sender = await _peerConnection!.addTrack(track, _localStream!);
+      for (final track in localStream.getTracks()) {
+        final sender = await pc.addTrack(track, localStream);
+
+        debugPrint(
+          'WEBRTC LOCAL TRACK ADDED TO PEER: kind=${track.kind}, id=${track.id}, enabled=${track.enabled}',
+        );
+
         if (track.kind == 'video') {
           _videoSender = sender;
         }
       }
 
-      _peerConnection!.onIceCandidate = (candidate) {
-        if (_disposed) return;
-        onIceCandidate(candidate);
-      };
-
-_peerConnection!.onTrack = (event) async {
-  if (_disposed) return;
-
-  if (event.streams.isNotEmpty) {
-    _remoteStream = event.streams.first;
-  } else {
-    _remoteStream ??= await createLocalMediaStream('remote_stream');
-
-    if (event.track.kind == 'video' || event.track.kind == 'audio') {
-      await _remoteStream!.addTrack(event.track);
-    }
-  }
-
-  if (!_disposed && _renderersInitialized) {
-    remoteRenderer.srcObject = _remoteStream;
-  }
-
-  onRemoteStream();
-};
-      _peerConnection!.onConnectionState = (state) {
-        debugPrint('WEBRTC CONNECTION STATE: $state');
-      };
-
-      _peerConnection!.onIceConnectionState = (state) {
-        debugPrint('WEBRTC ICE STATE: $state');
-      };
+      await _forceAudioOn();
     } catch (e) {
       debugPrint('WebRTC createConnection error: $e');
       await dispose();
@@ -145,43 +376,61 @@ _peerConnection!.onTrack = (event) async {
   }
 
   Future<RTCSessionDescription> createOffer() async {
-    if (_peerConnection == null) {
-      throw Exception('Peer connection is null');
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) {
+      throw Exception('Peer connection is null/disposed');
     }
 
-    final offer = await _peerConnection!.createOffer({
+    final offer = await pc.createOffer({
       'offerToReceiveAudio': true,
       'offerToReceiveVideo': true,
     });
 
-    await _peerConnection!.setLocalDescription(offer);
+    await pc.setLocalDescription(offer);
+
+    debugPrint('WEBRTC LOCAL OFFER CREATED');
     return offer;
   }
 
   Future<RTCSessionDescription> createAnswer() async {
-    if (_peerConnection == null) {
-      throw Exception('Peer connection is null');
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) {
+      throw Exception('Peer connection is null/disposed');
     }
 
-    final answer = await _peerConnection!.createAnswer({
+    final answer = await pc.createAnswer({
       'offerToReceiveAudio': true,
       'offerToReceiveVideo': true,
     });
 
-    await _peerConnection!.setLocalDescription(answer);
+    await pc.setLocalDescription(answer);
+
+    debugPrint('WEBRTC LOCAL ANSWER CREATED');
     return answer;
   }
 
   Future<void> setRemoteDescription(Map data) async {
-    if (_peerConnection == null || _disposed) return;
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) return;
 
     final sdp = data['sdp'];
     final type = data['type'];
 
-    if (sdp == null || type == null) return;
+    if (sdp == null || type == null) {
+      debugPrint('WEBRTC SET REMOTE DESCRIPTION FAILED: missing sdp/type');
+      return;
+    }
 
-    await _peerConnection!.setRemoteDescription(
-      RTCSessionDescription(sdp, type),
+    debugPrint('WEBRTC SET REMOTE DESCRIPTION: $type');
+
+    await pc.setRemoteDescription(
+      RTCSessionDescription(
+        sdp.toString(),
+        type.toString(),
+      ),
     );
 
     _remoteDescriptionSet = true;
@@ -189,48 +438,60 @@ _peerConnection!.onTrack = (event) async {
   }
 
   Future<void> addCandidate(Map data) async {
-    if (_peerConnection == null || _disposed) return;
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) return;
 
     final candidateValue = data['candidate'];
     final sdpMid = data['sdpMid'];
-    final sdpMLineIndex = data['sdpMLineIndex'];
+    final sdpMLineIndex = _toInt(data['sdpMLineIndex']);
 
-    if (candidateValue == null) return;
+    if (candidateValue == null || candidateValue.toString().trim().isEmpty) {
+      debugPrint('WEBRTC ADD ICE FAILED: candidate missing');
+      return;
+    }
 
     final candidate = RTCIceCandidate(
-      candidateValue,
-      sdpMid,
+      candidateValue.toString(),
+      sdpMid?.toString(),
       sdpMLineIndex,
     );
 
     if (!_remoteDescriptionSet) {
       _pendingCandidates.add(candidate);
+      debugPrint('WEBRTC ICE QUEUED');
       return;
     }
 
     try {
-      await _peerConnection!.addCandidate(candidate);
+      await pc.addCandidate(candidate);
+      debugPrint('WEBRTC ICE ADDED');
     } catch (e) {
       debugPrint('ICE add error: $e');
     }
   }
 
   Future<void> enableVideo() async {
-    if (_peerConnection == null) {
-      throw Exception('Peer connection is null');
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) {
+      throw Exception('Peer connection is null/disposed');
     }
 
-    if (_localStream == null) {
+    final localStream = _localStream;
+
+    if (localStream == null) {
       throw Exception('Local stream is null');
     }
 
-    final existingVideoTracks = _localStream!.getVideoTracks();
+    final existingVideoTracks = localStream.getVideoTracks();
 
     if (existingVideoTracks.isNotEmpty) {
       final videoTrack = existingVideoTracks.first;
       videoTrack.enabled = true;
 
-      final senders = await _peerConnection!.getSenders();
+      final senders = await pc.getSenders();
+
       for (final sender in senders) {
         if (sender.track?.kind == 'video' || _videoSender == sender) {
           _videoSender = sender;
@@ -243,10 +504,10 @@ _peerConnection!.onTrack = (event) async {
       }
 
       if (_renderersInitialized && !_disposed) {
-        localRenderer.srcObject = _localStream;
+        localRenderer.srcObject = localStream;
       }
 
-      await Helper.setSpeakerphoneOn(true);
+      await _forceAudioOn();
       return;
     }
 
@@ -260,12 +521,20 @@ _peerConnection!.onTrack = (event) async {
       },
     });
 
-    final videoTrack = videoStream.getVideoTracks().first;
+    final videoTracks = videoStream.getVideoTracks();
+
+    if (videoTracks.isEmpty) {
+      await videoStream.dispose();
+      throw Exception('No video track from camera');
+    }
+
+    final videoTrack = videoTracks.first;
     videoTrack.enabled = true;
 
-    await _localStream!.addTrack(videoTrack);
+    await localStream.addTrack(videoTrack);
 
-    final senders = await _peerConnection!.getSenders();
+    final senders = await pc.getSenders();
+
     for (final sender in senders) {
       if (sender.track?.kind == 'video' || _videoSender == sender) {
         _videoSender = sender;
@@ -276,23 +545,34 @@ _peerConnection!.onTrack = (event) async {
     if (_videoSender != null) {
       await _videoSender!.replaceTrack(videoTrack);
     } else {
-      _videoSender = await _peerConnection!.addTrack(videoTrack, _localStream!);
+      _videoSender = await pc.addTrack(videoTrack, localStream);
     }
 
     if (_renderersInitialized && !_disposed) {
-      localRenderer.srcObject = _localStream;
+      localRenderer.srcObject = localStream;
     }
 
-    await Helper.setSpeakerphoneOn(true);
+    await _forceAudioOn();
   }
 
+  /*
+    Use this only for whole video-call -> audio-call switch.
+    Do NOT use this for normal camera on/off inside video call.
+    Normal camera off must use toggleCamera(false), not disableVideoHard().
+  */
   Future<void> disableVideoHard() async {
-    if (_peerConnection == null || _localStream == null) return;
+    final pc = _peerConnection;
+    final localStream = _localStream;
 
-    final videoTracks = List<MediaStreamTrack>.from(_localStream!.getVideoTracks());
+    if (pc == null || localStream == null || _disposed) return;
+
+    final videoTracks = List<MediaStreamTrack>.from(
+      localStream.getVideoTracks(),
+    );
 
     try {
-      final senders = await _peerConnection!.getSenders();
+      final senders = await pc.getSenders();
+
       for (final sender in senders) {
         if (sender.track?.kind == 'video' || _videoSender == sender) {
           _videoSender = sender;
@@ -311,40 +591,40 @@ _peerConnection!.onTrack = (event) async {
       try {
         track.enabled = false;
         await track.stop();
-        await _localStream!.removeTrack(track);
+        await localStream.removeTrack(track);
       } catch (_) {}
     }
 
     if (_renderersInitialized && !_disposed) {
-      localRenderer.srcObject = _localStream;
+      localRenderer.srcObject = localStream;
     }
 
-    try {
-      await Helper.setSpeakerphoneOn(false);
-    } catch (_) {}
+    await _forceAudioOn();
   }
 
   Future<RTCSessionDescription> createRenegotiationOffer() async {
-    if (_peerConnection == null) {
-      throw Exception('Peer connection is null');
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) {
+      throw Exception('Peer connection is null/disposed');
     }
 
-    final offer = await _peerConnection!.createOffer({
+    final offer = await pc.createOffer({
       'offerToReceiveAudio': true,
       'offerToReceiveVideo': true,
     });
 
-    await _peerConnection!.setLocalDescription(offer);
+    await pc.setLocalDescription(offer);
+
+    debugPrint('WEBRTC RENEGOTIATION OFFER CREATED');
     return offer;
   }
 
   Future<RTCSessionDescription> handleRenegotiationOffer(Map data) async {
-    if (_peerConnection == null) {
-      throw Exception('Peer connection is null');
-    }
+    final pc = _peerConnection;
 
-    if (_disposed) {
-      throw Exception('WebRTC already disposed');
+    if (pc == null || _disposed) {
+      throw Exception('Peer connection is null/disposed');
     }
 
     final sdp = data['sdp'];
@@ -354,44 +634,62 @@ _peerConnection!.onTrack = (event) async {
       throw Exception('Invalid renegotiation offer');
     }
 
-    await _peerConnection!.setRemoteDescription(
-      RTCSessionDescription(sdp, type),
+    await pc.setRemoteDescription(
+      RTCSessionDescription(
+        sdp.toString(),
+        type.toString(),
+      ),
     );
 
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
 
-    final answer = await _peerConnection!.createAnswer({
+    final answer = await pc.createAnswer({
       'offerToReceiveAudio': true,
       'offerToReceiveVideo': true,
     });
 
-    await _peerConnection!.setLocalDescription(answer);
+    await pc.setLocalDescription(answer);
+
+    debugPrint('WEBRTC RENEGOTIATION ANSWER CREATED');
     return answer;
   }
 
   Future<void> handleRenegotiationAnswer(Map data) async {
-    if (_peerConnection == null || _disposed) return;
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) return;
 
     final sdp = data['sdp'];
     final type = data['type'];
 
-    if (sdp == null || type == null) return;
+    if (sdp == null || type == null) {
+      debugPrint('WEBRTC RENEGOTIATION ANSWER INVALID');
+      return;
+    }
 
-    await _peerConnection!.setRemoteDescription(
-      RTCSessionDescription(sdp, type),
+    await pc.setRemoteDescription(
+      RTCSessionDescription(
+        sdp.toString(),
+        type.toString(),
+      ),
     );
 
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
+
+    debugPrint('WEBRTC RENEGOTIATION ANSWER SET');
   }
 
   Future<void> _flushPendingCandidates() async {
-    if (_peerConnection == null) return;
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) return;
 
     for (final candidate in List<RTCIceCandidate>.from(_pendingCandidates)) {
       try {
-        await _peerConnection!.addCandidate(candidate);
+        await pc.addCandidate(candidate);
+        debugPrint('WEBRTC PENDING ICE ADDED');
       } catch (e) {
         debugPrint('Pending ICE add error: $e');
       }
@@ -401,19 +699,41 @@ _peerConnection!.onTrack = (event) async {
   }
 
   void toggleMic(bool enabled) {
-    for (final track in _localStream?.getAudioTracks() ?? []) {
-      track.enabled = enabled;
+    _micEnabled = enabled;
+
+    final audioTracks = _localStream?.getAudioTracks() ?? [];
+
+    for (final track in audioTracks) {
+      track.enabled = _micEnabled;
+      debugPrint(
+        'WEBRTC MIC TOGGLE: micEnabled=$_micEnabled, track=${track.id}, actual=${track.enabled}',
+      );
     }
   }
 
+  /*
+    Messenger/WhatsApp style camera off/on:
+    - Only disables/enables local video track.
+    - Does NOT stop the track.
+    - Does NOT remove track.
+    - Does NOT replace sender track with null.
+  */
   void toggleCamera(bool enabled) {
-    for (final track in _localStream?.getVideoTracks() ?? []) {
+    final videoTracks = _localStream?.getVideoTracks() ?? [];
+
+    for (final track in videoTracks) {
       track.enabled = enabled;
+      debugPrint('WEBRTC CAMERA TOGGLE: enabled=$enabled, track=${track.id}');
+    }
+
+    if (_renderersInitialized && !_disposed) {
+      localRenderer.srcObject = _localStream;
     }
   }
 
   Future<void> switchCamera() async {
     final tracks = _localStream?.getVideoTracks() ?? [];
+
     if (tracks.isEmpty) return;
 
     await Helper.switchCamera(tracks.first);
@@ -422,8 +742,40 @@ _peerConnection!.onTrack = (event) async {
   Future<void> setSpeaker(bool enabled) async {
     try {
       await Helper.setSpeakerphoneOn(enabled);
+
+      /*
+        Speaker controls remote audio output only.
+        It must never unmute local microphone.
+      */
+      for (final track in _localStream?.getAudioTracks() ?? []) {
+        track.enabled = _micEnabled;
+        debugPrint(
+          'WEBRTC SPEAKER SET: speaker=$enabled, micPreserved=$_micEnabled, track=${track.id}, actual=${track.enabled}',
+        );
+      }
     } catch (e) {
       debugPrint('Set speaker error: $e');
+    }
+  }
+
+  Future<void> _forceAudioOn() async {
+    try {
+      /*
+        Called after remote stream/video switch.
+        Do not force mic true here.
+      */
+      for (final track in _localStream?.getAudioTracks() ?? []) {
+        track.enabled = _micEnabled;
+        debugPrint(
+          'WEBRTC AUDIO TRACK PRESERVED: micEnabled=$_micEnabled, track=${track.id}, actual=${track.enabled}',
+        );
+      }
+
+      await Helper.setSpeakerphoneOn(true);
+
+      debugPrint('WEBRTC AUDIO ROUTE FORCED ON, MIC PRESERVED=$_micEnabled');
+    } catch (e) {
+      debugPrint('Force audio route error: $e');
     }
   }
 
@@ -431,12 +783,15 @@ _peerConnection!.onTrack = (event) async {
     _disposed = true;
     _remoteDescriptionSet = false;
     _pendingCandidates.clear();
+    _micEnabled = true;
 
     try {
       _peerConnection?.onIceCandidate = null;
       _peerConnection?.onTrack = null;
+      _peerConnection?.onAddStream = null;
       _peerConnection?.onConnectionState = null;
       _peerConnection?.onIceConnectionState = null;
+      _peerConnection?.onSignalingState = null;
 
       try {
         localRenderer.srcObject = null;
@@ -450,12 +805,11 @@ _peerConnection!.onTrack = (event) async {
         } catch (_) {}
       }
 
-      for (final track in _remoteStream?.getTracks() ?? []) {
-        try {
-          track.enabled = false;
-          await track.stop();
-        } catch (_) {}
-      }
+      /*
+        Remote tracks are owned by the remote peer. Stopping can sometimes
+        cause renderer/object errors on Android. So only detach renderer and
+        dispose stream safely below.
+      */
 
       try {
         final senders = await _peerConnection?.getSenders();

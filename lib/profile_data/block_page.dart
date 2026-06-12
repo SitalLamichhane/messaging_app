@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 class MessengerBlockPage extends StatelessWidget {
@@ -14,6 +13,7 @@ class MessengerBlockPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final displayName = name.trim().isEmpty ? 'this person' : name.trim();
 
     final bgColor = isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
     final cardColor = isDark ? const Color(0xFF111827) : Colors.white;
@@ -93,8 +93,8 @@ class MessengerBlockPage extends StatelessWidget {
                       const SizedBox(height: 28),
                       Text(
                         isBlocked
-                            ? 'Unblock ${name.trim().isEmpty ? 'this person' : name}?'
-                            : 'Block ${name.trim().isEmpty ? 'this person' : name} on Messenger?',
+                            ? 'Unblock $displayName?'
+                            : 'Block $displayName on Messenger?',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: primaryText,
@@ -140,8 +140,8 @@ class MessengerBlockPage extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 isBlocked
-                                    ? 'Unblocking here only changes your app frontend state for now.'
-                                    : 'Blocking here only changes your app frontend state for now.',
+                                    ? 'After unblocking, this person can message and call you again.'
+                                    : 'After blocking, this person cannot message or call you.',
                                 style: TextStyle(
                                   color: primaryText,
                                   fontSize: 13.5,

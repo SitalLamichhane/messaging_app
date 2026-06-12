@@ -39,10 +39,10 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
   String get phoneDigits => phoneController.text.replaceAll(RegExp(r'\D'), '');
 
   bool get isButtonEnabled =>
-      phoneController.text.trim().isNotEmpty && !_isLoading;
+    phoneDigits.length == 10 && !_isLoading;
 
   Future<void> onContinue() async {
-    if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+    if (phoneDigits.length != 10) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Number is invalid')),
       );
@@ -394,7 +394,7 @@ class _PhoneInput extends StatelessWidget {
         cursorColor: const Color(0xFF4A73E8),
         inputFormatters: [
           FilteringTextInputFormatter.digitsOnly,
-          LengthLimitingTextInputFormatter(15),
+          LengthLimitingTextInputFormatter(10),
           PhoneNumberFormatter(),
         ],
         onChanged: onChanged,

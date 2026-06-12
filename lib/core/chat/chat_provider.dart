@@ -6,7 +6,6 @@ import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/core/chat/chat_api.dart';
 import 'package:messaging_app/core/chat/chat_socket_service.dart';
-
 class ChatProvider extends ChangeNotifier {
   bool isLoading = false;
   bool isSending = false;
@@ -656,74 +655,93 @@ class ChatProvider extends ChangeNotifier {
         json['conversation_type'] == 'group' ||
         json['is_group'] == true;
 
+    final members = _mapMembers(json['members']);
+
+    ChatUser? otherUser;
+
+    if (!isGroup && members.isNotEmpty) {
+      for (final member in members) {
+        if (member.id.toString() != myId.toString()) {
+          otherUser = member;
+          break;
+        }
+      }
+
+      otherUser ??= members.first;
+    }
+
     String chatName =
         json['name']?.toString() ?? json['title']?.toString() ?? '';
 
     String avatarUrl = json['image']?.toString() ??
         json['group_image']?.toString() ??
         json['avatar']?.toString() ??
+        json['avatar_url']?.toString() ??
+        json['profile_picture']?.toString() ??
         '';
 
     String phone = '';
 
     if (!isGroup) {
       phone = json['phone']?.toString() ??
+          json['phone_number']?.toString() ??
           json['other_user']?['phone']?.toString() ??
+          json['other_user']?['phone_number']?.toString() ??
           '';
 
-      final members = json['members'];
-
-      if (members is List) {
-        Map? otherMember;
-
-        for (final member in members) {
-          final user = member['user'];
-
-          if (user is Map && user['id'].toString() != myId) {
-            otherMember = member;
-            break;
-          }
+      if (otherUser != null) {
+        if (phone.trim().isEmpty) {
+          phone = otherUser.phone;
         }
 
-        final otherUser = otherMember?['user'];
-
-        if (otherUser is Map) {
-          phone = phone.isNotEmpty
-              ? phone
-              : otherUser['phone']?.toString() ?? '';
-
-          if (chatName.trim().isEmpty) {
-            chatName = otherUser['full_name']?.toString() ??
-                otherUser['name']?.toString() ??
-                otherUser['username']?.toString() ??
-                otherUser['phone']?.toString() ??
-                'Unknown';
-          }
-
-          avatarUrl = otherUser['avatar']?.toString() ??
-              otherUser['avatar_url']?.toString() ??
-              otherUser['profile_image']?.toString() ??
-              avatarUrl;
+        if (chatName.trim().isEmpty) {
+          chatName = otherUser.name.trim().isNotEmpty
+              ? otherUser.name.trim()
+              : otherUser.phone.trim().isNotEmpty
+                  ? otherUser.phone.trim()
+                  : 'Unknown';
         }
+
+        if (avatarUrl.trim().isEmpty) {
+          avatarUrl = otherUser.avatarUrl;
+        }
+      }
+
+      if (avatarUrl.trim().isEmpty && json['other_user'] is Map) {
+        final otherUserMap = json['other_user'] as Map;
+
+        avatarUrl = otherUserMap['profile_picture']?.toString() ??
+            otherUserMap['profilePicture']?.toString() ??
+            otherUserMap['avatar']?.toString() ??
+            otherUserMap['avatar_url']?.toString() ??
+            otherUserMap['profile_image']?.toString() ??
+            otherUserMap['image']?.toString() ??
+            otherUserMap['photo']?.toString() ??
+            '';
       }
     }
 
     if (chatName.trim().isEmpty) {
       chatName = json['other_user']?['full_name']?.toString() ??
+          json['other_user']?['profile_name']?.toString() ??
           json['other_user']?['name']?.toString() ??
           json['other_user']?['username']?.toString() ??
           json['other_user']?['phone']?.toString() ??
           'Unknown';
     }
 
-    final members = _mapMembers(json['members']);
+    debugPrint('MAPPED CHAT NAME: $chatName');
+    debugPrint('MAPPED CHAT AVATAR: $avatarUrl');
 
     return ChatItem(
       id: '${json['id']}',
       name: chatName,
       phone: phone,
       avatarUrl: avatarUrl,
-      isOnline: json['is_online'] ?? json['other_user']?['is_online'] ?? false,
+      isOnline: otherUser?.isOnline ??
+          json['is_online'] ??
+          json['other_user']?['is_online'] ??
+          false,
       isGroup: isGroup,
       members: members,
       adminIds: _mapAdminIds(json),
@@ -744,26 +762,57 @@ class ChatProvider extends ChangeNotifier {
     final members = <ChatUser>[];
 
     for (final member in membersJson) {
-      final user = member is Map ? member['user'] ?? member : null;
+      if (member is! Map) continue;
 
-      if (user is Map) {
-        members.add(
-          ChatUser(
-            id: user['id']?.toString() ?? '',
-            name: user['full_name']?.toString() ??
-                user['name']?.toString() ??
-                user['username']?.toString() ??
-                user['phone']?.toString() ??
-                'Unknown',
-            phone: user['phone']?.toString() ?? '',
-            avatarUrl: user['avatar']?.toString() ??
-                user['avatar_url']?.toString() ??
-                user['profile_image']?.toString() ??
-                '',
-            isOnline: user['is_online'] ?? false,
-          ),
-        );
-      }
+      final user = member['user'] is Map ? member['user'] as Map : member;
+
+      final avatarUrl = user['profile_picture']?.toString() ??
+          user['profilePicture']?.toString() ??
+          user['avatar']?.toString() ??
+          user['avatar_url']?.toString() ??
+          user['profile_image']?.toString() ??
+          user['image']?.toString() ??
+          user['photo']?.toString() ??
+          member['profile_picture']?.toString() ??
+          member['profilePicture']?.toString() ??
+          member['avatar']?.toString() ??
+          member['avatar_url']?.toString() ??
+          member['profile_image']?.toString() ??
+          member['image']?.toString() ??
+          member['photo']?.toString() ??
+          '';
+
+      final name = member['display_name']?.toString() ??
+          member['nickname']?.toString() ??
+          user['full_name']?.toString() ??
+          user['profile_name']?.toString() ??
+          user['name']?.toString() ??
+          user['username']?.toString() ??
+          user['phone']?.toString() ??
+          user['phone_number']?.toString() ??
+          'Unknown';
+
+      final phone = user['phone_number']?.toString() ??
+          user['phone']?.toString() ??
+          member['phone_number']?.toString() ??
+          member['phone']?.toString() ??
+          '';
+
+      members.add(
+        ChatUser(
+          id: user['id']?.toString() ??
+              member['user_id']?.toString() ??
+              member['id']?.toString() ??
+              '',
+          name: name,
+          phone: phone,
+          avatarUrl: avatarUrl,
+          isOnline: user['is_online'] ?? member['is_online'] ?? false,
+        ),
+      );
+
+      debugPrint('MAPPED MEMBER: ${members.last.id} ${members.last.name}');
+      debugPrint('MAPPED MEMBER AVATAR: ${members.last.avatarUrl}');
     }
 
     return members;
@@ -810,9 +859,13 @@ class ChatProvider extends ChangeNotifier {
               sender['username']?.toString()
           : null,
       senderAvatar: sender is Map
-          ? sender['avatar']?.toString() ??
+          ? sender['profile_picture']?.toString() ??
+              sender['profilePicture']?.toString() ??
+              sender['avatar']?.toString() ??
               sender['avatar_url']?.toString() ??
-              sender['profile_image']?.toString()
+              sender['profile_image']?.toString() ??
+              sender['image']?.toString() ??
+              sender['photo']?.toString()
           : null,
       filePath: json['media']?.toString() ??
           json['media_url']?.toString() ??
