@@ -21,6 +21,7 @@ import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/core/call/global_call_handler.dart';
 import 'package:messaging_app/core/call/call_notification.dart';
 import 'package:messaging_app/core/call/mini_call_overlay.dart';
+import 'package:messaging_app/core/call/call_lifecycle_watcher.dart';
 
 bool _handlingColdStartCallKit = false;
 StreamSubscription<CallEvent?>? _callKitSubscription;
@@ -46,10 +47,8 @@ Future<void> main() async {
   debugPrint('[MAIN] FirebaseMessaging background handler registered');
 
   /*
-    Important:
-    We register CallKit event listener early.
-    But real navigation can only happen after runApp + first frame,
-    because navigatorKey needs MaterialApp.
+    Register CallKit listener early.
+    Navigation will happen after MaterialApp/navigatorKey is ready.
   */
   _setupCallKitDebugListener();
 
@@ -93,16 +92,16 @@ Future<void> _initAfterFirstFrame() async {
 
     /*
       Initialize notification service after navigator exists.
-      This sets up FCM, local notification, CallKit show/receive logic.
+      This sets up FCM/local notification/CallKit logic.
     */
     debugPrint('[MAIN] Calling NotificationService.init()...');
     await NotificationService.init();
     debugPrint('[MAIN] NotificationService.init() completed');
 
     /*
-      Killed-app fix.
-      In killed state, CallKit accept event may not be caught by listener.
-      So after app opens, check active CallKit calls manually.
+      Keep this enabled.
+      In killed state, sometimes CallKit accept event is not received by
+      onEvent listener, so we check active calls after Flutter opens.
     */
     await _checkKilledStateCallKit();
 
@@ -139,8 +138,11 @@ void _setupCallKitDebugListener() {
       final body = _safeMap(event.body);
 
       if (event.event == Event.actionCallAccept) {
-        debugPrint('[MAIN CALLKIT] ACCEPT clicked');
-        await _handleCallKitAcceptFromMain(body, source: 'onEvent_accept');
+        debugPrint('[MAIN CALLKIT] ANSWER clicked');
+        await _handleCallKitAcceptFromMain(
+          body,
+          source: 'onEvent_accept',
+        );
         return;
       }
 
@@ -214,11 +216,15 @@ Future<void> _checkKilledStateCallKit() async {
 
     if (conversationId.isEmpty || callerId.isEmpty) {
       debugPrint(
-        '[MAIN CALLKIT] Active call missing conversationId/callerId. Cannot open socket screen.',
+        '[MAIN CALLKIT] Active call missing conversationId/callerId. Cannot open direct call screen.',
       );
       return;
     }
 
+    /*
+      This means app was killed and opened from CallKit.
+      Go directly to Flutter call screen, not IncomingCallScreen.
+    */
     await _handleCallKitAcceptFromMain(
       firstCall,
       source: 'activeCalls_cold_start',
@@ -245,7 +251,7 @@ Future<void> _handleCallKitAcceptFromMain(
   try {
     debugPrint('');
     debugPrint('################################################');
-    debugPrint('### HANDLE CALLKIT ACCEPT FROM MAIN');
+    debugPrint('### HANDLE CALLKIT ANSWER FROM MAIN');
     debugPrint('################################################');
     debugPrint('source: $source');
     debugPrint('rawData: $rawData');
@@ -283,12 +289,21 @@ Future<void> _handleCallKitAcceptFromMain(
       ['caller_avatar', 'callerAvatar', 'avatar'],
     );
 
-    final isVideoCall = _readBool(
-      data,
-      ['is_video_call', 'isVideoCall', 'video'],
-    );
+    final isVideoCall =
+        _readBool(data, ['is_video_call', 'isVideoCall', 'video']) ||
+            _readBool(rawData, ['is_video_call', 'isVideoCall', 'video']) ||
+            rawData['type'] == 1 ||
+            rawData['type']?.toString() == '1' ||
+            data['type'] == 1 ||
+            data['type']?.toString() == '1';
 
-    debugPrint('========== MAIN CALLKIT ACCEPT RESOLVED ==========');
+    debugPrint('rawData type: ${rawData['type']}');
+    debugPrint('data type: ${data['type']}');
+    debugPrint('data is_video_call: ${data['is_video_call']}');
+    debugPrint('data isVideoCall: ${data['isVideoCall']}');
+    debugPrint('resolved isVideoCall: $isVideoCall');
+
+    debugPrint('========== MAIN CALLKIT ANSWER RESOLVED ==========');
     debugPrint('callId: $callId');
     debugPrint('conversationId: $conversationId');
     debugPrint('callerId: $callerId');
@@ -343,14 +358,20 @@ Future<void> _handleCallKitAcceptFromMain(
 
     if (nav == null) {
       debugPrint(
-        '[MAIN CALLKIT] ERROR: navigator is null. Cannot open CallWaitingScreen.',
+        '[MAIN CALLKIT] ERROR: navigator is null. Cannot open direct call screen.',
       );
       return;
     }
 
+    /*
+      IMPORTANT:
+      Do NOT call FlutterCallkitIncoming.endCall(callId) here.
+      ANSWER means user accepted the call. endCall() can trigger ended/cancel flow
+      and prevent Flutter call screen from opening/connecting.
+    */
     debugPrint('');
     debugPrint('################################################');
-    debugPrint('### CALLING GlobalCallHandler.openIncomingCallFromCallKit');
+    debugPrint('### CALLKIT ANSWER CLICKED: OPEN DIRECT CALL SCREEN');
     debugPrint('################################################');
 
     await GlobalCallHandler.instance.openIncomingCallFromCallKit(
@@ -361,8 +382,10 @@ Future<void> _handleCallKitAcceptFromMain(
       callerAvatar: callerAvatar,
       isVideoCall: isVideoCall,
     );
+
+    debugPrint('[MAIN CALLKIT] Direct call screen opened after ANSWER');
   } catch (e, st) {
-    debugPrint('!!!!!!!!!! HANDLE CALLKIT ACCEPT FROM MAIN ERROR !!!!!!!!!!');
+    debugPrint('!!!!!!!!!! HANDLE CALLKIT ANSWER FROM MAIN ERROR !!!!!!!!!!');
     debugPrint('error: $e');
     debugPrint('stack: $st');
     debugPrint('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
@@ -444,7 +467,22 @@ Map<String, dynamic> _extractCallData(Map<String, dynamic> rawData) {
     final extraRaw = body['extra'];
 
     if (extraRaw is Map) {
-      return Map<String, dynamic>.from(extraRaw);
+      final extra = Map<String, dynamic>.from(extraRaw);
+
+      // Preserve CallKit type because type: 1 means video.
+      if (extra['type'] == null && body['type'] != null) {
+        extra['type'] = body['type'];
+      }
+
+      if (extra['type'] == null && rawData['type'] != null) {
+        extra['type'] = rawData['type'];
+      }
+
+      return extra;
+    }
+
+    if (body['type'] == null && rawData['type'] != null) {
+      body['type'] = rawData['type'];
     }
 
     return body;
@@ -453,7 +491,13 @@ Map<String, dynamic> _extractCallData(Map<String, dynamic> rawData) {
   final extraRaw = rawData['extra'];
 
   if (extraRaw is Map) {
-    return Map<String, dynamic>.from(extraRaw);
+    final extra = Map<String, dynamic>.from(extraRaw);
+
+    if (extra['type'] == null && rawData['type'] != null) {
+      extra['type'] = rawData['type'];
+    }
+
+    return extra;
   }
 
   return rawData;
@@ -516,15 +560,9 @@ extension _StringFallback on String {
 }
 
 /*
-  Root global incoming-call listener.
-
-  This is what makes IncomingCallScreen show everywhere while app is open:
-    ChatListScreen
-    Profile page
-    Dashboard
-    Settings
-    Inside chat
-    Any pushed screen
+  This class is no longer used in MaterialApp builder because AuthGate starts
+  the global incoming-call socket. Keep it for now if other files reference it,
+  but do not wrap the app with it or you may get duplicate incoming handling.
 */
 class GlobalCallBootstrapper extends StatefulWidget {
   final Widget child;
@@ -621,6 +659,7 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
       final accessToken = _firstNotEmpty([
         await ApiClient.storage.read(key: 'access'),
         await ApiClient.storage.read(key: 'access_token'),
+        await ApiClient.storage.read(key: 'token'),
       ]);
 
       final currentUserId = _firstNotEmpty([
@@ -879,8 +918,21 @@ class MyApp extends StatelessWidget {
             ),
           ),
           home: const AuthGate(),
+
+          /*
+            Do not wrap with GlobalCallBootstrapper here.
+            AuthGate starts global socket now.
+            This prevents duplicate incoming call screens.
+
+            CallLifecycleWatcher handles:
+            - app background/home -> Android PiP
+            - app detached/killed -> end call best-effort
+
+            MiniCallOverlay handles:
+            - inside-app minimized call floating screen
+          */
           builder: (context, child) {
-            return GlobalCallBootstrapper(
+            return CallLifecycleWatcher(
               child: Stack(
                 children: [
                   child ?? const SizedBox.shrink(),

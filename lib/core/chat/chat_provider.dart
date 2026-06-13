@@ -6,6 +6,7 @@ import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/core/chat/chat_api.dart';
 import 'package:messaging_app/core/chat/chat_socket_service.dart';
+
 class ChatProvider extends ChangeNotifier {
   bool isLoading = false;
   bool isSending = false;
@@ -17,6 +18,15 @@ class ChatProvider extends ChangeNotifier {
 
   final List<ChatItem> conversations = [];
   final Map<String, List<ChatMessage>> conversationMessages = {};
+
+  /// Messenger-like reactions stored per conversation/message.
+  /// key: conversationId, value: {messageId: emoji}
+  final Map<String, Map<String, String>> conversationMessageReactions = {};
+
+  /// Messenger-like pinned messages stored per conversation.
+  /// key: conversationId, value: pinned message ids
+  final Map<String, Set<String>> conversationPinnedMessageIds = {};
+
   final ChatSocketService socket = ChatSocketService();
   final List<dynamic> searchedUsers = [];
 
@@ -37,6 +47,36 @@ class ChatProvider extends ChangeNotifier {
       final phone = chat.phone.replaceAll(RegExp(r'[^0-9]'), '');
       return phone.contains(digits);
     }).toList();
+  }
+
+
+  Map<String, String> getReactionsForChat(String conversationId) {
+    return Map<String, String>.from(
+      conversationMessageReactions[conversationId] ?? const {},
+    );
+  }
+
+  Set<String> getPinnedMessageIdsForChat(String conversationId) {
+    return Set<String>.from(
+      conversationPinnedMessageIds[conversationId] ?? const {},
+    );
+  }
+
+  String? getReactionForMessage({
+    required String conversationId,
+    required String messageId,
+  }) {
+    final reaction = conversationMessageReactions[conversationId]?[messageId];
+    if (reaction == null || reaction.trim().isEmpty) return null;
+    return reaction;
+  }
+
+  bool isMessagePinned({
+    required String conversationId,
+    required String messageId,
+  }) {
+    return conversationPinnedMessageIds[conversationId]?.contains(messageId) ??
+        false;
   }
 
   void _setLoading(bool value) {
@@ -69,13 +109,52 @@ class ChatProvider extends ChangeNotifier {
         final action = data['action']?.toString();
         final type = data['type']?.toString();
 
+        if (_isReactionPayload(data)) {
+          _applyReactionPayload(
+            conversationId: conversationId,
+            data: data,
+          );
+          return;
+        }
+
+        if (_isDeletePayload(data)) {
+          _applyDeletePayload(
+            conversationId: conversationId,
+            data: data,
+          );
+          return;
+        }
+
+        if (_isPinPayload(data)) {
+          _applyPinPayload(
+            conversationId: conversationId,
+            data: data,
+          );
+          return;
+        }
+
         if (action == 'new_message' || type == 'message') {
           final rawMessage = data['message'] ?? data;
+
+          if (_isReactionPayload(rawMessage)) {
+            _applyReactionPayload(
+              conversationId: conversationId,
+              data: rawMessage,
+            );
+            return;
+          }
+
           final message = await _mapMessage(rawMessage);
 
           if (message.type == MessageType.text && message.text.trim().isEmpty) {
             return;
           }
+
+          _syncMessageMetaFromJson(
+            conversationId: conversationId,
+            messageId: message.id,
+            json: rawMessage,
+          );
 
           final key = '$conversationId';
           conversationMessages.putIfAbsent(key, () => []);
@@ -195,6 +274,9 @@ class ChatProvider extends ChangeNotifier {
     _setLoading(true);
     error = null;
 
+    final myIdString = await _myUserId();
+    currentUserId = int.tryParse(myIdString) ?? currentUserId;
+
     try {
       final response = await ChatApi.getMessages(
         conversationId: conversationId,
@@ -206,12 +288,21 @@ class ChatProvider extends ChangeNotifier {
 
       final messages = <ChatMessage>[];
 
+      conversationMessageReactions['$conversationId'] = {};
+      conversationPinnedMessageIds['$conversationId'] = {};
+
       for (final item in List.from(list)) {
         final message = await _mapMessage(item);
 
         if (message.type == MessageType.text && message.text.trim().isEmpty) {
           continue;
         }
+
+        _syncMessageMetaFromJson(
+          conversationId: conversationId,
+          messageId: message.id,
+          json: item,
+        );
 
         messages.add(message);
       }
@@ -359,23 +450,57 @@ class ChatProvider extends ChangeNotifier {
     _setSending(false);
   }
 
+  Future<bool> setReaction({
+    required int conversationId,
+    required int messageId,
+    required String reaction,
+  }) async {
+    error = null;
+
+    final key = '$conversationId';
+    final messageKey = '$messageId';
+    final previousReaction = conversationMessageReactions[key]?[messageKey];
+
+    _setLocalReaction(
+      conversationId: conversationId,
+      messageId: messageKey,
+      reaction: reaction,
+    );
+
+    try {
+      await ChatApi.sendReaction(
+        conversationId: conversationId,
+        reactionTo: messageId,
+        reaction: reaction,
+      );
+
+      return true;
+    } catch (e) {
+      error = e.toString();
+
+      // Roll back optimistic UI when API fails.
+      _setLocalReaction(
+        conversationId: conversationId,
+        messageId: messageKey,
+        reaction: previousReaction ?? '',
+      );
+
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Backward-compatible wrapper for old screen code.
   Future<void> sendReaction({
     required int conversationId,
     required int reactionTo,
     required String reaction,
   }) async {
-    error = null;
-
-    try {
-      await ChatApi.sendReaction(
-        conversationId: conversationId,
-        reactionTo: reactionTo,
-        reaction: reaction,
-      );
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
-    }
+    await setReaction(
+      conversationId: conversationId,
+      messageId: reactionTo,
+      reaction: reaction,
+    );
   }
 
   Future<void> sendImage({
@@ -417,26 +542,64 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<void> sendImages({
-  required int conversationId,
-  required List<File> images,
-  String? caption,
-}) async {
-  if (images.isEmpty) return;
+    required int conversationId,
+    required List<File> images,
+    String? caption,
+  }) async {
+    if (images.isEmpty) return;
 
-  final temp = ChatMessage(
-    id: DateTime.now().microsecondsSinceEpoch.toString(),
-    type: MessageType.mediaAlbum,
-    text: caption ?? '',
-    isMe: true,
-    sentAt: DateTime.now(),
-    isSeen: false,
-    mediaUrls: images.map((e) => e.path).toList(),
-  );
+    final temp = ChatMessage(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      type: MessageType.mediaAlbum,
+      text: caption ?? '',
+      isMe: true,
+      sentAt: DateTime.now(),
+      isSeen: false,
+      mediaUrls: images.map((e) => e.path).toList(),
+    );
 
-  _addLocalMessage(conversationId, temp);
+    _addLocalMessage(conversationId, temp);
 
-  notifyListeners();
-}
+    _setSending(true);
+    error = null;
+
+    try {
+      final response = await ChatApi.sendImages(
+        conversationId: conversationId,
+        images: images,
+        caption: caption,
+      );
+
+      var realMessage = await _mapMessage(response.data);
+
+      // Some backends return only one "media" URL even when multiple images
+      // were uploaded. Messenger should still show the full selected album
+      // immediately for the sender, so keep all local paths as a fallback.
+      if (realMessage.type == MessageType.mediaAlbum &&
+          ((realMessage.mediaUrls ?? []).length < images.length)) {
+        realMessage = realMessage.copyWith(
+          mediaUrls: images.map((image) => image.path).toList(),
+        );
+      }
+
+      _syncMessageMetaFromJson(
+        conversationId: conversationId,
+        messageId: realMessage.id,
+        json: response.data,
+      );
+
+      _replaceMessage(conversationId, temp.id, realMessage);
+    } catch (e) {
+      error = e.toString();
+
+      final key = '$conversationId';
+      conversationMessages[key]?.removeWhere((m) => m.id == temp.id);
+
+      notifyListeners();
+    }
+
+    _setSending(false);
+  }
 
   Future<void> sendVideo({
     required int conversationId,
@@ -566,9 +729,216 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
+  Future<bool> deleteMessageForMe({
+    required int conversationId,
+    required int messageId,
+  }) async {
+    error = null;
+
+    try {
+      await ChatApi.deleteMessageForMe(
+        conversationId: conversationId,
+        messageId: messageId,
+      );
+
+      _removeLocalMessage(
+        conversationId: conversationId,
+        messageId: '$messageId',
+      );
+
+      return true;
+    } catch (e) {
+      error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> deleteMessageForEveryone({
+    required int conversationId,
+    required int messageId,
+  }) async {
+    error = null;
+
+    try {
+      await ChatApi.deleteMessageForEveryone(
+        conversationId: conversationId,
+        messageId: messageId,
+      );
+
+      _removeLocalMessage(
+        conversationId: conversationId,
+        messageId: '$messageId',
+      );
+
+      return true;
+    } catch (e) {
+      error = e.toString();
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> togglePinMessage({
+    required int conversationId,
+    required int messageId,
+  }) async {
+    error = null;
+
+    final key = '$conversationId';
+    final messageKey = '$messageId';
+    final wasPinned = conversationPinnedMessageIds[key]?.contains(messageKey) ??
+        false;
+
+    _setLocalPinned(
+      conversationId: conversationId,
+      messageId: messageKey,
+      pinned: !wasPinned,
+    );
+
+    try {
+      final response = await ChatApi.togglePinMessage(
+        conversationId: conversationId,
+        messageId: messageId,
+      );
+
+      final responseData = response.data;
+      final pinnedFromServer = _boolFromDynamic(
+        responseData is Map ? responseData['pinned_by_me'] : null,
+      );
+
+      if (pinnedFromServer != null) {
+        _setLocalPinned(
+          conversationId: conversationId,
+          messageId: messageKey,
+          pinned: pinnedFromServer,
+        );
+      }
+
+      return true;
+    } catch (e) {
+      error = e.toString();
+
+      // Roll back optimistic UI when API fails.
+      _setLocalPinned(
+        conversationId: conversationId,
+        messageId: messageKey,
+        pinned: wasPinned,
+      );
+
+      notifyListeners();
+      return false;
+    }
+  }
+
   List<ChatMessage> getMessagesForChat(String conversationId) {
     return conversationMessages[conversationId] ?? [];
   }
+
+
+  bool _looksLikeTempOutgoingId(String id) {
+    final cleanId = id.trim();
+
+    if (cleanId.isEmpty) return false;
+
+    // Local optimistic messages use DateTime.now().microsecondsSinceEpoch.
+    // Server ids are normally shorter database ids.
+    final asNumber = int.tryParse(cleanId);
+    if (asNumber == null) return false;
+
+    return cleanId.length >= 14;
+  }
+
+  bool _sameOutgoingPayload(ChatMessage a, ChatMessage b) {
+    if (a.type != b.type) return false;
+
+    switch (a.type) {
+      case MessageType.text:
+        return a.text.trim() == b.text.trim();
+
+      case MessageType.image:
+      case MessageType.video:
+      case MessageType.file:
+        final aName = (a.fileName ?? '').trim();
+        final bName = (b.fileName ?? '').trim();
+
+        if (aName.isNotEmpty && bName.isNotEmpty && aName == bName) {
+          return true;
+        }
+
+        final aPath = (a.filePath ?? '').trim();
+        final bPath = (b.filePath ?? '').trim();
+
+        if (aPath.isNotEmpty &&
+            bPath.isNotEmpty &&
+            aPath.split('/').last == bPath.split('/').last) {
+          return true;
+        }
+
+        return a.text.trim().isNotEmpty && a.text.trim() == b.text.trim();
+
+      case MessageType.mediaAlbum:
+        final aUrls = a.mediaUrls ?? const <String>[];
+        final bUrls = b.mediaUrls ?? const <String>[];
+
+        if (aUrls.isNotEmpty && bUrls.isNotEmpty) {
+          final aFirst = aUrls.first.split('/').last;
+          final bFirst = bUrls.first.split('/').last;
+
+          if (aFirst == bFirst) return true;
+        }
+
+        return a.text.trim() == b.text.trim();
+
+      case MessageType.audio:
+        return true;
+
+      case MessageType.call:
+        return false;
+    }
+  }
+
+  bool _mergeWithPendingOutgoingIfNeeded({
+    required int conversationId,
+    required ChatMessage realMessage,
+  }) {
+    if (!realMessage.isMe) return false;
+    if (_looksLikeTempOutgoingId(realMessage.id)) return false;
+
+    final key = '$conversationId';
+    final list = conversationMessages[key];
+
+    if (list == null || list.isEmpty) return false;
+
+    final now = DateTime.now();
+
+    final pendingIndex = list.lastIndexWhere((message) {
+      if (!message.isMe) return false;
+      if (!_looksLikeTempOutgoingId(message.id)) return false;
+      if (message.type != realMessage.type) return false;
+
+      final age = now.difference(message.sentAt).abs();
+      if (age > const Duration(seconds: 45)) return false;
+
+      return _sameOutgoingPayload(message, realMessage);
+    });
+
+    if (pendingIndex == -1) return false;
+
+    list[pendingIndex] = realMessage;
+    list.sort((a, b) => a.sentAt.compareTo(b.sentAt));
+
+    final chatIndex = conversations.indexWhere((c) => c.id == key);
+
+    if (chatIndex != -1) {
+      conversations[chatIndex].message = _preview(realMessage);
+      conversations[chatIndex].time = _formatChatTime(realMessage.sentAt);
+    }
+
+    notifyListeners();
+    return true;
+  }
+
 
   void _addLocalMessage(int conversationId, ChatMessage message) {
     if (message.type == MessageType.text && message.text.trim().isEmpty) {
@@ -578,6 +948,13 @@ class ChatProvider extends ChangeNotifier {
     final key = '$conversationId';
 
     conversationMessages.putIfAbsent(key, () => []);
+
+    if (_mergeWithPendingOutgoingIfNeeded(
+      conversationId: conversationId,
+      realMessage: message,
+    )) {
+      return;
+    }
 
     final exists = conversationMessages[key]!.any((m) => m.id == message.id);
     if (!exists) {
@@ -627,6 +1004,34 @@ class ChatProvider extends ChangeNotifier {
     if (chatIndex != -1) {
       conversations[chatIndex].message = _preview(realMessage);
       conversations[chatIndex].time = _formatChatTime(realMessage.sentAt);
+    }
+
+    notifyListeners();
+  }
+
+
+  void _removeLocalMessage({
+    required int conversationId,
+    required String messageId,
+  }) {
+    final key = '$conversationId';
+
+    conversationMessages[key]?.removeWhere((m) => m.id == messageId);
+    conversationMessageReactions[key]?.remove(messageId);
+    conversationPinnedMessageIds[key]?.remove(messageId);
+
+    final chatIndex = conversations.indexWhere((c) => c.id == key);
+    final messages = conversationMessages[key] ?? [];
+
+    if (chatIndex != -1) {
+      if (messages.isEmpty) {
+        conversations[chatIndex].message = 'Start chatting';
+        conversations[chatIndex].time = '';
+      } else {
+        final lastMessage = messages.last;
+        conversations[chatIndex].message = _preview(lastMessage);
+        conversations[chatIndex].time = _formatChatTime(lastMessage.sentAt);
+      }
     }
 
     notifyListeners();
@@ -836,9 +1241,29 @@ class ChatProvider extends ChangeNotifier {
 
     final sender = json['sender'];
 
-    final senderId = sender is Map
-        ? sender['id'].toString()
-        : json['sender_id']?.toString() ?? sender?.toString() ?? '';
+    String senderId = '';
+
+    if (sender is Map) {
+      senderId = sender['id']?.toString() ??
+          sender['user_id']?.toString() ??
+          sender['pk']?.toString() ??
+          '';
+    } else if (sender != null) {
+      senderId = sender.toString();
+    }
+
+    if (senderId.trim().isEmpty || senderId.trim() == 'null') {
+      senderId = json['sender_id']?.toString() ??
+          json['user_id']?.toString() ??
+          json['from_user_id']?.toString() ??
+          json['created_by']?.toString() ??
+          '';
+    }
+
+    final isOwnMessage = senderId.toString().trim() == myId.toString().trim() ||
+        json['is_me'] == true ||
+        json['isMe'] == true ||
+        json['mine'] == true;
 
     final messageType = json['message_type']?.toString() ?? 'text';
     final type = _backendTypeToMessageType(messageType);
@@ -847,7 +1272,7 @@ class ChatProvider extends ChangeNotifier {
       id: '${json['id']}',
       type: type,
       text: json['text']?.toString() ?? json['message']?.toString() ?? '',
-      isMe: senderId == myId,
+      isMe: isOwnMessage,
       sentAt: _parseDate(
         json['created_at'] ?? json['sent_at'] ?? json['timestamp'],
       ),
@@ -867,11 +1292,22 @@ class ChatProvider extends ChangeNotifier {
               sender['image']?.toString() ??
               sender['photo']?.toString()
           : null,
-      filePath: json['media']?.toString() ??
-          json['media_url']?.toString() ??
-          json['file']?.toString(),
+      filePath: type == MessageType.mediaAlbum
+          ? null
+          : json['media']?.toString() ??
+              json['media_url']?.toString() ??
+              json['file']?.toString(),
       fileName: json['file_name']?.toString() ?? json['media_name']?.toString(),
       fileSizeBytes: json['file_size'] is int ? json['file_size'] : null,
+      mediaUrls: type == MessageType.mediaAlbum
+          ? _mapMediaUrls(
+              json['media_urls'] ??
+                  json['media'] ??
+                  json['files'] ??
+                  json['album_items'] ??
+                  json['attachments'],
+            )
+          : null,
       audioPath: type == MessageType.audio
           ? json['media']?.toString() ??
               json['media_url']?.toString() ??
@@ -893,20 +1329,317 @@ class ChatProvider extends ChangeNotifier {
   }
 
   MessageType _backendTypeToMessageType(String type) {
-    switch (type) {
+    final cleanType = type.trim().toLowerCase();
+
+    switch (cleanType) {
       case 'image':
+      case 'photo':
         return MessageType.image;
       case 'media_album':
+      case 'mediaalbum':
+      case 'album':
+      case 'images':
         return MessageType.mediaAlbum;
       case 'video':
         return MessageType.video;
       case 'audio':
+      case 'voice':
+      case 'voice_message':
         return MessageType.audio;
       case 'file':
+      case 'document':
         return MessageType.file;
       default:
         return MessageType.text;
     }
+  }
+
+  void _syncMessageMetaFromJson({
+    required int conversationId,
+    required String messageId,
+    required dynamic json,
+  }) {
+    if (json is! Map) return;
+
+    final key = '$conversationId';
+
+    final reaction = _reactionFromJson(json);
+    if (reaction != null) {
+      _setLocalReaction(
+        conversationId: conversationId,
+        messageId: messageId,
+        reaction: reaction,
+        notify: false,
+      );
+    }
+
+    final pinned = _pinnedFromJson(json);
+    if (pinned != null) {
+      _setLocalPinned(
+        conversationId: conversationId,
+        messageId: messageId,
+        pinned: pinned,
+        notify: false,
+      );
+    } else {
+      conversationMessageReactions.putIfAbsent(key, () => {});
+      conversationPinnedMessageIds.putIfAbsent(key, () => <String>{});
+    }
+  }
+
+  bool _isReactionPayload(dynamic data) {
+    if (data is! Map) return false;
+
+    final action = data['action']?.toString().toLowerCase() ?? '';
+    final type = data['type']?.toString().toLowerCase() ?? '';
+    final messageType = data['message_type']?.toString().toLowerCase() ?? '';
+
+    return action == 'reaction' ||
+        action == 'message_reaction' ||
+        action == 'new_reaction' ||
+        type == 'reaction' ||
+        type == 'message_reaction' ||
+        messageType == 'reaction';
+  }
+
+  bool _isDeletePayload(dynamic data) {
+    if (data is! Map) return false;
+
+    final action = data['action']?.toString().toLowerCase() ?? '';
+    final type = data['type']?.toString().toLowerCase() ?? '';
+
+    return action == 'delete_message' ||
+        action == 'message_deleted' ||
+        action == 'deleted_for_everyone' ||
+        type == 'delete_message' ||
+        type == 'message_deleted';
+  }
+
+  bool _isPinPayload(dynamic data) {
+    if (data is! Map) return false;
+
+    final action = data['action']?.toString().toLowerCase() ?? '';
+    final type = data['type']?.toString().toLowerCase() ?? '';
+
+    return action == 'pin_message' ||
+        action == 'message_pinned' ||
+        action == 'message_unpinned' ||
+        type == 'pin_message' ||
+        type == 'message_pinned' ||
+        type == 'message_unpinned';
+  }
+
+  void _applyReactionPayload({
+    required int conversationId,
+    required dynamic data,
+  }) {
+    if (data is! Map) return;
+
+    final rawMessageId = data['reaction_to'] ??
+        data['message_id'] ??
+        data['target_message_id'] ??
+        data['id'];
+    final messageId = rawMessageId?.toString() ?? '';
+
+    if (messageId.trim().isEmpty) return;
+
+    final reaction = data['reaction']?.toString() ??
+        data['emoji']?.toString() ??
+        data['my_reaction']?.toString() ??
+        '';
+
+    _setLocalReaction(
+      conversationId: conversationId,
+      messageId: messageId,
+      reaction: reaction,
+    );
+  }
+
+  void _applyDeletePayload({
+    required int conversationId,
+    required dynamic data,
+  }) {
+    if (data is! Map) return;
+
+    final rawMessageId = data['message_id'] ?? data['id'];
+    final messageId = rawMessageId?.toString() ?? '';
+
+    if (messageId.trim().isEmpty) return;
+
+    _removeLocalMessage(
+      conversationId: conversationId,
+      messageId: messageId,
+    );
+  }
+
+  void _applyPinPayload({
+    required int conversationId,
+    required dynamic data,
+  }) {
+    if (data is! Map) return;
+
+    final rawMessageId = data['message_id'] ?? data['id'];
+    final messageId = rawMessageId?.toString() ?? '';
+
+    if (messageId.trim().isEmpty) return;
+
+    final pinned = _boolFromDynamic(data['pinned_by_me'] ?? data['pinned']) ??
+        (data['action']?.toString().toLowerCase() == 'message_pinned' ||
+            data['type']?.toString().toLowerCase() == 'message_pinned');
+
+    _setLocalPinned(
+      conversationId: conversationId,
+      messageId: messageId,
+      pinned: pinned,
+    );
+  }
+
+  void _setLocalReaction({
+    required int conversationId,
+    required String messageId,
+    required String reaction,
+    bool notify = true,
+  }) {
+    final key = '$conversationId';
+    conversationMessageReactions.putIfAbsent(key, () => {});
+
+    final cleanReaction = reaction.trim();
+
+    if (cleanReaction.isEmpty || cleanReaction == 'null') {
+      conversationMessageReactions[key]!.remove(messageId);
+    } else {
+      conversationMessageReactions[key]![messageId] = cleanReaction;
+    }
+
+    if (notify) notifyListeners();
+  }
+
+  void _setLocalPinned({
+    required int conversationId,
+    required String messageId,
+    required bool pinned,
+    bool notify = true,
+  }) {
+    final key = '$conversationId';
+    conversationPinnedMessageIds.putIfAbsent(key, () => <String>{});
+
+    if (pinned) {
+      conversationPinnedMessageIds[key]!.add(messageId);
+    } else {
+      conversationPinnedMessageIds[key]!.remove(messageId);
+    }
+
+    if (notify) notifyListeners();
+  }
+
+  String? _reactionFromJson(Map json) {
+    final raw = json['my_reaction'] ?? json['reaction'] ?? json['emoji'];
+    final reaction = raw?.toString().trim() ?? '';
+
+    if (reaction.isNotEmpty && reaction != 'null') {
+      return reaction;
+    }
+
+    final reactions = json['reactions'];
+    final currentId = currentUserId?.toString();
+
+    if (reactions is Map && currentId != null) {
+      final myReaction = reactions[currentId]?.toString().trim() ?? '';
+      if (myReaction.isNotEmpty && myReaction != 'null') {
+        return myReaction;
+      }
+    }
+
+    return null;
+  }
+
+  bool? _pinnedFromJson(Map json) {
+    return _boolFromDynamic(
+      json['pinned_by_me'] ??
+          json['is_pinned'] ??
+          json['pinned'] ??
+          json['pinnedByMe'],
+    );
+  }
+
+  bool? _boolFromDynamic(dynamic value) {
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+
+    final cleanValue = value.toString().trim().toLowerCase();
+
+    if (cleanValue == 'true' || cleanValue == '1' || cleanValue == 'yes') {
+      return true;
+    }
+
+    if (cleanValue == 'false' || cleanValue == '0' || cleanValue == 'no') {
+      return false;
+    }
+
+    return null;
+  }
+
+  List<String>? _mapMediaUrls(dynamic value) {
+    if (value == null) return null;
+
+    dynamic rawValue = value;
+
+    if (rawValue is Map) {
+      rawValue = rawValue['media_urls'] ??
+          rawValue['urls'] ??
+          rawValue['files'] ??
+          rawValue['results'] ??
+          rawValue['album_items'] ??
+          rawValue['attachments'] ??
+          rawValue['media'] ??
+          rawValue['file'] ??
+          rawValue['url'];
+    }
+
+    if (rawValue is List) {
+      final urls = <String>[];
+
+      for (final item in rawValue) {
+        if (item == null) continue;
+
+        if (item is Map) {
+          final url = item['url'] ??
+              item['file'] ??
+              item['media'] ??
+              item['media_url'] ??
+              item['image'] ??
+              item['path'];
+          final cleanUrl = url?.toString().trim() ?? '';
+          if (cleanUrl.isNotEmpty && cleanUrl != 'null') {
+            urls.add(cleanUrl);
+          }
+          continue;
+        }
+
+        final cleanUrl = item.toString().trim();
+        if (cleanUrl.isNotEmpty && cleanUrl != 'null') {
+          urls.add(cleanUrl);
+        }
+      }
+
+      return urls.isEmpty ? null : urls;
+    }
+
+    final singleUrl = rawValue.toString().trim();
+    if (singleUrl.isEmpty || singleUrl == 'null') return null;
+
+    if (singleUrl.contains(',') && !singleUrl.startsWith('http')) {
+      final urls = singleUrl
+          .split(',')
+          .map((item) => item.trim())
+          .where((item) => item.isNotEmpty && item != 'null')
+          .toList();
+
+      return urls.isEmpty ? null : urls;
+    }
+
+    return [singleUrl];
   }
 
   DateTime _parseDate(dynamic value) {
@@ -917,7 +1650,7 @@ class ChatProvider extends ChangeNotifier {
   String _preview(ChatMessage message) {
     switch (message.type) {
       case MessageType.mediaAlbum:
-     return '📷 ${message.mediaUrls?.length ?? 0} Photos';
+        return '📷 ${message.mediaUrls?.length ?? 0} Photos';
       case MessageType.text:
         return message.text.isEmpty ? 'Message' : message.text;
       case MessageType.image:

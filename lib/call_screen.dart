@@ -3,11 +3,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
-import 'package:simple_pip_mode/simple_pip.dart';
 
 import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/call_waiting.dart';
+import 'package:messaging_app/core/api_client.dart';
+import 'package:messaging_app/core/config/app_config.dart';
+import 'package:messaging_app/core/call/call_socket_service.dart';
 import 'package:messaging_app/core/call/call_overlay_controller.dart';
 import 'package:messaging_app/core/call/call_provider.dart';
 import 'package:messaging_app/core/call/call_state.dart';
@@ -50,12 +52,14 @@ class CallScreen extends ConsumerStatefulWidget {
   ConsumerState<CallScreen> createState() => _CallScreenState();
 }
 
-class _CallScreenState extends ConsumerState<CallScreen>
-    with WidgetsBindingObserver {
+class _CallScreenState extends ConsumerState<CallScreen> {
   bool _didStart = false;
   bool _didSaveCallResult = false;
   bool _didPop = false;
   bool _upgradeDialogShowing = false;
+
+  bool _connectingAcceptedCallSocket = false;
+  bool _sentAcceptedCallReady = false;
 
   ProviderSubscription<CallState>? _callListener;
 
@@ -238,10 +242,149 @@ class _CallScreenState extends ConsumerState<CallScreen>
     });
   }
 
+  Future<bool> _ensureSocketForAcceptedBackgroundCall() async {
+    if (widget.isCaller) return true;
+
+    final offer = _normalizedIncomingOffer();
+
+    /*
+      If offer already exists, socket should already be connected from the
+      normal IncomingCallScreen / CallWaitingScreen flow.
+    */
+    if (offer != null) return true;
+
+    if (_connectingAcceptedCallSocket) {
+      return SocketService.instance.isConnected;
+    }
+
+    final convId = widget.conversationId?.toString().trim() ??
+        widget.chat?.id.toString().trim() ??
+        '';
+
+    if (convId.isEmpty) {
+      debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: conversationId empty');
+      return false;
+    }
+
+    final parsedConversationId = int.tryParse(convId);
+
+    if (parsedConversationId == null) {
+      debugPrint(
+        'CALL SCREEN ACCEPT SOCKET ERROR: invalid conversationId: $convId',
+      );
+      return false;
+    }
+
+    _connectingAcceptedCallSocket = true;
+
+    try {
+      String? accessToken = await ApiClient.storage.read(key: 'access');
+
+      if (accessToken == null || accessToken.trim().isEmpty) {
+        debugPrint('CALL SCREEN ACCEPT SOCKET: access empty, trying refresh');
+        accessToken = await ApiClient.refreshAccessToken();
+      }
+
+      if (accessToken == null || accessToken.trim().isEmpty) {
+        debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: access token empty');
+        return false;
+      }
+
+      final url = AppConfig.callSocketUrl(
+        conversationId: parsedConversationId,
+        token: accessToken.trim(),
+      );
+
+      debugPrint('========== CALL SCREEN ACCEPT SOCKET ==========');
+      debugPrint('conversationId: $convId');
+      debugPrint('currentUserId: ${widget.currentUserId}');
+      debugPrint('callerId/receiverId: ${widget.receiverId}');
+      debugPrint('callId: ${widget.callId ?? ''}');
+      debugPrint('url: $url');
+      debugPrint('==============================================');
+
+      await SocketService.instance.connect(url: url);
+      await Future.delayed(const Duration(milliseconds: 250));
+
+      if (!SocketService.instance.isConnected) {
+        debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: socket not connected');
+        return false;
+      }
+
+      debugPrint('CALL SCREEN ACCEPT SOCKET CONNECTED');
+      return true;
+    } catch (e, st) {
+      debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: $e');
+      debugPrint(st.toString());
+      return false;
+    } finally {
+      _connectingAcceptedCallSocket = false;
+    }
+  }
+
+  void _sendCallReadyForAcceptedBackgroundCall() {
+    if (widget.isCaller) return;
+
+    final offer = _normalizedIncomingOffer();
+
+    /*
+      Only send call_ready when CallScreen was opened directly from
+      killed/background ANSWER and no SDP offer exists yet.
+    */
+    if (offer != null) return;
+
+    if (_sentAcceptedCallReady) {
+      debugPrint('CALL SCREEN CALL_READY IGNORED: already sent');
+      return;
+    }
+
+    final convId = widget.conversationId?.toString().trim() ??
+        widget.chat?.id.toString().trim() ??
+        '';
+
+    if (convId.isEmpty) {
+      debugPrint('CALL SCREEN CALL_READY ERROR: conversationId empty');
+      return;
+    }
+
+    if (widget.currentUserId.trim().isEmpty) {
+      debugPrint('CALL SCREEN CALL_READY ERROR: currentUserId empty');
+      return;
+    }
+
+    if (widget.receiverId.trim().isEmpty) {
+      debugPrint('CALL SCREEN CALL_READY ERROR: receiverId/callerId empty');
+      return;
+    }
+
+    _sentAcceptedCallReady = true;
+
+    debugPrint('========== CALL SCREEN SENDING CALL_READY ==========');
+    debugPrint('from/currentUserId: ${widget.currentUserId}');
+    debugPrint('target/callerId: ${widget.receiverId}');
+    debugPrint('conversationId: $convId');
+    debugPrint('callId: ${widget.callId ?? ''}');
+    debugPrint('===================================================');
+
+    SocketService.instance.emit(
+      CallSocketEvents.callReady,
+      {
+        'from': widget.currentUserId,
+        'from_user': widget.currentUserId,
+        'call_id': widget.callId,
+        'callId': widget.callId,
+        'conversation_id': convId,
+        'conversationId': convId,
+      },
+      targetUser: widget.receiverId,
+      conversationId: convId,
+      queueIfDisconnected: true,
+    );
+  }
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
 
     ref.read(callScreenMinimizedProvider.notifier).state = false;
 
@@ -268,7 +411,7 @@ class _CallScreenState extends ConsumerState<CallScreen>
       },
     );
 
-    Future.microtask(() {
+    Future.microtask(() async {
       if (!mounted || _didStart) return;
 
       _didStart = true;
@@ -282,14 +425,41 @@ class _CallScreenState extends ConsumerState<CallScreen>
         return;
       }
 
-      if (!_receiverHasValidOffer()) {
-        _closeInvalidReceiverCall();
-        return;
-      }
+      /*
+        Do not redirect receiver to CallWaitingScreen here.
 
+        For killed/background ANSWER:
+        - CallScreen opens directly.
+        - CallScreen connects /ws/call/<conversation_id>/.
+        - CallProvider starts without offer and waits for call_offer.
+        - CallScreen sends call_ready after provider socket handlers are ready.
+      */
       final offer = widget.isCaller ? null : _normalizedIncomingOffer();
 
-      ref.read(callProvider.notifier).startCall(
+      if (!widget.isCaller && offer == null) {
+        final connected = await _ensureSocketForAcceptedBackgroundCall();
+
+        if (!connected) {
+          if (!mounted) return;
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Could not connect call socket')),
+          );
+
+          Future.delayed(const Duration(milliseconds: 700), () {
+            if (!mounted || _didPop) return;
+
+            _didPop = true;
+            _safePopOrLog('CALL SCREEN SOCKET CONNECT FAILED');
+          });
+
+          return;
+        }
+      }
+
+      if (!mounted) return;
+
+      await ref.read(callProvider.notifier).startCall(
             currentUserId: widget.currentUserId,
             currentUserName: widget.currentUserName,
             currentUserAvatar: widget.currentUserAvatar,
@@ -302,30 +472,23 @@ class _CallScreenState extends ConsumerState<CallScreen>
             conversationId: widget.conversationId ?? widget.chat?.id,
             callId: widget.callId,
           );
+
+      /*
+        Send call_ready after CallProvider has registered call_offer handler.
+        This avoids missing the caller's resent offer.
+      */
+      if (!widget.isCaller && offer == null) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        _sendCallReadyForAcceptedBackgroundCall();
+      }
     });
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
     _callListener?.close();
     _callListener = null;
     super.dispose();
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) async {
-    final callState = ref.read(callProvider);
-
-    if (state == AppLifecycleState.paused &&
-        callState.isVideoCall &&
-        !_isFinalStatus(callState.status)) {
-      try {
-        await SimplePip().enterPipMode();
-      } catch (e) {
-        debugPrint('PiP error: $e');
-      }
-    }
   }
 
   Future<void> _showVideoUpgradeRequestDialog(CallState callState) async {
@@ -377,15 +540,14 @@ class _CallScreenState extends ConsumerState<CallScreen>
       return;
     }
 
-    ref.read(callScreenMinimizedProvider.notifier).state = true;
+    /*
+      Inside app:
+      Show Messenger-like floating mini call screen.
 
-    if (callState.isVideoCall) {
-      try {
-        await SimplePip().enterPipMode();
-      } catch (e) {
-        debugPrint('PiP minimize error: $e');
-      }
-    }
+      Do NOT call Android PiP here.
+      Background/home PiP is handled globally by CallLifecycleWatcher.
+    */
+    ref.read(callScreenMinimizedProvider.notifier).state = true;
 
     if (mounted) {
       _safePopOrLog('CALL SCREEN MINIMIZE');

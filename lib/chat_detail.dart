@@ -29,6 +29,7 @@ import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
+import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
 class ChatDetailScreen extends StatefulWidget {
   final ChatItem chat;
@@ -56,6 +57,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isSendingText = false;
   bool _isSendingLike = false;
   bool _isStartingCall = false;
+  bool _isSendingMedia = false;
 
   final Map<String, String> _messageReactions = {};
   final Set<String> _pinnedMessageIds = {};
@@ -625,10 +627,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (!mounted) return;
 
       setState(() {
-        _messages = _sortedProviderMessages(provider)
-        .where((m) => !_hiddenMessageIds.contains(m.id))
-        .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-        .toList();
+        _messages = _visibleProviderMessages(provider);
       });
 
       WidgetsBinding.instance.addPostFrameCallback((_) => _jumpBottom());
@@ -703,16 +702,59 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
   }
 
+  List<ChatMessage> _visibleProviderMessages(ChatProvider provider) {
+    return _sortedProviderMessages(provider)
+        .where((m) => !_hiddenMessageIds.contains(m.id))
+        .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
+        .toList();
+  }
+
+
+  void _syncMessengerProviderState(ChatProvider provider) {
+    final freshReactions = provider.getReactionsForChat(widget.chat.id);
+    final freshPinnedIds = provider.getPinnedMessageIdsForChat(widget.chat.id);
+
+    if (!mapEquals(_messageReactions, freshReactions)) {
+      _messageReactions
+        ..clear()
+        ..addAll(freshReactions);
+    }
+
+    if (!setEquals(_pinnedMessageIds, freshPinnedIds)) {
+      _pinnedMessageIds
+        ..clear()
+        ..addAll(freshPinnedIds);
+    }
+  }
+
   void _syncLocalMessages() {
     try {
-      _messages = _sortedProviderMessages(_chatProvider)
-          .where((m) => !_hiddenMessageIds.contains(m.id))
-          .toList();
+      _messages = _visibleProviderMessages(_chatProvider);
     } catch (_) {
       _messages = (List<ChatMessage>.from(widget.chat.messages)
-          ..sort((a, b) => a.sentAt.compareTo(b.sentAt)))
+            ..sort((a, b) => a.sentAt.compareTo(b.sentAt)))
           .where((m) => !_hiddenMessageIds.contains(m.id))
+          .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
           .toList();
+    }
+  }
+
+  Future<double> _videoDurationInSeconds(File video) async {
+    VideoPlayerController? controller;
+
+    try {
+      controller = VideoPlayerController.file(video);
+      await controller.initialize();
+
+      final duration = controller.value.duration;
+      if (duration.inMilliseconds <= 0) return 1.0;
+
+      return duration.inMilliseconds / 1000.0;
+    } catch (e) {
+      debugPrint('VIDEO DURATION READ ERROR: $e');
+      return 1.0;
+    } finally {
+      await controller?.dispose();
     }
   }
 
@@ -829,9 +871,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       setState(() {
         _replyingTo = null;
         _showEmoji = false;
-        _messages = _sortedProviderMessages(provider)
-            .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-            .toList();
+        _messages = _visibleProviderMessages(provider);
       });
 
       _smartScrollToBottom();
@@ -884,9 +924,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (!mounted) return;
 
       setState(() {
-        _messages = _sortedProviderMessages(provider)
-            .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-            .toList();
+        _messages = _visibleProviderMessages(provider);
       });
 
       _smartScrollToBottom();
@@ -1278,15 +1316,54 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _applyReaction(ChatMessage message, String emoji, Offset burstCenter) {
+    final conversationId = int.tryParse(widget.chat.id);
+    final messageId = int.tryParse(message.id);
+
     HapticFeedback.heavyImpact();
+
+    final previousReaction = _messageReactions[message.id];
+    final nextReaction = previousReaction == emoji ? '' : emoji;
+
     setState(() {
-      if (_messageReactions[message.id] == emoji) {
+      if (nextReaction.trim().isEmpty) {
         _messageReactions.remove(message.id);
       } else {
-        _messageReactions[message.id] = emoji;
+        _messageReactions[message.id] = nextReaction;
       }
     });
-    _showReactionBurst(burstCenter, emoji);
+
+    if (nextReaction.trim().isNotEmpty) {
+      _showReactionBurst(burstCenter, nextReaction);
+    }
+
+    if (conversationId == null || messageId == null) {
+      return;
+    }
+
+    unawaited(
+      _chatProvider
+          .setReaction(
+        conversationId: conversationId,
+        messageId: messageId,
+        reaction: nextReaction,
+      )
+          .then((success) {
+        if (!mounted || success) return;
+
+        setState(() {
+          if (previousReaction == null || previousReaction.trim().isEmpty) {
+            _messageReactions.remove(message.id);
+          } else {
+            _messageReactions[message.id] = previousReaction;
+          }
+        });
+
+        _showMessengerPop(
+          'Could not react',
+          icon: Icons.error_rounded,
+        );
+      }),
+    );
   }
 
   void _openDeleteMessageDialog(ChatMessage message) {
@@ -1416,69 +1493,132 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  void _deleteFromMe(ChatMessage message) {
+  Future<void> _deleteFromMe(ChatMessage message) async {
+    final conversationId = int.tryParse(widget.chat.id);
+    final messageId = int.tryParse(message.id);
+
     HapticFeedback.mediumImpact();
+
+    if (conversationId == null || messageId == null) {
+      setState(() {
+        _hiddenMessageIds.add(message.id);
+        _messages.removeWhere((m) => m.id == message.id);
+      });
+      return;
+    }
+
     setState(() {
       _deletingMessageIds.add(message.id);
     });
 
-    Future.delayed(const Duration(milliseconds: 260), () {
-      if (!mounted) return;
-      setState(() {
-        _hiddenMessageIds.add(message.id);
-        _messages.removeWhere((m) => m.id == message.id);
-        widget.chat.messages.removeWhere((m) => m.id == message.id);
-        _messageReactions.remove(message.id);
-        _pinnedMessageIds.remove(message.id);
-        _deletingMessageIds.remove(message.id);
-      });
+    final success = await _chatProvider.deleteMessageForMe(
+      conversationId: conversationId,
+      messageId: messageId,
+    );
 
-      AppChatData.notify();
+    if (!mounted) return;
 
-      _showMessengerPop(
-        'Deleted from me',
-        icon: Icons.delete_rounded,
-      );
+    setState(() {
+      _deletingMessageIds.remove(message.id);
     });
+
+    if (!success) {
+      _showMessengerPop(
+        'Could not delete',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    setState(() {
+      _hiddenMessageIds.add(message.id);
+      _messages.removeWhere((m) => m.id == message.id);
+      widget.chat.messages.removeWhere((m) => m.id == message.id);
+      _messageReactions.remove(message.id);
+      _pinnedMessageIds.remove(message.id);
+    });
+
+    AppChatData.notify();
+
+    _showMessengerPop(
+      'Deleted from me',
+      icon: Icons.delete_rounded,
+    );
   }
 
-  void _deleteFromEverybody(ChatMessage message) {
+  Future<void> _deleteFromEverybody(ChatMessage message) async {
     if (!message.isMe) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('You can only delete your own message for everyone'),
-          behavior: SnackBarBehavior.floating,
-        ),
+      _showMessengerPop(
+        'You can only delete your own message for everyone',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final conversationId = int.tryParse(widget.chat.id);
+    final messageId = int.tryParse(message.id);
+
+    if (conversationId == null || messageId == null) {
+      _showMessengerPop(
+        'Message is not ready',
+        icon: Icons.error_rounded,
       );
       return;
     }
 
     HapticFeedback.heavyImpact();
+
     setState(() {
       _deletingMessageIds.add(message.id);
     });
 
-    Future.delayed(const Duration(milliseconds: 280), () {
-      if (!mounted) return;
-      setState(() {
-        _hiddenMessageIds.add(message.id);
-        _messages.removeWhere((m) => m.id == message.id);
-        widget.chat.messages.removeWhere((m) => m.id == message.id);
-        _messageReactions.remove(message.id);
-        _pinnedMessageIds.remove(message.id);
-        _deletingMessageIds.remove(message.id);
-      });
+    final success = await _chatProvider.deleteMessageForEveryone(
+      conversationId: conversationId,
+      messageId: messageId,
+    );
 
-      AppChatData.notify();
+    if (!mounted) return;
 
-      _showMessengerPop(
-        'Deleted from everyone',
-        icon: Icons.delete_rounded,
-      );
+    setState(() {
+      _deletingMessageIds.remove(message.id);
     });
+
+    if (!success) {
+      _showMessengerPop(
+        'Could not delete',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    setState(() {
+      _hiddenMessageIds.add(message.id);
+      _messages.removeWhere((m) => m.id == message.id);
+      widget.chat.messages.removeWhere((m) => m.id == message.id);
+      _messageReactions.remove(message.id);
+      _pinnedMessageIds.remove(message.id);
+    });
+
+    AppChatData.notify();
+
+    _showMessengerPop(
+      'Deleted from everyone',
+      icon: Icons.delete_rounded,
+    );
   }
 
-  void _pinMessage(ChatMessage message) {
+  Future<void> _pinMessage(ChatMessage message) async {
+    final conversationId = int.tryParse(widget.chat.id);
+    final messageId = int.tryParse(message.id);
+
+    if (conversationId == null || messageId == null) {
+      _showMessengerPop(
+        'Message is not ready',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
     final alreadyPinned = _pinnedMessageIds.contains(message.id);
 
     setState(() {
@@ -1488,6 +1628,29 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         _pinnedMessageIds.add(message.id);
       }
     });
+
+    final success = await _chatProvider.togglePinMessage(
+      conversationId: conversationId,
+      messageId: messageId,
+    );
+
+    if (!mounted) return;
+
+    if (!success) {
+      setState(() {
+        if (alreadyPinned) {
+          _pinnedMessageIds.add(message.id);
+        } else {
+          _pinnedMessageIds.remove(message.id);
+        }
+      });
+
+      _showMessengerPop(
+        'Could not update pin',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
 
     _showMessengerPop(
       alreadyPinned ? 'Message unpinned' : 'Message pinned',
@@ -1646,7 +1809,7 @@ void _openReactionPicker(
     barrierDismissible: true,
     barrierLabel: 'Message actions',
     barrierColor: Colors.transparent,
-    transitionDuration: const Duration(milliseconds: 185),
+    transitionDuration: const Duration(milliseconds: 145),
     pageBuilder: (_, __, ___) {
       return StatefulBuilder(
         builder: (context, dialogSetState) {
@@ -1753,14 +1916,7 @@ void _openReactionPicker(
           void selectReactionIndex(int index) {
             final emoji = _messengerReactions[index];
             HapticFeedback.selectionClick();
-            setState(() {
-              if (_messageReactions[message.id] == emoji) {
-                _messageReactions.remove(message.id);
-              } else {
-                _messageReactions[message.id] = emoji;
-              }
-            });
-            _showReactionBurst(reactionCenterFor(index), emoji);
+            _applyReaction(message, emoji, reactionCenterFor(index));
             Navigator.pop(context);
           }
 
@@ -2403,12 +2559,20 @@ void _openReactionPicker(
 
     HapticFeedback.selectionClick();
 
-    setState(() {
-      _messageReactions[message.id] = selectedEmoji;
-    });
+    final screenSize = MediaQuery.of(context).size;
+    _applyReaction(
+      message,
+      selectedEmoji,
+      Offset(screenSize.width / 2, screenSize.height / 2),
+    );
   }
 
   Future<void> _pickImage(ImageSource source) async {
+    if (_isSendingMedia) {
+      _showMessengerPop('Please wait, media is sending');
+      return;
+    }
+
     if (_isBlockedForMessaging()) {
       _showBlockedNotice();
       return;
@@ -2416,8 +2580,9 @@ void _openReactionPicker(
 
     final file = await _picker.pickImage(
       source: source,
-      imageQuality: 85,
-      maxWidth: 1800,
+      imageQuality: 86,
+      maxWidth: 1920,
+      maxHeight: 1920,
     );
 
     if (file == null) return;
@@ -2433,33 +2598,59 @@ void _openReactionPicker(
 
     final provider = _chatProvider;
 
-    await provider.sendImage(
-      conversationId: conversationId,
-      image: File(file.path),
-    );
+    if (mounted) {
+      setState(() {
+        _isSendingMedia = true;
+        _showEmoji = false;
+      });
+    }
 
-    if (!mounted) return;
+    try {
+      await provider.sendImage(
+        conversationId: conversationId,
+        image: File(file.path),
+      );
 
-    setState(() {
-      _replyingTo = null;
-      _messages = _sortedProviderMessages(provider)
-          .where((m) => !_hiddenMessageIds.contains(m.id))
-          .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-          .toList();
-    });
+      if (!mounted) return;
 
-    _smartScrollToBottom();
+      setState(() {
+        _replyingTo = null;
+        _syncLocalMessages();
+      });
+
+      _smartScrollToBottom();
+    } catch (e) {
+      debugPrint('PICK IMAGE ERROR: $e');
+
+      if (!mounted) return;
+      _showMessengerPop(
+        'Could not send photo',
+        icon: Icons.error_rounded,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingMedia = false;
+        });
+      }
+    }
   }
 
   Future<void> _pickMultipleImages() async {
+    if (_isSendingMedia) {
+      _showMessengerPop('Please wait, media is sending');
+      return;
+    }
+
     if (_isBlockedForMessaging()) {
       _showBlockedNotice();
       return;
     }
 
     final files = await _picker.pickMultiImage(
-      imageQuality: 85,
-      maxWidth: 1800,
+      imageQuality: 86,
+      maxWidth: 1920,
+      maxHeight: 1920,
     );
 
     if (files.isEmpty) return;
@@ -2475,11 +2666,19 @@ void _openReactionPicker(
     }
 
     final provider = _chatProvider;
+    final imageFiles = files.map((file) => File(file.path)).toList();
+
+    if (mounted) {
+      setState(() {
+        _isSendingMedia = true;
+        _showEmoji = false;
+      });
+    }
 
     try {
       await provider.sendImages(
         conversationId: conversationId,
-        images: files.map((file) => File(file.path)).toList(),
+        images: imageFiles,
       );
 
       if (!mounted) return;
@@ -2487,10 +2686,7 @@ void _openReactionPicker(
       setState(() {
         _replyingTo = null;
         _showEmoji = false;
-        _messages = _sortedProviderMessages(provider)
-            .where((m) => !_hiddenMessageIds.contains(m.id))
-            .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-            .toList();
+        _syncLocalMessages();
       });
 
       _smartScrollToBottom();
@@ -2502,6 +2698,398 @@ void _openReactionPicker(
         'Could not send photos',
         icon: Icons.error_rounded,
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingMedia = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pickVideo(ImageSource source) async {
+    if (_isSendingMedia) {
+      _showMessengerPop('Please wait, media is sending');
+      return;
+    }
+
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
+    final pickedVideo = await _picker.pickVideo(
+      source: source,
+      maxDuration: const Duration(minutes: 10),
+    );
+
+    if (pickedVideo == null) return;
+
+    final conversationId = int.tryParse(widget.chat.id);
+
+    if (conversationId == null) {
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final provider = _chatProvider;
+    final videoFile = File(pickedVideo.path);
+
+    if (mounted) {
+      setState(() {
+        _isSendingMedia = true;
+        _showEmoji = false;
+      });
+    }
+
+    try {
+      final duration = await _videoDurationInSeconds(videoFile);
+
+      await provider.sendVideo(
+        conversationId: conversationId,
+        video: videoFile,
+        duration: duration,
+      );
+
+      if (!mounted) return;
+
+      setState(() {
+        _replyingTo = null;
+        _showEmoji = false;
+        _syncLocalMessages();
+      });
+
+      _smartScrollToBottom();
+    } catch (e) {
+      debugPrint('PICK VIDEO ERROR: $e');
+
+      if (!mounted) return;
+      _showMessengerPop(
+        'Could not send video',
+        icon: Icons.error_rounded,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingMedia = false;
+        });
+      }
+    }
+  }
+
+
+
+  Future<void> _showMessengerMediaSheet() async {
+    // Messenger rule:
+    // Gallery icon must open one mixed gallery only.
+    // No separate "Take photo" / "Record video" menu inside gallery.
+    await _pickMessengerGalleryMedia();
+  }
+
+  Future<void> _pickMessengerGalleryMedia() async {
+    if (_isSendingMedia) {
+      _showMessengerPop('Please wait, media is sending');
+      return;
+    }
+
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
+    final conversationId = int.tryParse(widget.chat.id);
+
+    if (conversationId == null) {
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    List<AssetEntity>? selectedAssets;
+
+    try {
+      selectedAssets = await AssetPicker.pickAssets(
+        context,
+        pickerConfig: const AssetPickerConfig(
+          maxAssets: 20,
+          requestType: RequestType.common,
+          gridCount: 4,
+        ),
+      );
+    } catch (e) {
+      debugPrint('MESSENGER GALLERY PICKER ERROR: $e');
+
+      if (!mounted) return;
+      _showMessengerPop(
+        'Could not open gallery',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    if (selectedAssets == null || selectedAssets.isEmpty) return;
+
+    if (mounted) {
+      setState(() {
+        _isSendingMedia = true;
+        _showEmoji = false;
+      });
+    }
+
+    final imageFiles = <File>[];
+    final videoFiles = <File>[];
+    int skippedCount = 0;
+
+    try {
+      for (final asset in selectedAssets) {
+        final file = await asset.file;
+
+        if (file == null || file.path.trim().isEmpty) {
+          skippedCount++;
+          continue;
+        }
+
+        if (asset.type == AssetType.image) {
+          imageFiles.add(file);
+        } else if (asset.type == AssetType.video) {
+          videoFiles.add(file);
+        } else {
+          skippedCount++;
+        }
+      }
+
+      if (imageFiles.isEmpty && videoFiles.isEmpty) {
+        if (!mounted) return;
+        _showMessengerPop(
+          'Selected media is not supported',
+          icon: Icons.error_rounded,
+        );
+        return;
+      }
+
+      final provider = _chatProvider;
+
+      // Messenger-like mixed media rule:
+      // - 1 photo = single image bubble
+      // - many photos = one album/grid bubble
+      // - videos = video messages
+      // - mixed selection = photos first as image/album, then videos
+      if (imageFiles.isNotEmpty) {
+        if (imageFiles.length == 1) {
+          await provider.sendImage(
+            conversationId: conversationId,
+            image: imageFiles.first,
+          );
+        } else {
+          await provider.sendImages(
+            conversationId: conversationId,
+            images: imageFiles,
+          );
+        }
+      }
+
+      for (final videoFile in videoFiles) {
+        final duration = await _videoDurationInSeconds(videoFile);
+
+        await provider.sendVideo(
+          conversationId: conversationId,
+          video: videoFile,
+          duration: duration,
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _replyingTo = null;
+        _showEmoji = false;
+        _syncLocalMessages();
+      });
+
+      _smartScrollToBottom();
+
+      if (skippedCount > 0) {
+        _showMessengerPop(
+          '$skippedCount unsupported file skipped',
+          icon: Icons.info_rounded,
+        );
+      }
+    } catch (e) {
+      debugPrint('MESSENGER GALLERY SEND ERROR: $e');
+
+      if (!mounted) return;
+      _showMessengerPop(
+        'Could not send selected media',
+        icon: Icons.error_rounded,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingMedia = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pickGalleryMedia() async {
+    if (_isSendingMedia) {
+      _showMessengerPop('Please wait, media is sending');
+      return;
+    }
+
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
+      return;
+    }
+
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      type: FileType.media,
+      withData: false,
+    );
+
+    if (result == null || result.files.isEmpty) return;
+
+    final selectedFiles = result.files
+        .where((file) => file.path != null && file.path!.trim().isNotEmpty)
+        .map((file) => File(file.path!))
+        .toList();
+
+    if (selectedFiles.isEmpty) {
+      _showMessengerPop(
+        'No media selected',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final conversationId = int.tryParse(widget.chat.id);
+
+    if (conversationId == null) {
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    bool isImageFile(File file) {
+      final path = file.path.toLowerCase();
+      return path.endsWith('.jpg') ||
+          path.endsWith('.jpeg') ||
+          path.endsWith('.png') ||
+          path.endsWith('.webp') ||
+          path.endsWith('.gif') ||
+          path.endsWith('.heic') ||
+          path.endsWith('.heif');
+    }
+
+    bool isVideoFile(File file) {
+      final path = file.path.toLowerCase();
+      return path.endsWith('.mp4') ||
+          path.endsWith('.mov') ||
+          path.endsWith('.m4v') ||
+          path.endsWith('.avi') ||
+          path.endsWith('.mkv') ||
+          path.endsWith('.webm') ||
+          path.endsWith('.3gp');
+    }
+
+    final imageFiles = <File>[];
+    final videoFiles = <File>[];
+    int skippedCount = 0;
+
+    for (final file in selectedFiles) {
+      if (isImageFile(file)) {
+        imageFiles.add(file);
+      } else if (isVideoFile(file)) {
+        videoFiles.add(file);
+      } else {
+        skippedCount++;
+      }
+    }
+
+    if (imageFiles.isEmpty && videoFiles.isEmpty) {
+      _showMessengerPop(
+        'Selected media is not supported',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final provider = _chatProvider;
+
+    if (mounted) {
+      setState(() {
+        _isSendingMedia = true;
+        _showEmoji = false;
+      });
+    }
+
+    try {
+      // Photos are sent first. Multiple photos become one album message,
+      // like Messenger. One photo becomes a normal image message.
+      if (imageFiles.isNotEmpty) {
+        if (imageFiles.length == 1) {
+          await provider.sendImage(
+            conversationId: conversationId,
+            image: imageFiles.first,
+          );
+        } else {
+          await provider.sendImages(
+            conversationId: conversationId,
+            images: imageFiles,
+          );
+        }
+      }
+
+      // Videos are sent one by one because your backend stores videos as
+      // separate video messages.
+      for (final videoFile in videoFiles) {
+        final duration = await _videoDurationInSeconds(videoFile);
+
+        await provider.sendVideo(
+          conversationId: conversationId,
+          video: videoFile,
+          duration: duration,
+        );
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _replyingTo = null;
+        _showEmoji = false;
+        _syncLocalMessages();
+      });
+
+      _smartScrollToBottom();
+
+      if (skippedCount > 0) {
+        _showMessengerPop(
+          '$skippedCount unsupported file skipped',
+          icon: Icons.info_rounded,
+        );
+      }
+    } catch (e) {
+      debugPrint('PICK GALLERY MEDIA ERROR: $e');
+
+      if (!mounted) return;
+      _showMessengerPop(
+        'Could not send selected media',
+        icon: Icons.error_rounded,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingMedia = false;
+        });
+      }
     }
   }
 
@@ -2553,10 +3141,7 @@ void _openReactionPicker(
       setState(() {
         _replyingTo = null;
         _showEmoji = false;
-        _messages = _sortedProviderMessages(provider)
-            .where((m) => !_hiddenMessageIds.contains(m.id))
-            .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-            .toList();
+        _messages = _visibleProviderMessages(provider);
       });
 
       _smartScrollToBottom();
@@ -2663,10 +3248,7 @@ void _openReactionPicker(
       _recordDuration = Duration.zero;
       _currentRecordPath = null;
       _replyingTo = null;
-      _messages = _sortedProviderMessages(provider)
-        .where((m) => !_hiddenMessageIds.contains(m.id))
-        .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-        .toList();
+      _messages = _visibleProviderMessages(provider);
     });
 
     _smartScrollToBottom();
@@ -3171,6 +3753,18 @@ Future<void> _startCall(bool isVideo) async {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_isSendingMedia)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: const LinearProgressIndicator(
+                    minHeight: 3,
+                    backgroundColor: Color(0xFFE5E7EB),
+                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1877F2)),
+                  ),
+                ),
+              ),
             if (_replyingTo != null)
               Container(
                 margin: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
@@ -3249,7 +3843,7 @@ Future<void> _startCall(bool isVideo) async {
                     icon: Icons.photo_library_rounded,
                     onTap: () {
                       HapticFeedback.lightImpact();
-                      _pickMultipleImages();
+                      unawaited(_pickMessengerGalleryMedia());
                     },
                   ),
                   _MessengerPlainIcon(
@@ -3721,10 +4315,8 @@ Future<void> _startCall(bool isVideo) async {
   Widget build(BuildContext context) {
     final provider = context.watch<ChatProvider>();
 
-    _messages = _sortedProviderMessages(provider)
-        .where((m) => !_hiddenMessageIds.contains(m.id))
-        .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-        .toList();
+    _syncMessengerProviderState(provider);
+    _messages = _visibleProviderMessages(provider);
 
     if (_messages.length != _lastRenderedMessageCount) {
       _lastRenderedMessageCount = _messages.length;
@@ -3747,12 +4339,21 @@ Future<void> _startCall(bool isVideo) async {
               controller: _scrollController,
               keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
               padding: const EdgeInsets.fromLTRB(10, 12, 10, 6),
+              physics: const BouncingScrollPhysics(
+                parent: AlwaysScrollableScrollPhysics(),
+              ),
+              cacheExtent: 1400,
               itemCount: _messages.length,
               itemBuilder: (context, index) {
-                return _buildMessageItem(
-                  message: _messages[index],
-                  index: index,
-                  isDark: isDark,
+                final message = _messages[index];
+
+                return RepaintBoundary(
+                  key: ValueKey('message_${message.id}'),
+                  child: _buildMessageItem(
+                    message: message,
+                    index: index,
+                    isDark: isDark,
+                  ),
                 );
               },
             ),
@@ -4658,12 +5259,9 @@ class _MessageBubble extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 6),
                   child: replyBlock,
                 ),
-              _MediaAlbumGrid(
-                images: message.mediaUrls ?? const [],
-                isMe: message.isMe,
-                onTap: (index) {
-                  // Add your fullscreen viewer here later.
-                },
+              DynamicMessageMedia(
+                message: message,
+                isDark: isDark,
               ),
               if (message.text.trim().isNotEmpty)
                 Padding(

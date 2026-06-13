@@ -1,9 +1,20 @@
+// lib/widgets/dynamic_message_media.dart
+//
+// Messenger-style media rendering:
+// - Images: tap to fullscreen, pinch zoom, drag, double-tap zoom via PhotoView
+// - Videos: inline preview/play + fullscreen player with pinch zoom
+// - Albums: 2/3/4+ image grid like Messenger + fullscreen swipe gallery
+// - Files: tappable file bubble; image/video files open in viewer
+
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/core/config/app_config.dart';
+import 'package:photo_view/photo_view.dart';
 import 'package:video_player/video_player.dart';
 
 String get baseServerUrl => AppConfig.serverUrl;
@@ -21,11 +32,97 @@ String fixedMediaUrl(String? url) {
     return '$baseServerUrl$decoded';
   }
 
+  if (decoded.startsWith('media/')) {
+    return '$baseServerUrl/$decoded';
+  }
+
+  if (decoded.startsWith('/')) {
+    return '$baseServerUrl$decoded';
+  }
+
   return decoded;
 }
 
 bool _isNetworkPath(String path) {
-  return path.startsWith('http://') || path.startsWith('https://');
+  final cleanPath = path.trim().toLowerCase();
+  return cleanPath.startsWith('http://') || cleanPath.startsWith('https://');
+}
+
+bool _looksLikeImagePath(String value) {
+  final path = value.toLowerCase().split('?').first.split('#').first;
+  return path.endsWith('.jpg') ||
+      path.endsWith('.jpeg') ||
+      path.endsWith('.png') ||
+      path.endsWith('.webp') ||
+      path.endsWith('.gif') ||
+      path.endsWith('.heic') ||
+      path.endsWith('.heif');
+}
+
+bool _looksLikeVideoPath(String value) {
+  final path = value.toLowerCase().split('?').first.split('#').first;
+  return path.endsWith('.mp4') ||
+      path.endsWith('.mov') ||
+      path.endsWith('.m4v') ||
+      path.endsWith('.webm') ||
+      path.endsWith('.avi') ||
+      path.endsWith('.mkv') ||
+      path.endsWith('.3gp');
+}
+
+bool _looksLikeAudioPath(String value) {
+  final path = value.toLowerCase().split('?').first.split('#').first;
+  return path.endsWith('.mp3') ||
+      path.endsWith('.m4a') ||
+      path.endsWith('.aac') ||
+      path.endsWith('.wav') ||
+      path.endsWith('.ogg') ||
+      path.endsWith('.opus') ||
+      path.endsWith('.amr');
+}
+
+String _fileExtension(String value) {
+  final clean = value.split('?').first.split('#').first;
+  final name = clean.replaceAll('\\', '/').split('/').last;
+  final dot = name.lastIndexOf('.');
+  if (dot == -1 || dot == name.length - 1) return '';
+  return name.substring(dot + 1).toUpperCase();
+}
+
+String _fileNameFromPath(String value, String fallback) {
+  final clean = value.split('?').first.split('#').first;
+  final name = clean.replaceAll('\\', '/').split('/').last.trim();
+  return name.isEmpty ? fallback : name;
+}
+
+void _showMediaSnack(BuildContext context, String text) {
+  ScaffoldMessenger.of(context).hideCurrentSnackBar();
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(
+      content: Text(text),
+      behavior: SnackBarBehavior.floating,
+      duration: const Duration(milliseconds: 1400),
+    ),
+  );
+}
+
+enum _ViewerMediaType {
+  image,
+  video,
+}
+
+class _ViewerMedia {
+  final String path;
+  final _ViewerMediaType type;
+  final String heroTag;
+
+  const _ViewerMedia({
+    required this.path,
+    required this.type,
+    required this.heroTag,
+  });
+
+  bool get isNetwork => _isNetworkPath(path);
 }
 
 class DynamicMessageMedia extends StatelessWidget {
@@ -41,19 +138,17 @@ class DynamicMessageMedia extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     switch (message.type) {
-  case MessageType.image:
-    return _ImageBubble(message: message);
+      case MessageType.image:
+        return _ImageBubble(message: message);
 
-  case MessageType.mediaAlbum:
-    return _MediaAlbumBubble(
-      message: message,
-    );
-
-  case MessageType.audio:
-        return _AudioBubble(message: message);
+      case MessageType.mediaAlbum:
+        return _MediaAlbumBubble(message: message);
 
       case MessageType.video:
         return _VideoBubble(message: message);
+
+      case MessageType.audio:
+        return _AudioBubble(message: message);
 
       case MessageType.file:
         return _FileBubble(message: message, isDark: isDark);
@@ -62,6 +157,37 @@ class DynamicMessageMedia extends StatelessWidget {
         return const SizedBox.shrink();
     }
   }
+}
+
+void _openMediaViewer(
+  BuildContext context, {
+  required List<_ViewerMedia> items,
+  int initialIndex = 0,
+}) {
+  final cleanItems = items.where((item) => item.path.trim().isNotEmpty).toList();
+  if (cleanItems.isEmpty) return;
+
+  final safeInitialIndex = initialIndex.clamp(0, cleanItems.length - 1);
+
+  Navigator.of(context).push(
+    PageRouteBuilder(
+      opaque: true,
+      barrierColor: Colors.black,
+      pageBuilder: (_, __, ___) => _MessengerFullScreenMediaViewer(
+        items: cleanItems,
+        initialIndex: safeInitialIndex,
+      ),
+      transitionsBuilder: (_, animation, __, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOut,
+          ),
+          child: child,
+        );
+      },
+    ),
+  );
 }
 
 class _ImageBubble extends StatelessWidget {
@@ -77,12 +203,16 @@ class _ImageBubble extends StatelessWidget {
 
     if (path.isEmpty) return const SizedBox.shrink();
 
+    final heroTag = 'image_${message.id}_${path.hashCode}';
+
     final imageWidget = _isNetworkPath(path)
         ? Image.network(
             path,
             width: 230,
             height: 280,
             fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
             errorBuilder: (_, __, ___) {
               return const _BrokenMediaBox(
                 icon: Icons.broken_image_rounded,
@@ -95,6 +225,8 @@ class _ImageBubble extends StatelessWidget {
             width: 230,
             height: 280,
             fit: BoxFit.cover,
+            filterQuality: FilterQuality.medium,
+            gaplessPlayback: true,
             errorBuilder: (_, __, ___) {
               return const _BrokenMediaBox(
                 icon: Icons.broken_image_rounded,
@@ -105,24 +237,19 @@ class _ImageBubble extends StatelessWidget {
 
     return GestureDetector(
       onTap: () {
-        Navigator.push(
+        _openMediaViewer(
           context,
-          PageRouteBuilder(
-            opaque: false,
-            barrierColor: Colors.black,
-            pageBuilder: (_, __, ___) => _FullScreenImageViewer(
-              imagePath: path,
-              isNetwork: _isNetworkPath(path),
-              heroTag: 'image_${message.id}',
+          items: [
+            _ViewerMedia(
+              path: path,
+              type: _ViewerMediaType.image,
+              heroTag: heroTag,
             ),
-            transitionsBuilder: (_, animation, __, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-          ),
+          ],
         );
       },
       child: Hero(
-        tag: 'image_${message.id}',
+        tag: heroTag,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(18),
           child: imageWidget,
@@ -132,70 +259,557 @@ class _ImageBubble extends StatelessWidget {
   }
 }
 
+class _MessengerFullScreenMediaViewer extends StatefulWidget {
+  final List<_ViewerMedia> items;
+  final int initialIndex;
 
-class _FullScreenImageViewer extends StatelessWidget {
-  final String imagePath;
-  final bool isNetwork;
-  final String heroTag;
-
-  const _FullScreenImageViewer({
-    required this.imagePath,
-    required this.isNetwork,
-    required this.heroTag,
+  const _MessengerFullScreenMediaViewer({
+    required this.items,
+    required this.initialIndex,
   });
 
   @override
+  State<_MessengerFullScreenMediaViewer> createState() =>
+      _MessengerFullScreenMediaViewerState();
+}
+
+class _MessengerFullScreenMediaViewerState
+    extends State<_MessengerFullScreenMediaViewer> {
+  late final PageController _pageController;
+  late int _currentIndex;
+  bool _showBars = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex;
+    _pageController = PageController(initialPage: widget.initialIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  void _close() {
+    Navigator.of(context).pop();
+  }
+
+  Widget _buildPage(_ViewerMedia item) {
+    if (item.type == _ViewerMediaType.video) {
+      return _FullScreenVideoPage(
+        path: item.path,
+        isNetwork: item.isNetwork,
+        onToggleBars: () {
+          setState(() => _showBars = !_showBars);
+        },
+      );
+    }
+
+    return _FullScreenImagePage(
+      path: item.path,
+      isNetwork: item.isNetwork,
+      heroTag: item.heroTag,
+      onToggleBars: () {
+        setState(() => _showBars = !_showBars);
+      },
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final image = isNetwork
-        ? Image.network(
-            imagePath,
-            fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const Center(
-              child: Icon(Icons.broken_image_rounded, color: Colors.white, size: 48),
-            ),
-          )
-        : Image.file(
-            File(imagePath),
-            fit: BoxFit.contain,
-            errorBuilder: (_, __, ___) => const Center(
-              child: Icon(Icons.broken_image_rounded, color: Colors.white, size: 48),
-            ),
-          );
+    final topPadding = MediaQuery.of(context).padding.top;
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Stack(
         children: [
           Positioned.fill(
-            child: GestureDetector(
-              onVerticalDragEnd: (details) {
-                final velocity = details.primaryVelocity ?? 0;
-                if (velocity.abs() > 450) {
-                  Navigator.pop(context);
-                }
+            child: PageView.builder(
+              controller: _pageController,
+              itemCount: widget.items.length,
+              physics: const BouncingScrollPhysics(),
+              onPageChanged: (index) {
+                setState(() {
+                  _currentIndex = index;
+                });
               },
+              itemBuilder: (context, index) {
+                return _buildPage(widget.items[index]);
+              },
+            ),
+          ),
+
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            top: _showBars ? topPadding + 6 : -76,
+            left: 6,
+            right: 6,
+            child: Row(
+              children: [
+                IconButton(
+                  onPressed: _close,
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: Colors.white,
+                    size: 30,
+                  ),
+                ),
+                const Spacer(),
+                if (widget.items.length > 1)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.45),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Text(
+                      '${_currentIndex + 1}/${widget.items.length}',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w800,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                const SizedBox(width: 8),
+              ],
+            ),
+          ),
+
+          AnimatedPositioned(
+            duration: const Duration(milliseconds: 180),
+            curve: Curves.easeOut,
+            left: 0,
+            right: 0,
+            bottom: _showBars ? bottomPadding + 16 : -70,
+            child: IgnorePointer(
               child: Center(
-                child: Hero(
-                  tag: heroTag,
-                  child: InteractiveViewer(
-                    minScale: 0.8,
-                    maxScale: 4.5,
-                    child: image,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.35),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    widget.items[_currentIndex].type == _ViewerMediaType.video
+                        ? 'Pinch to zoom • Drag to move • Tap controls'
+                        : 'Pinch to zoom • Double tap to zoom • Drag to move',
+                    style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      decoration: TextDecoration.none,
+                    ),
                   ),
                 ),
               ),
             ),
           ),
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 8,
-            left: 8,
-            child: IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.close_rounded, color: Colors.white, size: 30),
-            ),
-          ),
         ],
       ),
+    );
+  }
+}
+
+class _FullScreenImagePage extends StatelessWidget {
+  final String path;
+  final bool isNetwork;
+  final String heroTag;
+  final VoidCallback onToggleBars;
+
+  const _FullScreenImagePage({
+    required this.path,
+    required this.isNetwork,
+    required this.heroTag,
+    required this.onToggleBars,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ImageProvider imageProvider =
+        isNetwork ? NetworkImage(path) : FileImage(File(path));
+
+    return GestureDetector(
+      onTap: onToggleBars,
+      child: PhotoView(
+        imageProvider: imageProvider,
+        backgroundDecoration: const BoxDecoration(color: Colors.black),
+        minScale: PhotoViewComputedScale.contained,
+        initialScale: PhotoViewComputedScale.contained,
+        maxScale: PhotoViewComputedScale.covered * 4.0,
+        enablePanAlways: true,
+        strictScale: false,
+        heroAttributes: PhotoViewHeroAttributes(tag: heroTag),
+        loadingBuilder: (context, event) {
+          return const Center(
+            child: CircularProgressIndicator(color: Colors.white),
+          );
+        },
+        errorBuilder: (context, error, stackTrace) {
+          return const Center(
+            child: Icon(
+              Icons.broken_image_rounded,
+              color: Colors.white,
+              size: 54,
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _FullScreenVideoPage extends StatefulWidget {
+  final String path;
+  final bool isNetwork;
+  final VoidCallback onToggleBars;
+
+  const _FullScreenVideoPage({
+    required this.path,
+    required this.isNetwork,
+    required this.onToggleBars,
+  });
+
+  @override
+  State<_FullScreenVideoPage> createState() => _FullScreenVideoPageState();
+}
+
+class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
+  VideoPlayerController? _controller;
+
+  bool _isReady = false;
+  bool _hasError = false;
+  bool _userPaused = false;
+  bool _resumeScheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    try {
+      if (widget.path.trim().isEmpty) {
+        if (!mounted) return;
+        setState(() => _hasError = true);
+        return;
+      }
+
+      if (widget.isNetwork) {
+        _controller = VideoPlayerController.networkUrl(Uri.parse(widget.path));
+      } else {
+        _controller = VideoPlayerController.file(File(widget.path));
+      }
+
+      await _controller!.initialize();
+      await _controller!.setLooping(false);
+      _controller!.addListener(_videoListener);
+
+      await _controller!.play();
+
+      if (!mounted) return;
+
+      setState(() {
+        _isReady = true;
+        _userPaused = false;
+      });
+    } catch (e) {
+      debugPrint('FULLSCREEN VIDEO LOAD ERROR: $e');
+
+      if (!mounted) return;
+
+      setState(() {
+        _hasError = true;
+      });
+    }
+  }
+
+  void _videoListener() {
+    if (!mounted) return;
+
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    final value = controller.value;
+    final isCompleted = value.duration > Duration.zero &&
+        value.position >= value.duration &&
+        !value.isPlaying;
+
+    if (!value.isBuffering &&
+        !value.isPlaying &&
+        !_userPaused &&
+        !isCompleted &&
+        !_resumeScheduled) {
+      _resumeScheduled = true;
+
+      Future.microtask(() async {
+        final c = _controller;
+        if (!mounted || c == null || !c.value.isInitialized) return;
+
+        if (!c.value.isBuffering &&
+            !c.value.isPlaying &&
+            !_userPaused &&
+            c.value.position < c.value.duration) {
+          try {
+            await c.play();
+          } catch (e) {
+            debugPrint('FULLSCREEN AUTO RESUME ERROR: $e');
+          }
+        }
+
+        _resumeScheduled = false;
+
+        if (mounted) setState(() {});
+      });
+    }
+
+    setState(() {});
+  }
+
+  Future<void> _togglePlay() async {
+    final controller = _controller;
+    if (controller == null || !_isReady) return;
+
+    if (controller.value.position >= controller.value.duration &&
+        controller.value.duration > Duration.zero) {
+      await controller.seekTo(Duration.zero);
+    }
+
+    if (controller.value.isPlaying) {
+      _userPaused = true;
+      await controller.pause();
+    } else {
+      _userPaused = false;
+      await controller.play();
+    }
+
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _seekRelative(Duration delta) async {
+    final controller = _controller;
+    if (controller == null || !_isReady) return;
+
+    final current = controller.value.position;
+    final duration = controller.value.duration;
+
+    var target = current + delta;
+    if (target < Duration.zero) target = Duration.zero;
+    if (duration > Duration.zero && target > duration) target = duration;
+
+    await controller.seekTo(target);
+
+    if (!_userPaused && !controller.value.isPlaying) {
+      try {
+        await controller.play();
+      } catch (_) {}
+    }
+  }
+
+  String _formatVideoTime(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+
+    if (hours > 0) return '$hours:$minutes:$seconds';
+
+    return '$minutes:$seconds';
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_videoListener);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_hasError) {
+      return Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: const Icon(
+          Icons.videocam_off_rounded,
+          color: Colors.white,
+          size: 60,
+        ),
+      );
+    }
+
+    if (!_isReady || _controller == null) {
+      return Container(
+        color: Colors.black,
+        alignment: Alignment.center,
+        child: const CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    final controller = _controller!;
+    final value = controller.value;
+    final duration = value.duration;
+    final position = value.position;
+    final isBuffering = value.isBuffering;
+    final showPlayButton = !value.isPlaying && !isBuffering;
+
+    final videoChild = Center(
+      child: AspectRatio(
+        aspectRatio: value.aspectRatio == 0 ? 16 / 9 : value.aspectRatio,
+        child: VideoPlayer(controller),
+      ),
+    );
+
+    return Stack(
+      alignment: Alignment.center,
+      children: [
+        Positioned.fill(
+          child: PhotoView.customChild(
+            backgroundDecoration: const BoxDecoration(color: Colors.black),
+            minScale: PhotoViewComputedScale.contained,
+            initialScale: PhotoViewComputedScale.contained,
+            maxScale: PhotoViewComputedScale.covered * 3.5,
+            enablePanAlways: true,
+            strictScale: false,
+            childSize: MediaQuery.of(context).size,
+            child: videoChild,
+          ),
+        ),
+
+        if (isBuffering)
+          Container(
+            width: 76,
+            height: 76,
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.48),
+              shape: BoxShape.circle,
+            ),
+            alignment: Alignment.center,
+            child: const SizedBox(
+              width: 34,
+              height: 34,
+              child: CircularProgressIndicator(
+                color: Colors.white,
+                strokeWidth: 3,
+              ),
+            ),
+          ),
+
+        if (showPlayButton)
+          GestureDetector(
+            onTap: _togglePlay,
+            child: Container(
+              width: 84,
+              height: 84,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.52),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 56,
+              ),
+            ),
+          ),
+
+        Positioned(
+          left: 16,
+          right: 16,
+          bottom: MediaQuery.of(context).padding.bottom + 50,
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.48),
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                VideoProgressIndicator(
+                  controller,
+                  allowScrubbing: true,
+                  padding: EdgeInsets.zero,
+                  colors: const VideoProgressColors(
+                    playedColor: Colors.white,
+                    bufferedColor: Colors.white54,
+                    backgroundColor: Colors.white24,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    GestureDetector(
+                      onTap: _togglePlay,
+                      child: Icon(
+                        value.isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 28,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: () => _seekRelative(const Duration(seconds: -10)),
+                      child: const Icon(
+                        Icons.replay_10_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => _seekRelative(const Duration(seconds: 10)),
+                      child: const Icon(
+                        Icons.forward_10_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        '${_formatVideoTime(position)} / ${_formatVideoTime(duration)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          decoration: TextDecoration.none,
+                        ),
+                      ),
+                    ),
+                    if (isBuffering) ...[
+                      const SizedBox(width: 8),
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                          color: Colors.white,
+                          strokeWidth: 2,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -446,26 +1060,36 @@ class _VideoBubble extends StatefulWidget {
 
 class _VideoBubbleState extends State<_VideoBubble> {
   VideoPlayerController? _controller;
+
   bool _isReady = false;
   bool _hasError = false;
+  bool _showControls = true;
+  bool _userPaused = false;
+  bool _resumeScheduled = false;
+
+  String _path = '';
+
+  Timer? _controlsTimer;
 
   @override
   void initState() {
     super.initState();
-    _initVideo();
+    _initPreview();
   }
 
-  Future<void> _initVideo() async {
+  Future<void> _initPreview() async {
     try {
       final path = fixedMediaUrl(widget.message.filePath);
 
-      if (path.isEmpty) {
+      if (path.trim().isEmpty) {
         if (!mounted) return;
         setState(() {
           _hasError = true;
         });
         return;
       }
+
+      _path = path;
 
       if (_isNetworkPath(path)) {
         _controller = VideoPlayerController.networkUrl(Uri.parse(path));
@@ -474,14 +1098,17 @@ class _VideoBubbleState extends State<_VideoBubble> {
       }
 
       await _controller!.initialize();
+      await _controller!.setLooping(false);
 
       if (!mounted) return;
+
+      _controller!.addListener(_previewListener);
 
       setState(() {
         _isReady = true;
       });
     } catch (e) {
-      debugPrint('VIDEO LOAD ERROR: $e');
+      debugPrint('VIDEO PREVIEW LOAD ERROR: $e');
 
       if (!mounted) return;
 
@@ -491,20 +1118,183 @@ class _VideoBubbleState extends State<_VideoBubble> {
     }
   }
 
-  void _toggle() {
-    if (!_isReady || _controller == null) return;
+  void _previewListener() {
+    if (!mounted) return;
 
-    setState(() {
-      if (_controller!.value.isPlaying) {
-        _controller!.pause();
-      } else {
-        _controller!.play();
-      }
+    final controller = _controller;
+    if (controller == null || !controller.value.isInitialized) return;
+
+    final value = controller.value;
+
+    final isCompleted = value.duration > Duration.zero &&
+        value.position >= value.duration &&
+        !value.isPlaying;
+
+    if (isCompleted) {
+      _showControls = true;
+      _userPaused = true;
+    }
+
+    if (!value.isBuffering &&
+        !value.isPlaying &&
+        !_userPaused &&
+        !isCompleted &&
+        !_resumeScheduled) {
+      _resumeScheduled = true;
+
+      Future.microtask(() async {
+        final c = _controller;
+        if (!mounted || c == null || !c.value.isInitialized) return;
+
+        if (!c.value.isBuffering &&
+            !c.value.isPlaying &&
+            !_userPaused &&
+            c.value.position < c.value.duration) {
+          try {
+            await c.play();
+          } catch (e) {
+            debugPrint('INLINE VIDEO AUTO RESUME ERROR: $e');
+          }
+        }
+
+        _resumeScheduled = false;
+
+        if (mounted) setState(() {});
+      });
+    }
+
+    setState(() {});
+  }
+
+  void _startControlsTimer() {
+    _controlsTimer?.cancel();
+
+    final controller = _controller;
+    if (controller == null || !controller.value.isPlaying) return;
+
+    _controlsTimer = Timer(const Duration(milliseconds: 1200), () {
+      if (!mounted) return;
+      final c = _controller;
+      if (c == null || !c.value.isPlaying) return;
+
+      setState(() {
+        _showControls = false;
+      });
     });
+  }
+
+  Future<void> _playOrPauseInline() async {
+    final controller = _controller;
+    if (controller == null || !_isReady) return;
+
+    HapticFeedback.lightImpact();
+
+    if (controller.value.position >= controller.value.duration &&
+        controller.value.duration > Duration.zero) {
+      await controller.seekTo(Duration.zero);
+    }
+
+    if (controller.value.isPlaying) {
+      _userPaused = true;
+      await controller.pause();
+      _controlsTimer?.cancel();
+
+      if (mounted) {
+        setState(() {
+          _showControls = true;
+        });
+      }
+      return;
+    }
+
+    _userPaused = false;
+    await controller.play();
+
+    if (mounted) {
+      setState(() {
+        _showControls = true;
+      });
+    }
+
+    _startControlsTimer();
+  }
+
+  void _openFullScreenVideo() {
+    if (_path.trim().isEmpty) return;
+
+    HapticFeedback.lightImpact();
+
+    // Pausing the small preview here is intentional because fullscreen
+    // owns playback after opening. This is not the buffering pause bug.
+    _controller?.pause();
+    _userPaused = true;
+    _controlsTimer?.cancel();
+
+    if (mounted) {
+      setState(() {
+        _showControls = true;
+      });
+    }
+
+    _openMediaViewer(
+      context,
+      items: [
+        _ViewerMedia(
+          path: _path,
+          type: _ViewerMediaType.video,
+          heroTag: 'video_${widget.message.id}_${_path.hashCode}',
+        ),
+      ],
+    );
+  }
+
+  void _handleVideoSurfaceTap() {
+    final controller = _controller;
+
+    if (controller == null || !_isReady) return;
+
+    if (controller.value.isPlaying && !controller.value.isBuffering) {
+      _openFullScreenVideo();
+    } else {
+      _playOrPauseInline();
+    }
+  }
+
+  Future<void> _seekInline(Duration delta) async {
+    final controller = _controller;
+    if (controller == null || !_isReady) return;
+
+    final duration = controller.value.duration;
+    var target = controller.value.position + delta;
+
+    if (target < Duration.zero) target = Duration.zero;
+    if (duration > Duration.zero && target > duration) target = duration;
+
+    await controller.seekTo(target);
+
+    if (!_userPaused && !controller.value.isPlaying) {
+      try {
+        await controller.play();
+      } catch (_) {}
+    }
+
+    _startControlsTimer();
+  }
+
+  String _formatVideoTime(Duration duration) {
+    final hours = duration.inHours;
+    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+
+    if (hours > 0) return '$hours:$minutes:$seconds';
+
+    return '$minutes:$seconds';
   }
 
   @override
   void dispose() {
+    _controlsTimer?.cancel();
+    _controller?.removeListener(_previewListener);
     _controller?.dispose();
     super.dispose();
   }
@@ -519,41 +1309,246 @@ class _VideoBubbleState extends State<_VideoBubble> {
     }
 
     if (!_isReady || _controller == null) {
-      return Container(
-        width: 230,
-        height: 160,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: Colors.black12,
-          borderRadius: BorderRadius.circular(18),
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          width: 230,
+          height: 160,
+          color: Colors.black,
+          alignment: Alignment.center,
+          child: const CircularProgressIndicator(
+            color: Colors.white,
+            strokeWidth: 2.6,
+          ),
         ),
-        child: const CircularProgressIndicator(),
       );
     }
 
-    return GestureDetector(
-      onTap: _toggle,
+    final controller = _controller!;
+    final value = controller.value;
+    final duration = value.duration;
+    final position = value.position;
+    final durationText = duration == Duration.zero ? '' : _formatVideoTime(duration);
+    final positionText = _formatVideoTime(position);
+    final isPlaying = value.isPlaying;
+    final isBuffering = value.isBuffering;
+
+    final showBigButton = (!isPlaying && !isBuffering) || _showControls;
+
+    return Hero(
+      tag: 'video_${widget.message.id}_${_path.hashCode}',
       child: ClipRRect(
         borderRadius: BorderRadius.circular(18),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            SizedBox(
-              width: 230,
-              height: 160,
-              child: VideoPlayer(_controller!),
-            ),
-            if (!_controller!.value.isPlaying)
-              const CircleAvatar(
-                radius: 30,
-                backgroundColor: Colors.black54,
-                child: Icon(
-                  Icons.play_arrow_rounded,
-                  color: Colors.white,
-                  size: 38,
+        child: Container(
+          width: 230,
+          height: 160,
+          color: Colors.black,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Positioned.fill(
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onTap: _handleVideoSurfaceTap,
+                  onDoubleTap: _openFullScreenVideo,
+                  child: FittedBox(
+                    fit: BoxFit.cover,
+                    child: SizedBox(
+                      width: value.size.width <= 0 ? 230 : value.size.width,
+                      height: value.size.height <= 0 ? 160 : value.size.height,
+                      child: VideoPlayer(controller),
+                    ),
+                  ),
                 ),
               ),
-          ],
+
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: AnimatedOpacity(
+                    opacity: _showControls || !isPlaying || isBuffering ? 1 : 0,
+                    duration: const Duration(milliseconds: 160),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withOpacity(0.05),
+                            Colors.black.withOpacity(0.38),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+
+              if (isBuffering)
+                Container(
+                  width: 62,
+                  height: 62,
+                  decoration: BoxDecoration(
+                    color: Colors.black.withOpacity(0.48),
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 3,
+                    ),
+                  ),
+                ),
+
+              if (showBigButton && !isBuffering)
+                AnimatedScale(
+                  scale: isPlaying ? 0.92 : 1,
+                  duration: const Duration(milliseconds: 160),
+                  curve: Curves.easeOutBack,
+                  child: GestureDetector(
+                    onTap: _playOrPauseInline,
+                    child: Container(
+                      width: 62,
+                      height: 62,
+                      decoration: BoxDecoration(
+                        color: Colors.black.withOpacity(0.52),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.24),
+                          width: 1,
+                        ),
+                      ),
+                      child: Icon(
+                        isPlaying
+                            ? Icons.pause_rounded
+                            : Icons.play_arrow_rounded,
+                        color: Colors.white,
+                        size: 42,
+                      ),
+                    ),
+                  ),
+                ),
+
+              Positioned(
+                left: 8,
+                right: 8,
+                bottom: 8,
+                child: AnimatedOpacity(
+                  opacity: _showControls || !isPlaying || isBuffering ? 1 : 0,
+                  duration: const Duration(milliseconds: 160),
+                  child: Row(
+                    children: [
+                      GestureDetector(
+                        onTap: _playOrPauseInline,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.58),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                isPlaying
+                                    ? Icons.pause_rounded
+                                    : Icons.play_arrow_rounded,
+                                color: Colors.white,
+                                size: 14,
+                              ),
+                              if (durationText.isNotEmpty) ...[
+                                const SizedBox(width: 4),
+                                Text(
+                                  isPlaying || isBuffering
+                                      ? '$positionText / $durationText'
+                                      : durationText,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w800,
+                                    decoration: TextDecoration.none,
+                                  ),
+                                ),
+                              ],
+                              if (isBuffering) ...[
+                                const SizedBox(width: 5),
+                                const SizedBox(
+                                  width: 10,
+                                  height: 10,
+                                  child: CircularProgressIndicator(
+                                    color: Colors.white,
+                                    strokeWidth: 1.8,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      const Spacer(),
+                      if (isPlaying || isBuffering) ...[
+                        GestureDetector(
+                          onTap: () => _seekInline(const Duration(seconds: -10)),
+                          child: Container(
+                            padding: const EdgeInsets.all(5),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.50),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.replay_10_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                      ],
+                      GestureDetector(
+                        onTap: _openFullScreenVideo,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 7,
+                            vertical: 5,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withOpacity(0.58),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: const Icon(
+                            Icons.fullscreen_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: VideoProgressIndicator(
+                  controller,
+                  allowScrubbing: true,
+                  padding: EdgeInsets.zero,
+                  colors: const VideoProgressColors(
+                    playedColor: Colors.white,
+                    bufferedColor: Colors.white54,
+                    backgroundColor: Colors.white24,
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -569,47 +1564,180 @@ class _FileBubble extends StatelessWidget {
     required this.isDark,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final fileName = message.fileName ?? 'File';
+  IconData _iconForFile(String pathOrName) {
+    if (_looksLikeImagePath(pathOrName)) return Icons.image_rounded;
+    if (_looksLikeVideoPath(pathOrName)) return Icons.play_circle_fill_rounded;
+    if (_looksLikeAudioPath(pathOrName)) return Icons.audiotrack_rounded;
 
-    return Container(
-      width: 250,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: message.isMe
-            ? const Color(0xFF1877F2)
-            : isDark
-                ? const Color(0xFF1E293B)
-                : const Color(0xFFEFEFF4),
-        borderRadius: BorderRadius.circular(18),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: Colors.white,
-            child: Icon(
-              Icons.insert_drive_file_rounded,
-              color: message.isMe ? const Color(0xFF1877F2) : Colors.black87,
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              fileName,
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: message.isMe
-                    ? Colors.white
-                    : isDark
-                        ? Colors.white
-                        : Colors.black87,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
+    final ext = _fileExtension(pathOrName).toLowerCase();
+
+    if (ext == 'pdf') return Icons.picture_as_pdf_rounded;
+    if (ext == 'doc' || ext == 'docx') return Icons.description_rounded;
+    if (ext == 'xls' || ext == 'xlsx' || ext == 'csv') {
+      return Icons.table_chart_rounded;
+    }
+    if (ext == 'ppt' || ext == 'pptx') return Icons.slideshow_rounded;
+    if (ext == 'zip' || ext == 'rar' || ext == '7z') {
+      return Icons.folder_zip_rounded;
+    }
+
+    return Icons.insert_drive_file_rounded;
+  }
+
+  String _subtitleForFile(String pathOrName) {
+    if (_looksLikeImagePath(pathOrName)) return 'Tap to view photo';
+    if (_looksLikeVideoPath(pathOrName)) return 'Tap to play video';
+    if (_looksLikeAudioPath(pathOrName)) return 'Tap to copy audio link';
+
+    final ext = _fileExtension(pathOrName);
+    if (ext.isEmpty) return 'Tap to copy file link';
+
+    return '$ext file • Tap to copy link';
+  }
+
+  Future<void> _handleTap(
+    BuildContext context,
+    String path,
+    String fileName,
+  ) async {
+    if (path.trim().isEmpty) {
+      _showMediaSnack(context, 'File not found');
+      return;
+    }
+
+    if (_looksLikeImagePath(path) || _looksLikeImagePath(fileName)) {
+      _openMediaViewer(
+        context,
+        items: [
+          _ViewerMedia(
+            path: path,
+            type: _ViewerMediaType.image,
+            heroTag: 'file_image_${path.hashCode}',
           ),
         ],
+      );
+      return;
+    }
+
+    if (_looksLikeVideoPath(path) || _looksLikeVideoPath(fileName)) {
+      _openMediaViewer(
+        context,
+        items: [
+          _ViewerMedia(
+            path: path,
+            type: _ViewerMediaType.video,
+            heroTag: 'file_video_${path.hashCode}',
+          ),
+        ],
+      );
+      return;
+    }
+
+    await Clipboard.setData(ClipboardData(text: path));
+
+    _showMediaSnack(context, 'File link copied');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rawPath = (message.filePath ?? message.audioPath ?? '').trim();
+    final path = fixedMediaUrl(rawPath);
+    final fileName = (message.fileName?.trim().isNotEmpty ?? false)
+        ? message.fileName!.trim()
+        : _fileNameFromPath(path, 'File');
+
+    final isMe = message.isMe;
+    final bgColor = isMe
+        ? const Color(0xFF1877F2)
+        : isDark
+            ? const Color(0xFF1E293B)
+            : const Color(0xFFEFEFF4);
+    final textColor = isMe
+        ? Colors.white
+        : isDark
+            ? Colors.white
+            : Colors.black87;
+    final subColor = isMe
+        ? Colors.white.withOpacity(0.78)
+        : isDark
+            ? const Color(0xFFCBD5E1)
+            : const Color(0xFF6B7280);
+
+    final displayForType = path.isNotEmpty ? path : fileName;
+
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: () => _handleTap(context, path, fileName),
+        borderRadius: BorderRadius.circular(18),
+        child: Container(
+          width: 260,
+          padding: const EdgeInsets.all(11),
+          decoration: BoxDecoration(
+            color: bgColor,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(18),
+              topRight: const Radius.circular(18),
+              bottomLeft: Radius.circular(isMe ? 18 : 6),
+              bottomRight: Radius.circular(isMe ? 6 : 18),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color:
+                      isMe ? Colors.white.withOpacity(0.22) : Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(
+                  _iconForFile(displayForType),
+                  color: isMe ? Colors.white : const Color(0xFF1877F2),
+                  size: 25,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      fileName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: textColor,
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14.5,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      _subtitleForFile(displayForType),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: subColor,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 12,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 6),
+              Icon(
+                Icons.chevron_right_rounded,
+                color: subColor,
+                size: 22,
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -651,6 +1779,7 @@ class _BrokenMediaBox extends StatelessWidget {
     );
   }
 }
+
 class _MediaAlbumBubble extends StatelessWidget {
   final ChatMessage message;
 
@@ -658,9 +1787,39 @@ class _MediaAlbumBubble extends StatelessWidget {
     required this.message,
   });
 
+  void _openAlbumViewer(
+    BuildContext context,
+    List<String> images,
+    int initialIndex,
+  ) {
+    final items = <_ViewerMedia>[];
+
+    for (var i = 0; i < images.length; i++) {
+      final path = fixedMediaUrl(images[i]);
+      if (path.trim().isEmpty) continue;
+
+      items.add(
+        _ViewerMedia(
+          path: path,
+          type: _ViewerMediaType.image,
+          heroTag: 'album_${message.id}_${i}_${path.hashCode}',
+        ),
+      );
+    }
+
+    _openMediaViewer(
+      context,
+      items: items,
+      initialIndex: initialIndex,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final images = message.mediaUrls ?? [];
+    final images = (message.mediaUrls ?? [])
+        .map(fixedMediaUrl)
+        .where((path) => path.trim().isNotEmpty)
+        .toList();
 
     if (images.isEmpty) {
       return const SizedBox.shrink();
@@ -682,36 +1841,56 @@ class _MediaAlbumBubble extends StatelessWidget {
       int index, {
       bool showOverlay = false,
     }) {
-      final fixedPath = fixedMediaUrl(path);
-
       return GestureDetector(
-        onTap: () {},
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            _isNetworkPath(fixedPath)
-                ? Image.network(
-                    fixedPath,
-                    fit: BoxFit.cover,
-                  )
-                : Image.file(
-                    File(fixedPath),
-                    fit: BoxFit.cover,
-                  ),
-            if (showOverlay)
-              Container(
-                color: Colors.black54,
-                alignment: Alignment.center,
-                child: Text(
-                  '+$extra',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
+        onTap: () {
+          _openAlbumViewer(context, images, index);
+        },
+        child: Hero(
+          tag: 'album_${message.id}_${index}_${path.hashCode}',
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              _isNetworkPath(path)
+                  ? Image.network(
+                      path,
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.medium,
+                      gaplessPlayback: true,
+                      errorBuilder: (_, __, ___) {
+                        return const _BrokenMediaBox(
+                          icon: Icons.broken_image_rounded,
+                          text: 'Image not found',
+                        );
+                      },
+                    )
+                  : Image.file(
+                      File(path),
+                      fit: BoxFit.cover,
+                      filterQuality: FilterQuality.medium,
+                      gaplessPlayback: true,
+                      errorBuilder: (_, __, ___) {
+                        return const _BrokenMediaBox(
+                          icon: Icons.broken_image_rounded,
+                          text: 'Image not found',
+                        );
+                      },
+                    ),
+              if (showOverlay)
+                Container(
+                  color: Colors.black54,
+                  alignment: Alignment.center,
+                  child: Text(
+                    '+$extra',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 28,
+                      fontWeight: FontWeight.w800,
+                      decoration: TextDecoration.none,
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       );
     }
@@ -719,8 +1898,8 @@ class _MediaAlbumBubble extends StatelessWidget {
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
       child: SizedBox(
-        width: 240,
-        height: 190,
+        width: 244,
+        height: 196,
         child: images.length == 2
             ? Row(
                 children: [

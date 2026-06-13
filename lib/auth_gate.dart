@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import 'package:messaging_app/features/auth/auth_provider.dart';
 import 'package:messaging_app/login_page.dart';
 import 'package:messaging_app/core/api_client.dart';
+import 'package:messaging_app/core/call/global_call_handler.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -26,6 +27,10 @@ class _AuthGateState extends State<AuthGate> {
   bool _resolvingUser = false;
 
   int? _lastResolvedAuthUserId;
+
+  bool _globalCallSocketStarting = false;
+  bool _globalCallSocketStarted = false;
+  String? _globalCallSocketUserId;
 
   @override
   void initState() {
@@ -124,8 +129,6 @@ class _AuthGateState extends State<AuthGate> {
 
     final authUserId = int.tryParse(rawUserId);
 
-    // Main fix:
-    // Do not resolve again and again for the same logged-in user.
     if (_resolvedUserLoaded && _lastResolvedAuthUserId == authUserId) return;
     if (_resolvingUser) return;
 
@@ -172,13 +175,82 @@ class _AuthGateState extends State<AuthGate> {
     }
   }
 
+  Future<void> _startGlobalCallSocketIfNeeded({
+    required String currentUserId,
+    required String currentUserName,
+    required String currentUserAvatar,
+  }) async {
+    if (currentUserId.trim().isEmpty) {
+      debugPrint('AUTH GATE GLOBAL CALL ERROR: currentUserId empty');
+      return;
+    }
+
+    if (_globalCallSocketStarting) {
+      debugPrint('AUTH GATE GLOBAL CALL: already starting');
+      return;
+    }
+
+    if (_globalCallSocketStarted && _globalCallSocketUserId == currentUserId) {
+      debugPrint('AUTH GATE GLOBAL CALL: already started for $currentUserId');
+      return;
+    }
+
+    _globalCallSocketStarting = true;
+
+    try {
+      final accessToken = _firstNotEmpty([
+        await ApiClient.storage.read(key: 'access'),
+        await ApiClient.storage.read(key: 'access_token'),
+        await ApiClient.storage.read(key: 'token'),
+      ]);
+
+      if (accessToken.isEmpty) {
+        debugPrint('AUTH GATE GLOBAL CALL ERROR: access token empty');
+        return;
+      }
+
+      debugPrint('');
+      debugPrint('################################################');
+      debugPrint('### AUTH GATE STARTING GLOBAL CALL SOCKET');
+      debugPrint('################################################');
+      debugPrint('currentUserId: $currentUserId');
+      debugPrint('currentUserName: $currentUserName');
+      debugPrint('token exists: ${accessToken.isNotEmpty}');
+      debugPrint('################################################');
+
+      await GlobalCallHandler.instance.connectGlobalIncomingCallSocket(
+        accessToken: accessToken,
+        currentUserId: currentUserId,
+        currentUserName: currentUserName,
+        currentUserAvatar: currentUserAvatar,
+      );
+
+      _globalCallSocketStarted = true;
+      _globalCallSocketUserId = currentUserId;
+
+      debugPrint('AUTH GATE GLOBAL CALL SOCKET READY EVERYWHERE');
+    } catch (e, st) {
+      debugPrint('AUTH GATE GLOBAL CALL SOCKET ERROR: $e');
+      debugPrint(st.toString());
+    } finally {
+      _globalCallSocketStarting = false;
+    }
+  }
+
   void _clearResolvedUser() {
     _resolvedUserId = '';
     _resolvedUserName = '';
     _resolvedUserAvatar = '';
+
     _resolvedUserLoaded = false;
     _resolvingUser = false;
     _lastResolvedAuthUserId = null;
+
+    _globalCallSocketStarting = false;
+    _globalCallSocketStarted = false;
+    _globalCallSocketUserId = null;
+
+    GlobalCallHandler.instance.dispose();
   }
 
   @override
@@ -220,13 +292,9 @@ class _AuthGateState extends State<AuthGate> {
 
     final authUserId = int.tryParse(fallbackUserId);
 
-    // Main fix:
-    // addPostFrameCallback should only run when user is not resolved yet
-    // or when a different user logs in.
     if (!_resolvedUserLoaded && !_resolvingUser) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-
         _resolveUserOnly(user: user);
       });
     } else if (_lastResolvedAuthUserId != null &&
@@ -242,6 +310,9 @@ class _AuthGateState extends State<AuthGate> {
           _resolvedUserAvatar = '';
           _resolvedUserLoaded = false;
           _lastResolvedAuthUserId = null;
+
+          _globalCallSocketStarted = false;
+          _globalCallSocketUserId = null;
         });
 
         _resolveUserOnly(user: user);
@@ -269,6 +340,21 @@ class _AuthGateState extends State<AuthGate> {
           child: CircularProgressIndicator(),
         ),
       );
+    }
+
+    if (currentUserId.isNotEmpty &&
+        !_globalCallSocketStarting &&
+        (!_globalCallSocketStarted ||
+            _globalCallSocketUserId != currentUserId)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+
+        _startGlobalCallSocketIfNeeded(
+          currentUserId: currentUserId,
+          currentUserName: currentUserName,
+          currentUserAvatar: currentUserAvatar,
+        );
+      });
     }
 
     return ChatListScreen(

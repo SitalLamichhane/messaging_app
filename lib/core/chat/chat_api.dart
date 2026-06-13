@@ -35,11 +35,7 @@ class ChatApi {
   }) async {
     final formData = FormData.fromMap({
       'name': name.trim(),
-
-      // Django may receive this as list when using multipart.
-      // Backend should use request.data.getlist("member_ids").
       'member_ids': memberIds,
-
       if (groupImage != null)
         'group_image': await MultipartFile.fromFile(
           groupImage.path,
@@ -140,6 +136,50 @@ class ChatApi {
     );
   }
 
+static Future<Response> sendImages({
+  required int conversationId,
+  required List<File> images,
+  String? caption,
+}) async {
+  if (images.isEmpty) {
+    throw Exception('No images selected');
+  }
+
+  final formData = FormData();
+
+  formData.fields.add(
+    const MapEntry('message_type', 'media_album'),
+  );
+
+  if (caption != null && caption.trim().isNotEmpty) {
+    formData.fields.add(
+      MapEntry('text', caption.trim()),
+    );
+  }
+
+  for (final image in images) {
+    formData.files.add(
+      MapEntry(
+        'media',
+        await MultipartFile.fromFile(
+          image.path,
+          filename: image.path.split('/').last,
+        ),
+      ),
+    );
+  }
+
+  return ApiClient.dio.post(
+    '/chat/conversations/$conversationId/send/',
+    data: formData,
+    options: Options(
+      contentType: 'multipart/form-data',
+      receiveTimeout: const Duration(seconds: 60),
+      sendTimeout: const Duration(seconds: 60),
+    ),
+  );
+}
+
   static Future<Response> sendVideo({
     required int conversationId,
     required File video,
@@ -200,6 +240,33 @@ class ChatApi {
       '/chat/conversations/$conversationId/send/',
       data: formData,
       options: Options(contentType: 'multipart/form-data'),
+    );
+  }
+
+  static Future<Response> deleteMessageForMe({
+    required int conversationId,
+    required int messageId,
+  }) {
+    return ApiClient.dio.delete(
+      '/chat/conversations/$conversationId/messages/$messageId/delete-for-me/',
+    );
+  }
+
+  static Future<Response> deleteMessageForEveryone({
+    required int conversationId,
+    required int messageId,
+  }) {
+    return ApiClient.dio.delete(
+      '/chat/conversations/$conversationId/messages/$messageId/delete-for-everyone/',
+    );
+  }
+
+  static Future<Response> togglePinMessage({
+    required int conversationId,
+    required int messageId,
+  }) {
+    return ApiClient.dio.post(
+      '/chat/conversations/$conversationId/messages/$messageId/pin/',
     );
   }
 }

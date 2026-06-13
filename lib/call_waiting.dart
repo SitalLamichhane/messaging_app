@@ -604,7 +604,7 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       if ((callId ?? '').trim().isNotEmpty) {
         try {
           _logSmall('Ending CallKit call with id: ${callId!.trim()}');
-          await FlutterCallkitIncoming.endCall(callId.trim());
+    
           _logSmall('CallKit endCall success');
         } catch (e, st) {
           debugPrint('!!!!!!!!!! CALL WAITING END CALLKIT ERROR !!!!!!!!!!');
@@ -617,9 +617,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       }
 
       if (!mounted) {
-        _logSmall('Not opening CallScreen because widget unmounted after CallKit end');
-        return;
-      }
+    _logSmall('Not opening CallScreen because widget unmounted');
+   return;
+   }
 
       /*
         Remove waiting handlers before opening CallScreen.

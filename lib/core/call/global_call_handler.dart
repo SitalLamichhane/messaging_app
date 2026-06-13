@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:messaging_app/incoming_call_screen.dart';
 import 'package:messaging_app/call_waiting.dart';
+import 'package:messaging_app/call_screen.dart';
 import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/core/config/app_config.dart';
 import 'package:messaging_app/core/call/call_socket_service.dart';
@@ -498,7 +499,8 @@ class GlobalCallHandler {
   }) async {
     debugPrint('');
     debugPrint('################################################');
-    debugPrint('### GLOBAL CALLKIT ACCEPT RECEIVED');
+    debugPrint('### GLOBAL CALLKIT ANSWER RECEIVED');
+    debugPrint('### OPEN CALL SCREEN DIRECTLY');
     debugPrint('################################################');
     debugPrint('callId: $callId');
     debugPrint('conversationId: $conversationId');
@@ -506,6 +508,7 @@ class GlobalCallHandler {
     debugPrint('callerName: $callerName');
     debugPrint('callerAvatar: $callerAvatar');
     debugPrint('isVideoCall: $isVideoCall');
+    debugPrint('################################################');
 
     await _loadCurrentUserFromStorage();
 
@@ -514,40 +517,107 @@ class GlobalCallHandler {
     final currentAvatar = _currentUserAvatar ?? '';
 
     if (currentId.trim().isEmpty) {
-      debugPrint('CALLKIT ACCEPT ERROR: current user id empty');
+      debugPrint('CALLKIT ANSWER ERROR: current user id empty');
       return;
     }
 
     if (conversationId.trim().isEmpty) {
-      debugPrint('CALLKIT ACCEPT ERROR: conversation id empty');
+      debugPrint('CALLKIT ANSWER ERROR: conversation id empty');
       return;
     }
 
     if (callerId.trim().isEmpty) {
-      debugPrint('CALLKIT ACCEPT ERROR: caller id empty');
+      debugPrint('CALLKIT ANSWER ERROR: caller id empty');
       return;
     }
 
     if (callerId.trim() == currentId.trim()) {
-      debugPrint('CALLKIT ACCEPT IGNORED: caller is current user');
+      debugPrint('CALLKIT ANSWER IGNORED: caller is current user');
       return;
     }
 
-    /*
-      CallKit accept means the user already accepted from native screen.
-      So open CallWaitingScreen directly.
-    */
-    await _openCallWaitingScreen(
-      currentUserId: currentId,
-      currentUserName: currentName,
-      currentUserAvatar: currentAvatar,
-      callerId: callerId,
-      callerName: callerName.trim().isEmpty ? 'Incoming call' : callerName,
-      callerAvatar: callerAvatar,
-      isVideoCall: isVideoCall,
-      conversationId: conversationId,
-      callId: callId.trim().isNotEmpty ? callId : null,
+    final cleanCallId = callId.trim().isNotEmpty ? callId.trim() : null;
+    final cleanConversationId = conversationId.trim();
+    final cleanCallerId = callerId.trim();
+
+    if (_isSameActiveIncomingCall(
+      callerId: cleanCallerId,
+      conversationId: cleanConversationId,
+      callId: cleanCallId,
+    )) {
+      debugPrint('CALLKIT ANSWER IGNORED: same call already open/opening');
+      return;
+    }
+
+    if (_callScreenOpen || _openingIncomingScreen) {
+      debugPrint(
+        'CALLKIT ANSWER IGNORED: another call screen already open/opening',
+      );
+      return;
+    }
+
+    _openingIncomingScreen = true;
+    _callScreenOpen = true;
+    _activeIncomingCallerId = cleanCallerId;
+    _activeIncomingConversationId = cleanConversationId;
+    _activeIncomingCallId = cleanCallId;
+    _lastIncomingKey = _buildIncomingKey(
+      callerId: cleanCallerId,
+      conversationId: cleanConversationId,
+      callId: cleanCallId,
     );
+    _lastIncomingKeyTime = DateTime.now();
+
+    final navigator = await _waitForNavigator();
+
+    if (navigator == null) {
+      debugPrint('CALLKIT ANSWER ERROR: navigator null after wait');
+      markCallScreenClosed();
+      return;
+    }
+
+    try {
+      debugPrint('CALLKIT ANSWER: pushing CallScreen directly');
+
+      navigator.pushAndRemoveUntil(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => CallScreen(
+            name: callerName.trim().isEmpty
+                ? 'Incoming call'
+                : callerName.trim(),
+            avatarUrl: callerAvatar.trim(),
+            isVideoCall: isVideoCall,
+            chat: null,
+            currentUserId: currentId.trim(),
+            currentUserName: currentName.trim(),
+            currentUserAvatar: currentAvatar.trim(),
+            receiverId: cleanCallerId,
+            isCaller: false,
+
+            /*
+              Killed/background CallKit ANSWER:
+              - Open CallScreen directly.
+              - SDP offer may not exist yet.
+              - CallScreen connects /ws/call/<conversation_id>/.
+              - CallProvider waits for call_offer.
+              - CallScreen sends call_ready after provider handlers are ready.
+            */
+            incomingOffer: null,
+
+            conversationId: cleanConversationId,
+            callId: cleanCallId,
+          ),
+        ),
+        (route) => route.isFirst,
+      );
+    } catch (e, st) {
+      debugPrint('CALLKIT ANSWER OPEN CALL SCREEN ERROR: $e');
+      debugPrint(st.toString());
+      markCallScreenClosed();
+    } finally {
+      _openingIncomingScreen = false;
+    }
   }
 
   Future<void> rejectIncomingCallFromCallKit({
@@ -818,7 +888,7 @@ class GlobalCallHandler {
             conversationId: conversationId,
             callId: callId,
             chat: null,
-            emitAcceptOnOpen: false,
+            emitAcceptOnOpen: true,
           ),
         ),
       );

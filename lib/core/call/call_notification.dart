@@ -57,7 +57,7 @@ class NotificationService {
 
   static bool _initialized = false;
   static bool _callKitListenerRegistered = false;
-  static bool _handlingAccept = false;
+
   static bool _handlingDecline = false;
   static bool _handlingTimeout = false;
 
@@ -77,6 +77,11 @@ class NotificationService {
 
     await _requestFirebasePermission();
     await _requestCallKitPermissions();
+
+    /*
+      This listener handles DECLINE and TIMEOUT only.
+      ANSWER is handled in main.dart to avoid duplicate screens.
+    */
     _listenCallKitEvents();
 
     await saveCurrentToken();
@@ -103,7 +108,7 @@ class NotificationService {
 
       if (type == 'incoming_call') {
         debugPrint(
-          'FOREGROUND INCOMING CALL FCM SKIPPED: socket should handle UI',
+          'FOREGROUND INCOMING CALL FCM SKIPPED: global socket handles UI',
         );
         return;
       }
@@ -111,6 +116,10 @@ class NotificationService {
       debugPrint('FOREGROUND FCM IGNORED TYPE: $type');
     });
 
+    /*
+      User taps the notification body, not ANSWER.
+      In that case, open CallWaitingScreen.
+    */
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
       debugPrint('OPENED FROM BACKGROUND FCM DATA: ${message.data}');
 
@@ -121,6 +130,10 @@ class NotificationService {
       }
     });
 
+    /*
+      App opened from terminated state by tapping notification body.
+      This is not CallKit ANSWER. ANSWER is handled in main.dart.
+    */
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
 
     if (initialMessage != null) {
@@ -203,21 +216,15 @@ class NotificationService {
 
       switch (event.event) {
         case Event.actionCallAccept:
-          if (_handlingAccept) {
-            debugPrint('CALLKIT ACCEPT IGNORED: already handling');
-            return;
-          }
-
-          _handlingAccept = true;
-
-          try {
-            await _acceptCall(extra, body);
-          } finally {
-            Future.delayed(const Duration(milliseconds: 1000), () {
-              _handlingAccept = false;
-            });
-          }
-
+          /*
+            IMPORTANT:
+            Do not open CallWaitingScreen here.
+            main.dart handles ANSWER. If this file also handles ANSWER,
+            two screens can open or the app can fall back to ChatListScreen.
+          */
+          debugPrint(
+            'CALLKIT ACCEPT IGNORED IN NotificationService. main.dart handles ANSWER.',
+          );
           break;
 
         case Event.actionCallDecline:
@@ -317,7 +324,11 @@ class NotificationService {
       ]);
 
       final isVideoCall =
-          _readBool(data['is_video_call']) || _readBool(data['isVideoCall']);
+      _readBool(data['is_video_call']) ||
+      _readBool(data['isVideoCall']) ||
+      _readBool(data['video']) ||
+       data['type'] == 1 ||
+       data['type']?.toString() == '1';
 
       if (callerId.isEmpty) {
         debugPrint('SHOW INCOMING CALL ERROR: callerId empty');
@@ -424,6 +435,10 @@ class NotificationService {
     }
   }
 
+  /*
+    Kept as a fallback/helper, but NotificationService does not call this from
+    Event.actionCallAccept anymore. main.dart handles ANSWER.
+  */
   static Future<void> _acceptCall(
     Map<String, dynamic> extra,
     Map<String, dynamic> body,
@@ -483,13 +498,13 @@ class NotificationService {
             (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
             '';
 
-    debugPrint('================ CALL ACCEPT ================');
+    debugPrint('================ CALL ACCEPT FALLBACK ================');
     debugPrint('CALL ACCEPT currentUserId=$currentUserId');
     debugPrint('CALL ACCEPT callId=$callId');
     debugPrint('CALL ACCEPT callerId=$callerId');
     debugPrint('CALL ACCEPT conversationId=$conversationId');
     debugPrint('CALL ACCEPT isVideoCall=$isVideoCall');
-    debugPrint('=============================================');
+    debugPrint('=====================================================');
 
     if (currentUserId.isEmpty) {
       debugPrint('CALL ACCEPT ERROR: currentUserId empty');
@@ -506,8 +521,6 @@ class NotificationService {
       return;
     }
 
-    debugPrint('CALL ACCEPT OPENING CALL WAITING SCREEN ONLY');
-
     await _openCallWaitingScreen(
       currentUserId: currentUserId,
       currentUserName: currentUserName,
@@ -520,11 +533,11 @@ class NotificationService {
       callId: callId,
     );
 
+    /*
+      Do NOT call endCall(callId) here.
+      ANSWER means accepted, not ended.
+    */
     if (callId.isNotEmpty) {
-      Future.delayed(const Duration(milliseconds: 1500), () async {
-        await endCall(callId);
-      });
-
       unawaited(
         _safeUpdateCallStatus(
           callId: callId,
@@ -824,8 +837,12 @@ class NotificationService {
       'id',
     ]);
 
-    final isVideoCall =
-        _readBool(data['is_video_call']) || _readBool(data['isVideoCall']);
+     final isVideoCall =
+     _readBool(data['is_video_call']) ||
+     _readBool(data['isVideoCall']) ||
+     _readBool(data['video']) ||
+     data['type'] == 1 ||
+     data['type']?.toString() == '1';
 
     debugPrint('OPEN CALL WAITING FROM FCM CLICK');
     debugPrint('currentUserId=$currentUserId');
@@ -932,6 +949,8 @@ class NotificationService {
               isVideoCall: isVideoCall,
               conversationId: conversationId,
               callId: callId,
+              chat: null,
+              emitAcceptOnOpen: true,
             ),
           ),
           (route) => route.isFirst,

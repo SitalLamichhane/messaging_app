@@ -1,4 +1,5 @@
-
+import java.util.Properties
+import java.io.FileInputStream
 
 plugins {
     id("com.android.application")
@@ -7,10 +8,23 @@ plugins {
     id("com.google.gms.google-services")
 }
 
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+} else {
+    throw GradleException("Missing key.properties file. Create it at android/key.properties")
+}
+
+fun requireKeystoreProperty(name: String): String {
+    return keystoreProperties.getProperty(name)
+        ?: throw GradleException("Missing $name in android/key.properties")
+}
+
 android {
     namespace = "com.example.messaging_app"
 
-    // Use fixed SDK because Firebase / notification / call plugins need newer SDK.
     compileSdk = 36
 
     ndkVersion = flutter.ndkVersion
@@ -28,15 +42,22 @@ android {
     defaultConfig {
         applicationId = "com.example.messaging_app"
 
-        // Keep at least 23/24 for modern call + notification plugins.
         minSdk = 24
-
         targetSdk = 36
 
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
         multiDexEnabled = true
+    }
+
+    signingConfigs {
+        create("release") {
+            keyAlias = requireKeystoreProperty("keyAlias")
+            keyPassword = requireKeystoreProperty("keyPassword")
+            storeFile = file(requireKeystoreProperty("storeFile"))
+            storePassword = requireKeystoreProperty("storePassword")
+        }
     }
 
     buildTypes {
@@ -46,7 +67,7 @@ android {
         }
 
         release {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
             isMinifyEnabled = false
             isShrinkResources = false
         }
@@ -62,7 +83,5 @@ dependencies {
 
     implementation("androidx.multidex:multidex:2.0.1")
 
-    // Firebase Messaging dependency. Flutter plugin also adds it,
-    // but keeping this helps avoid missing native dependency issues.
     implementation("com.google.firebase:firebase-messaging:24.1.0")
 }
