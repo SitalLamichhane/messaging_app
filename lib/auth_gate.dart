@@ -223,6 +223,7 @@ class _AuthGateState extends State<AuthGate> {
         currentUserId: currentUserId,
         currentUserName: currentUserName,
         currentUserAvatar: currentUserAvatar,
+        allowConnect: true,
       );
 
       _globalCallSocketStarted = true;

@@ -9,7 +9,6 @@ import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/core/chat/chat_provider.dart';
 import 'package:messaging_app/core/config/app_config.dart';
-// import 'package:messaging_app/pages.dart'; // PagesScreen temporarily commented
 import 'package:messaging_app/profile_page.dart';
 import 'package:provider/provider.dart';
 
@@ -44,7 +43,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
 
-      final storedUserId = (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
+      final storedUserId =
+          (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
 
       if (!mounted) return;
 
@@ -93,7 +93,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     if (index == 1) {
       page = CallHistoryScreen(
-        currentUserId: widget.currentUserId,
+        currentUserId: _activeCurrentUserId(),
         currentUserName: widget.currentUserName,
         currentUserAvatar: widget.currentUserAvatar,
       );
@@ -101,7 +101,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       page = ProfileScreen(
         chatId: '',
         chatName: '',
-        currentUserId: widget.currentUserId,
+        currentUserId: _activeCurrentUserId(),
         currentUserName: widget.currentUserName,
         currentUserAvatar: widget.currentUserAvatar,
       );
@@ -208,54 +208,27 @@ class _ChatListScreenState extends State<ChatListScreen> {
     return '';
   }
 
-  String _memberRealName(ChatUser member) {
-    final name = member.name.trim();
-    return name.isEmpty ? 'Unknown' : name;
-  }
-
   String _memberNickname(ChatItem chat, String memberId) {
     return chat.memberNicknames[memberId]?.trim() ?? '';
   }
 
   String _chatAvatarUrl(ChatItem chat) {
-    final directAvatar = chat.avatarUrl.trim();
-
-    if (directAvatar.isNotEmpty) {
-      return directAvatar;
+    if (chat.isGroup) {
+      return chat.avatarUrl.trim();
     }
 
-    // If ChatItem.avatarUrl is empty, find the image from members.
-    // This works when backend sends:
-    // members: [{ user: { profile_picture: "..." } }]
+    final currentUserId = _activeCurrentUserId();
+
     for (final member in chat.members) {
-      final memberAvatar = member.avatarUrl.trim();
+      final memberId = member.id.toString().trim();
 
-      if (memberAvatar.isEmpty) continue;
+      if (memberId.isEmpty) continue;
 
-      // Prefer the member whose name is shown in this row.
-      if (member.name.trim().toLowerCase() == chat.name.trim().toLowerCase()) {
-        return memberAvatar;
-      }
-    }
-
-    // Fallback: choose the first member image that is not current user.
-    for (final member in chat.members) {
-      final memberAvatar = member.avatarUrl.trim();
-
-      if (memberAvatar.isEmpty) continue;
-
-      if (_activeCurrentUserId().isNotEmpty &&
-          member.id.toString() == _activeCurrentUserId()) {
+      if (currentUserId.isNotEmpty && memberId == currentUserId) {
         continue;
       }
 
-      return memberAvatar;
-    }
-
-    // Last fallback: use any member image.
-    for (final member in chat.members) {
       final memberAvatar = member.avatarUrl.trim();
-
       if (memberAvatar.isNotEmpty) {
         return memberAvatar;
       }
@@ -281,9 +254,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
         continue;
       }
 
-      // Messenger rule:
-      // 1. If nickname is set for this conversation, show nickname.
-      // 2. If nickname is empty/removed, show latest real profile name.
       final nickname = _memberNickname(chat, memberId);
       if (nickname.isNotEmpty) {
         return nickname;
@@ -653,10 +623,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final items = [
       _BottomNavItemData(Icons.chat_bubble_outline, 'Chats'),
       _BottomNavItemData(Icons.call_outlined, 'Calls'),
-
-      // PagesScreen temporarily commented
-      // _BottomNavItemData(Icons.description_outlined, 'Pages'),
-
       _BottomNavItemData(Icons.person_outline, 'Profile'),
     ];
 
@@ -752,14 +718,12 @@ class _Avatar extends StatelessWidget {
       return cleanValue;
     }
 
-    // If backend returns only "/media/...", convert it to full backend URL.
     if (cleanValue.startsWith('/media/')) {
-      return '${AppConfig.apiBaseUrl}$cleanValue';
+      return '${AppConfig.serverUrl}$cleanValue';
     }
 
-    // If backend returns "media/...", convert it to full backend URL.
     if (cleanValue.startsWith('media/')) {
-      return '${AppConfig.apiBaseUrl}/$cleanValue';
+      return '${AppConfig.serverUrl}/$cleanValue';
     }
 
     return cleanValue;

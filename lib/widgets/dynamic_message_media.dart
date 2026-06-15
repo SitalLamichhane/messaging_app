@@ -5,6 +5,13 @@
 // - Videos: inline preview/play + fullscreen player with pinch zoom
 // - Albums: 2/3/4+ image grid like Messenger + fullscreen swipe gallery
 // - Files: tappable file bubble; image/video files open in viewer
+//
+// Updated video behavior:
+// - Inline videos DO NOT autoplay
+// - Fullscreen videos DO NOT autoplay
+// - Videos DO NOT loop
+// - Videos DO NOT force auto-resume after user pause/end
+// - Buffering only shows loader; user controls playback like Messenger
 
 import 'dart:async';
 import 'dart:io';
@@ -490,8 +497,7 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
 
   bool _isReady = false;
   bool _hasError = false;
-  bool _userPaused = false;
-  bool _resumeScheduled = false;
+  bool _userPaused = true;
 
   @override
   void initState() {
@@ -517,13 +523,11 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
       await _controller!.setLooping(false);
       _controller!.addListener(_videoListener);
 
-      await _controller!.play();
-
       if (!mounted) return;
 
       setState(() {
         _isReady = true;
-        _userPaused = false;
+        _userPaused = true;
       });
     } catch (e) {
       debugPrint('FULLSCREEN VIDEO LOAD ERROR: $e');
@@ -547,32 +551,8 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
         value.position >= value.duration &&
         !value.isPlaying;
 
-    if (!value.isBuffering &&
-        !value.isPlaying &&
-        !_userPaused &&
-        !isCompleted &&
-        !_resumeScheduled) {
-      _resumeScheduled = true;
-
-      Future.microtask(() async {
-        final c = _controller;
-        if (!mounted || c == null || !c.value.isInitialized) return;
-
-        if (!c.value.isBuffering &&
-            !c.value.isPlaying &&
-            !_userPaused &&
-            c.value.position < c.value.duration) {
-          try {
-            await c.play();
-          } catch (e) {
-            debugPrint('FULLSCREEN AUTO RESUME ERROR: $e');
-          }
-        }
-
-        _resumeScheduled = false;
-
-        if (mounted) setState(() {});
-      });
+    if (isCompleted) {
+      _userPaused = true;
     }
 
     setState(() {});
@@ -610,12 +590,6 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
     if (duration > Duration.zero && target > duration) target = duration;
 
     await controller.seekTo(target);
-
-    if (!_userPaused && !controller.value.isPlaying) {
-      try {
-        await controller.play();
-      } catch (_) {}
-    }
   }
 
   String _formatVideoTime(Duration duration) {
@@ -675,15 +649,18 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
       alignment: Alignment.center,
       children: [
         Positioned.fill(
-          child: PhotoView.customChild(
-            backgroundDecoration: const BoxDecoration(color: Colors.black),
-            minScale: PhotoViewComputedScale.contained,
-            initialScale: PhotoViewComputedScale.contained,
-            maxScale: PhotoViewComputedScale.covered * 3.5,
-            enablePanAlways: true,
-            strictScale: false,
-            childSize: MediaQuery.of(context).size,
-            child: videoChild,
+          child: GestureDetector(
+            onTap: widget.onToggleBars,
+            child: PhotoView.customChild(
+              backgroundDecoration: const BoxDecoration(color: Colors.black),
+              minScale: PhotoViewComputedScale.contained,
+              initialScale: PhotoViewComputedScale.contained,
+              maxScale: PhotoViewComputedScale.covered * 3.5,
+              enablePanAlways: true,
+              strictScale: false,
+              childSize: MediaQuery.of(context).size,
+              child: videoChild,
+            ),
           ),
         ),
 
@@ -1064,8 +1041,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
   bool _isReady = false;
   bool _hasError = false;
   bool _showControls = true;
-  bool _userPaused = false;
-  bool _resumeScheduled = false;
+  bool _userPaused = true;
 
   String _path = '';
 
@@ -1106,6 +1082,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
 
       setState(() {
         _isReady = true;
+        _userPaused = true;
+        _showControls = true;
       });
     } catch (e) {
       debugPrint('VIDEO PREVIEW LOAD ERROR: $e');
@@ -1133,34 +1111,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
     if (isCompleted) {
       _showControls = true;
       _userPaused = true;
-    }
-
-    if (!value.isBuffering &&
-        !value.isPlaying &&
-        !_userPaused &&
-        !isCompleted &&
-        !_resumeScheduled) {
-      _resumeScheduled = true;
-
-      Future.microtask(() async {
-        final c = _controller;
-        if (!mounted || c == null || !c.value.isInitialized) return;
-
-        if (!c.value.isBuffering &&
-            !c.value.isPlaying &&
-            !_userPaused &&
-            c.value.position < c.value.duration) {
-          try {
-            await c.play();
-          } catch (e) {
-            debugPrint('INLINE VIDEO AUTO RESUME ERROR: $e');
-          }
-        }
-
-        _resumeScheduled = false;
-
-        if (mounted) setState(() {});
-      });
+      _controlsTimer?.cancel();
     }
 
     setState(() {});
@@ -1224,8 +1175,6 @@ class _VideoBubbleState extends State<_VideoBubble> {
 
     HapticFeedback.lightImpact();
 
-    // Pausing the small preview here is intentional because fullscreen
-    // owns playback after opening. This is not the buffering pause bug.
     _controller?.pause();
     _userPaused = true;
     _controlsTimer?.cancel();
@@ -1271,12 +1220,6 @@ class _VideoBubbleState extends State<_VideoBubble> {
     if (duration > Duration.zero && target > duration) target = duration;
 
     await controller.seekTo(target);
-
-    if (!_userPaused && !controller.value.isPlaying) {
-      try {
-        await controller.play();
-      } catch (_) {}
-    }
 
     _startControlsTimer();
   }

@@ -1,10 +1,9 @@
-<!-- android/app/src/main/AndroidManifest.xml -->
-
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.example.messaging_app">
 
     <!-- Network -->
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
     <!-- Audio / Video call permissions -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -12,13 +11,15 @@
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
 
     <!-- Bluetooth audio route permissions -->
-    <uses-permission android:name="android.permission.BLUETOOTH"
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_ADMIN"
         android:maxSdkVersion="30" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
-    <!-- Notification permissions -->
+    <!-- Notification / wake permissions -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -30,7 +31,7 @@
     <!-- Battery optimization permission -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
 
-    <!-- Android call related permissions -->
+    <!-- Optional call related permissions -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
 
@@ -49,6 +50,17 @@
     <uses-permission
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
+
+    <!--
+        Do NOT add SYSTEM_ALERT_WINDOW now.
+
+        For your current behavior:
+        - Back button inside app = MiniCallOverlay
+        - Home/background = PiP
+        - Force killed = backend timeout
+
+        SYSTEM_ALERT_WINDOW is only for real Messenger chat-head over other apps.
+    -->
 
     <application
         android:name="${applicationName}"

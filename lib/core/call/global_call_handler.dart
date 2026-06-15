@@ -89,7 +89,18 @@ class GlobalCallHandler {
     required String currentUserId,
     required String currentUserName,
     required String currentUserAvatar,
+    bool allowConnect = true,
   }) async {
+    /*
+      Messenger-style incoming calls require /ws/global-call/ to stay connected
+      after login. If this socket is blocked, the receiver will never see
+      IncomingCallScreen.
+    */
+    if (!allowConnect) {
+      debugPrint('GLOBAL INCOMING SOCKET CONNECT DISABLED BY CALLER');
+      return;
+    }
+
     debugPrint('');
     debugPrint('################################################');
     debugPrint('### CONNECT GLOBAL INCOMING CALL SOCKET');

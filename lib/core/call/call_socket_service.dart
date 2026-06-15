@@ -13,8 +13,6 @@ class CallSocketEvents {
   static const String callAnswer = 'call_answer';
   static const String iceCandidate = 'ice_candidate';
 
-  // Receiver sends this after accepting from CallKit/background.
-  // Caller receives this and resends the last cached call_offer.
   static const String callReady = 'call_ready';
 
   static const String callReject = 'call_reject';
@@ -34,6 +32,8 @@ class CallSocketEvents {
   static const String callVideoToggle = 'call_video_toggle';
   static const String callVideoUpgradeRejected =
       'call_video_upgrade_rejected';
+
+  static const String callEventSent = 'call_event_sent';
 }
 
 typedef SocketHandler = FutureOr<void> Function(Map<String, dynamic> data);
@@ -105,7 +105,7 @@ class SocketService {
   Future<void> connect({required String url}) async {
     final fixedUrl = _sanitizeWsUrl(url);
 
-    if (fixedUrl.trim().isEmpty) {
+    if (fixedUrl.isEmpty) {
       debugPrint('CALL WS CONNECT ERROR: URL empty');
       return;
     }
@@ -125,23 +125,22 @@ class SocketService {
 
     try {
       if (_channel != null) {
-        await disconnect(clearHandlers: false, clearQueue: false);
+        await disconnect(
+          clearHandlers: false,
+          clearQueue: false,
+          clearCache: false,
+          forgetUrl: false,
+        );
       }
 
       _url = fixedUrl;
 
       debugPrint('CALL WS CONNECTING: $fixedUrl');
 
-      _channel = WebSocketChannel.connect(Uri.parse(fixedUrl));
+      final channel = WebSocketChannel.connect(Uri.parse(fixedUrl));
+      _channel = channel;
 
-      await _channel!.ready.timeout(
-        const Duration(seconds: 8),
-        onTimeout: () {
-          throw TimeoutException('CALL WS READY TIMEOUT');
-        },
-      );
-
-      _subscription = _channel!.stream.listen(
+      _subscription = channel.stream.listen(
         _handleMessage,
         onError: (error) {
           debugPrint('CALL WS ERROR: $error');
@@ -158,17 +157,32 @@ class SocketService {
         cancelOnError: false,
       );
 
+      if (_channel != channel) {
+        debugPrint('CALL WS CONNECT ABORTED: channel changed');
+        return;
+      }
+
+      // IMPORTANT FIX:
+      // Do not wait for channel.ready before sending call_offer.
+      // Waiting here can delay the offer and receiver will fail to connect.
       _connected = true;
 
-      debugPrint('CALL WS CONNECTED: $fixedUrl');
+      debugPrint('CALL WS CONNECTED EARLY: $fixedUrl');
 
       _flushPendingMessages();
+
+      channel.ready.then((_) {
+        debugPrint('CALL WS READY OK');
+      }).catchError((e) {
+        debugPrint('CALL WS READY ERROR IGNORED: $e');
+      });
 
       if (!(_connectCompleter?.isCompleted ?? true)) {
         _connectCompleter?.complete();
       }
-    } catch (e) {
+    } catch (e, stack) {
       debugPrint('CALL WS CONNECT ERROR: $e');
+      debugPrint(stack.toString());
 
       _connected = false;
 
@@ -185,10 +199,8 @@ class SocketService {
       _channel = null;
 
       if (!(_connectCompleter?.isCompleted ?? true)) {
-        _connectCompleter?.completeError(e);
+        _connectCompleter?.complete();
       }
-
-      rethrow;
     } finally {
       _connecting = false;
       _connectCompleter = null;
@@ -236,6 +248,26 @@ class SocketService {
       debugPrint('CALL WS PAYLOAD: ${data['payload']}');
 
       final payload = data['payload'];
+
+      if (event == CallSocketEvents.callEventSent ||
+          data['type'] == CallSocketEvents.callEventSent) {
+        String ackType = '';
+
+        if (payload is Map) {
+          ackType = payload['sent_event']?.toString() ??
+              payload['sentEvent']?.toString() ??
+              '';
+        }
+
+        ackType = ackType.isNotEmpty
+            ? ackType
+            : rawData['sent_event']?.toString() ??
+                rawData['sentEvent']?.toString() ??
+                '';
+
+        debugPrint('CALL WS ACK IGNORED: $ackType');
+        return;
+      }
 
       final hasError =
           data['error'] != null || (payload is Map && payload['error'] != null);
@@ -299,9 +331,7 @@ class SocketService {
     for (final entry in data.entries) {
       final key = entry.key;
 
-      if (key == 'event' || key == 'type' || key == 'payload') {
-        continue;
-      }
+      if (key == 'event' || key == 'type' || key == 'payload') continue;
 
       payload.putIfAbsent(key, () => entry.value);
     }
@@ -318,6 +348,7 @@ class SocketService {
     _mirror(payload, 'caller_name', 'callerName');
     _mirror(payload, 'caller_avatar', 'callerAvatar');
     _mirror(payload, 'call_id', 'callId');
+    _mirror(payload, 'sent_event', 'sentEvent');
 
     if (payload['from'] == null && payload['from_user'] != null) {
       payload['from'] = payload['from_user'];
@@ -351,7 +382,7 @@ class SocketService {
 
       case CallSocketEvents.callJoin:
         debugPrint(
-          'CALL WS BLOCKED OUTGOING EVENT: call_join is not supported by backend',
+          'CALL WS BLOCKED OUTGOING EVENT: call_join is not supported',
         );
         return null;
 
@@ -375,6 +406,7 @@ class SocketService {
     _mirror(fixedPayload, 'caller_name', 'callerName');
     _mirror(fixedPayload, 'caller_avatar', 'callerAvatar');
     _mirror(fixedPayload, 'call_id', 'callId');
+    _mirror(fixedPayload, 'sent_event', 'sentEvent');
 
     if (fixedPayload['from'] == null && fixedPayload['from_user'] != null) {
       fixedPayload['from'] = fixedPayload['from_user'];
@@ -768,23 +800,41 @@ class SocketService {
   Future<void> disconnect({
     bool clearHandlers = false,
     bool clearQueue = true,
+    bool clearCache = true,
+    bool forgetUrl = true,
   }) async {
-    debugPrint('CALL WS DISCONNECT');
+    debugPrint('CALL WS DISCONNECT REQUESTED');
 
     _connected = false;
     _connecting = false;
 
-    try {
-      await _subscription?.cancel();
-    } catch (_) {}
+    final oldSubscription = _subscription;
+    final oldChannel = _channel;
 
     _subscription = null;
+    _channel = null;
+
+    if (forgetUrl) {
+      _url = null;
+    }
+
+    if (!(_connectCompleter?.isCompleted ?? true)) {
+      _connectCompleter?.complete();
+    }
+
+    _connectCompleter = null;
 
     try {
-      await _channel?.sink.close();
-    } catch (_) {}
+      await oldSubscription?.cancel();
+    } catch (e) {
+      debugPrint('CALL WS SUBSCRIPTION CANCEL ERROR: $e');
+    }
 
-    _channel = null;
+    try {
+      await oldChannel?.sink.close();
+    } catch (e) {
+      debugPrint('CALL WS CHANNEL CLOSE ERROR: $e');
+    }
 
     if (clearHandlers) {
       _handlers.clear();
@@ -793,6 +843,13 @@ class SocketService {
     if (clearQueue) {
       _pendingMessages.clear();
     }
+
+    if (clearCache) {
+      _cachedOffers.clear();
+      _lastCallReadyResend.clear();
+    }
+
+    debugPrint('CALL WS DISCONNECTED');
   }
 
   void reset() {

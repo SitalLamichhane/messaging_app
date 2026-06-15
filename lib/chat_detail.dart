@@ -2187,9 +2187,15 @@ void _openReactionPicker(
                                         isDark: true,
                                         isOnlyEmoji: _isOnlyEmoji(message.text),
                                         compact: true,
-                                        onCallAction: () => _startCall(
-                                          message.callType == CallEntryType.video,
-                                        ),
+                                        onCallAction: () => widget.chat.isGroup
+                                            ? _startGroupCall(
+                                                message.callType ==
+                                                    CallEntryType.video,
+                                              )
+                                            : _startCall(
+                                                message.callType ==
+                                                    CallEntryType.video,
+                                              ),
                                       ),
                                     ),
                                   ),
@@ -3451,6 +3457,134 @@ Future<void> _startCall(bool isVideo) async {
   }
 }
 
+  Future<void> _startGroupCall(bool isVideo) async {
+    if (_isStartingCall) return;
+
+    final latestChat = _freshChat();
+
+    if (!latestChat.isGroup) {
+      await _startCall(isVideo);
+      return;
+    }
+
+    final accessToken = await ApiClient.storage.read(key: 'access');
+    final currentUserId =
+        ((await ApiClient.storage.read(key: 'user_id')) ?? '').trim();
+
+    final storedName =
+        ((await ApiClient.storage.read(key: 'user_name')) ??
+                (await ApiClient.storage.read(key: 'full_name')) ??
+                '')
+            .trim();
+
+    final currentUserName = storedName.isEmpty ? 'You' : storedName;
+
+    final currentUserAvatar =
+        ((await ApiClient.storage.read(key: 'user_avatar')) ??
+                (await ApiClient.storage.read(key: 'avatar_url')) ??
+                (await ApiClient.storage.read(key: 'image_url')) ??
+                '')
+            .trim();
+
+    if (accessToken == null ||
+        accessToken.trim().isEmpty ||
+        currentUserId.isEmpty) {
+      _showMessengerPop(
+        'Login again to start call',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final conversationId = int.tryParse(latestChat.id);
+
+    if (conversationId == null) {
+      _showMessengerPop(
+        'Conversation is not ready',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    final otherMembers = latestChat.members.where((member) {
+      final id = member.id.toString().trim();
+      return id.isNotEmpty && id != currentUserId;
+    }).toList();
+
+    if (otherMembers.length < 2) {
+      _showMessengerPop(
+        'Group call needs at least 3 members',
+        icon: Icons.groups_rounded,
+      );
+      return;
+    }
+
+    setState(() {
+      _isStartingCall = true;
+    });
+
+    try {
+      await GlobalCallHandler.connectCallSocket(
+        url:
+            '${AppConfig.wsBaseUrl}/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
+        currentUserId: currentUserId,
+        currentUserName: currentUserName,
+        currentUserAvatar: currentUserAvatar,
+      );
+
+      final groupCallId =
+          'group_${latestChat.id}_${DateTime.now().millisecondsSinceEpoch}';
+
+      AppChatData.addCallLog(
+        chat: latestChat,
+        type: isVideo ? CallEntryType.video : CallEntryType.voice,
+        status: CallEntryStatus.outgoing,
+      );
+
+      if (!mounted) return;
+
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CallScreen(
+            name: latestChat.name.trim().isEmpty
+                ? 'Group call'
+                : latestChat.name,
+            avatarUrl: latestChat.avatarUrl,
+            isVideoCall: isVideo,
+            chat: latestChat,
+            currentUserId: currentUserId,
+            currentUserName: currentUserName,
+            currentUserAvatar: currentUserAvatar,
+            receiverId: '',
+            isCaller: true,
+            conversationId: latestChat.id,
+            callId: groupCallId,
+            isGroupCall: true,
+          ),
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('GROUP CALL START ERROR: $e');
+      debugPrint(st.toString());
+
+      if (!mounted) return;
+
+      _showMessengerPop(
+        'Could not start group call',
+        icon: Icons.error_rounded,
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStartingCall = false;
+        });
+      }
+    }
+  }
+
+
+
   Future<void> _openProfile() async {
     final currentUserId = (await ApiClient.storage.read(key: 'user_id')) ?? '';
 
@@ -3716,14 +3850,22 @@ Future<void> _startCall(bool isVideo) async {
               ),
             ),
             IconButton(
-              onPressed: _isStartingCall ? null : () => _startCall(false),
+              onPressed: _isStartingCall
+                  ? null
+                  : () => widget.chat.isGroup
+                      ? _startGroupCall(false)
+                      : _startCall(false),
               icon: const Icon(
                 Icons.call_rounded,
                 color: Color(0xFF1877F2),
               ),
             ),
             IconButton(
-              onPressed: _isStartingCall ? null : () => _startCall(true),
+              onPressed: _isStartingCall
+                  ? null
+                  : () => widget.chat.isGroup
+                      ? _startGroupCall(true)
+                      : _startCall(true),
               icon: const Icon(
                 Icons.videocam_rounded,
                 color: Color(0xFF1877F2),
@@ -4230,9 +4372,15 @@ Future<void> _startCall(bool isVideo) async {
                                   message: message,
                                   isDark: isDark,
                                   isOnlyEmoji: _isOnlyEmoji(message.text),
-                                  onCallAction: () => _startCall(
-                                    message.callType == CallEntryType.video,
-                                  ),
+                                  onCallAction: () => widget.chat.isGroup
+                                      ? _startGroupCall(
+                                          message.callType ==
+                                              CallEntryType.video,
+                                        )
+                                      : _startCall(
+                                          message.callType ==
+                                              CallEntryType.video,
+                                        ),
                                 ),
                               ),
                               if (reaction != null)

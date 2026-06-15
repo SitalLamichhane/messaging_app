@@ -1,19 +1,27 @@
 // lib/core/config/app_config.dart
 
 class AppConfig {
-  // true = emulator
-  // false = real mobile
-  static const bool useEmulator = true;
+  /*
+    Real mobile/server mode.
 
-  static String get host {
-    // Real mobile / same Wi-Fi testing
-    return '2.25.198.109';
+    IMPORTANT:
+    useEmulator must be false for VPS/IP testing.
+    If emulator mode exists somewhere else in old code, it can create bad URLs.
+  */
+  static const bool useEmulator = false;
 
-  }
+  static const String host = '2.25.198.109';
 
   static String get serverUrl => 'http://$host';
   static String get apiBaseUrl => '$serverUrl/api';
-  static String get wsBaseUrl => 'ws://$host';
+
+  /*
+    Use explicit :80.
+    Your log showed actual connect as:
+    http://2.25.198.109:0/ws/global-call/
+    This avoids bad implicit port parsing.
+  */
+  static String get wsBaseUrl => 'ws://$host:80';
 
   static String chatSocketUrl({
     required int conversationId,
@@ -23,21 +31,6 @@ class AppConfig {
     return '$wsBaseUrl/ws/chat/$conversationId/?token=$cleanToken';
   }
 
-  /*
-    Conversation call socket.
-
-    Use this only after user accepts call:
-      /ws/call/<conversation_id>/
-
-    This socket handles:
-      call_ready
-      call_offer
-      call_answer
-      ice_candidate
-      call_end
-      call_reject
-      call_busy
-  */
   static String callSocketUrl({
     required int conversationId,
     required String token,
@@ -46,18 +39,6 @@ class AppConfig {
     return '$wsBaseUrl/ws/call/$conversationId/?token=$cleanToken';
   }
 
-  /*
-    Global incoming call socket.
-
-    Connect this once after login:
-      /ws/global-call/
-
-    This socket handles:
-      incoming_call
-      call_cancelled
-
-    Keep this connected even inside CallScreen.
-  */
   static String globalCallSocketUrl({
     required String token,
   }) {

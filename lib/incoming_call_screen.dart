@@ -22,6 +22,7 @@ class IncomingCallScreen extends StatefulWidget {
   final String callerAvatar;
 
   final bool isVideoCall;
+  final bool isGroupCall;
 
   /*
     IMPORTANT:
@@ -43,6 +44,7 @@ class IncomingCallScreen extends StatefulWidget {
     required this.callerName,
     required this.callerAvatar,
     required this.isVideoCall,
+    this.isGroupCall = false,
     required this.offer,
     this.chat,
     this.conversationId,
@@ -90,6 +92,15 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     }
 
     return _effectiveConversationId;
+  }
+
+
+  bool get _isGroupCall {
+    return widget.isGroupCall == true ||
+        widget.offer?['is_group_call'] == true ||
+        widget.offer?['isGroupCall'] == true ||
+        widget.offer?['is_group_call']?.toString() == 'true' ||
+        widget.offer?['isGroupCall']?.toString() == 'true';
   }
 
   ChatItem? _freshChat() {
@@ -292,52 +303,91 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     final callKitId = _callKitId;
     final convId = _effectiveConversationId;
 
-    final connected = await _ensureCallSocketConnected();
+    try {
+      final connected = await _ensureCallSocketConnected();
 
-    if (!connected) {
-      debugPrint('INCOMING CALL REJECT WARNING: socket not connected');
+      if (!connected) {
+        debugPrint('INCOMING CALL REJECT WARNING: socket not connected');
+      }
+
+      final currentUserId = _resolvedCurrentUserId.isNotEmpty
+          ? _resolvedCurrentUserId
+          : widget.currentUserId.trim();
+
+      if (currentUserId.isNotEmpty && widget.callerId.trim().isNotEmpty) {
+        SocketService.instance.emit(
+          CallSocketEvents.callReject,
+          {
+            'from': currentUserId,
+            'from_user': currentUserId,
+            'reason': 'rejected',
+            if (_callId.isNotEmpty) 'call_id': _callId,
+            if (_callId.isNotEmpty) 'callId': _callId,
+            if (convId.isNotEmpty) 'conversation_id': convId,
+            if (convId.isNotEmpty) 'conversationId': convId,
+            'is_group_call': _isGroupCall,
+            'isGroupCall': _isGroupCall,
+            if (_isGroupCall && _callId.isNotEmpty) 'group_call_id': _callId,
+            if (_isGroupCall && _callId.isNotEmpty) 'groupCallId': _callId,
+          },
+          targetUser: widget.callerId.trim(),
+          conversationId: convId.isNotEmpty ? convId : null,
+          queueIfDisconnected: false,
+        );
+
+        // Wait shortly so call_reject reaches caller before closing socket.
+        await Future.delayed(const Duration(milliseconds: 180));
+      }
+
+      if (widget.chat != null) {
+        AppChatData.addCallLog(
+          chat: widget.chat!,
+          type: widget.isVideoCall ? CallEntryType.video : CallEntryType.voice,
+          status: CallEntryStatus.missed,
+        );
+      }
+
+      if (callKitId.trim().isNotEmpty) {
+        await NotificationService.endCall(callKitId);
+      }
+
+      GlobalCallHandler.instance.clearPendingOffer();
+      GlobalCallHandler.instance.markCallScreenClosed();
+
+      try {
+        if (SocketService.instance.isConnected) {
+          debugPrint('INCOMING CALL REJECT: disconnecting conversation socket');
+          await SocketService.instance.disconnect();
+          debugPrint('INCOMING CALL REJECT: conversation socket disconnected');
+        }
+      } catch (e, st) {
+        debugPrint('INCOMING CALL REJECT SOCKET DISCONNECT ERROR: $e');
+        debugPrint(st.toString());
+      }
+
+      if (context.mounted) {
+        Navigator.of(context).maybePop();
+      }
+    } catch (e, st) {
+      debugPrint('INCOMING CALL REJECT ERROR: $e');
+      debugPrint(st.toString());
+
+      if (callKitId.trim().isNotEmpty) {
+        await NotificationService.endCall(callKitId);
+      }
+
+      try {
+        if (SocketService.instance.isConnected) {
+          await SocketService.instance.disconnect();
+        }
+      } catch (_) {}
+
+      if (context.mounted) {
+        Navigator.of(context).maybePop();
+      }
+    } finally {
+      _rejecting = false;
     }
-
-    final currentUserId = _resolvedCurrentUserId.isNotEmpty
-        ? _resolvedCurrentUserId
-        : widget.currentUserId;
-
-    SocketService.instance.emit(
-      CallSocketEvents.callReject,
-      {
-        'from': currentUserId,
-        'from_user': currentUserId,
-        'reason': 'rejected',
-        if (_callId.isNotEmpty) 'call_id': _callId,
-        if (_callId.isNotEmpty) 'callId': _callId,
-        if (convId.isNotEmpty) 'conversation_id': convId,
-        if (convId.isNotEmpty) 'conversationId': convId,
-      },
-      targetUser: widget.callerId,
-      conversationId: convId.isNotEmpty ? convId : null,
-      queueIfDisconnected: true,
-    );
-
-    if (widget.chat != null) {
-      AppChatData.addCallLog(
-        chat: widget.chat!,
-        type: widget.isVideoCall ? CallEntryType.video : CallEntryType.voice,
-        status: CallEntryStatus.missed,
-      );
-    }
-
-    if (callKitId.trim().isNotEmpty) {
-      await NotificationService.endCall(callKitId);
-    }
-
-    GlobalCallHandler.instance.clearPendingOffer();
-    GlobalCallHandler.instance.markCallScreenClosed();
-
-    if (context.mounted) {
-      Navigator.of(context).maybePop();
-    }
-
-    _rejecting = false;
   }
 
   Future<void> _accept(BuildContext context) async {
@@ -387,7 +437,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
         call_offer resend and duplicate navigation race.
     */
 
-    final pendingOffer = GlobalCallHandler.instance.takePendingOffer(
+    final pendingOffer =
+        GlobalCallHandler.instance.takePendingOffer(
       callerId: widget.callerId,
       conversationId: convId,
       callId: _callId.isNotEmpty ? _callId : null,
@@ -412,7 +463,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       - wait for call_offer
       - open CallScreen
     */
-    if (!hasValidFinalOffer) {
+    if (!hasValidFinalOffer && !_isGroupCall) {
       debugPrint('INCOMING CALL ACCEPT: SDP missing.');
       debugPrint('INCOMING CALL ACCEPT: opening CallWaitingScreen.');
       debugPrint('INCOMING CALL OFFER DATA: ${widget.offer}');
@@ -473,9 +524,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
               : widget.currentUserAvatar,
           receiverId: widget.callerId,
           isCaller: false,
-          incomingOffer: finalOffer,
+          incomingOffer: hasValidFinalOffer ? finalOffer : null,
           conversationId: convId,
           callId: _callId.isNotEmpty ? _callId : null,
+          isGroupCall: _isGroupCall,
         ),
       ),
     );

@@ -754,6 +754,366 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     );
   }
 
+
+  Future<void> _openAddGroupMemberSheet() async {
+    if (!isGroupChat) return;
+
+    final phoneController = TextEditingController();
+    ChatUser? foundUser;
+    bool searching = false;
+    bool adding = false;
+    String errorText = '';
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: sheetColor,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            Future<void> searchUser() async {
+              final phone = phoneController.text.trim();
+
+              if (phone.isEmpty) {
+                setModalState(() {
+                  errorText = 'Enter phone number';
+                  foundUser = null;
+                });
+                return;
+              }
+
+              setModalState(() {
+                searching = true;
+                errorText = '';
+                foundUser = null;
+              });
+
+              try {
+                final response = await ApiClient.dio.get(
+                  '/chat/search-user/',
+                  queryParameters: {'phone': phone},
+                );
+
+                final data = response.data;
+
+                if (data is! Map) {
+                  setModalState(() {
+                    errorText = 'User not found';
+                    foundUser = null;
+                  });
+                  return;
+                }
+
+                final id = data['id']?.toString() ?? '';
+
+                if (id.isEmpty) {
+                  setModalState(() {
+                    errorText = 'User not found';
+                    foundUser = null;
+                  });
+                  return;
+                }
+
+                final alreadyMember = widget.chat.members.any(
+                  (member) => member.id.toString().trim() == id.trim(),
+                );
+
+                if (alreadyMember) {
+                  setModalState(() {
+                    errorText = 'This user is already in the group';
+                    foundUser = null;
+                  });
+                  return;
+                }
+
+                setModalState(() {
+                  foundUser = ChatUser(
+                    id: id,
+                    name: data['name']?.toString() ??
+                        data['full_name']?.toString() ??
+                        'User',
+                    phone: data['phone_number']?.toString() ??
+                        data['phone']?.toString() ??
+                        phone,
+                    avatarUrl: _cleanImageUrl(
+                      data['profile_picture']?.toString() ??
+                          data['avatarUrl']?.toString() ??
+                          data['avatar_url']?.toString() ??
+                          '',
+                    ),
+                  );
+                  errorText = '';
+                });
+              } on DioException catch (e) {
+                setModalState(() {
+                  errorText = e.response?.data is Map
+                      ? ((e.response?.data as Map)['error']?.toString() ??
+                          'User not found')
+                      : 'User not found';
+                  foundUser = null;
+                });
+              } catch (e) {
+                setModalState(() {
+                  errorText = 'Could not search user';
+                  foundUser = null;
+                });
+              } finally {
+                setModalState(() {
+                  searching = false;
+                });
+              }
+            }
+
+            Future<void> addUser() async {
+              final user = foundUser;
+              if (user == null || adding) return;
+
+              setModalState(() {
+                adding = true;
+                errorText = '';
+              });
+
+              try {
+                final response = await ApiClient.dio.post(
+                  '/chat/groups/${widget.chat.id}/add-member/',
+                  data: {'user_id': user.id},
+                );
+
+                final ok = response.statusCode == 200 ||
+                    response.statusCode == 201 ||
+                    response.data is Map &&
+                        (response.data['success'] == true ||
+                            response.data['created'] != null);
+
+                if (!ok) {
+                  setModalState(() {
+                    errorText = 'Could not add member';
+                  });
+                  return;
+                }
+
+                final alreadyMember = widget.chat.members.any(
+                  (member) => member.id.toString().trim() == user.id.trim(),
+                );
+
+                if (!alreadyMember) {
+                  widget.chat.members.add(user);
+                }
+
+                final index = AppChatData.chats.indexWhere(
+                  (chat) => chat.id.toString() == widget.chat.id.toString(),
+                );
+
+                if (index >= 0) {
+                  final existsInGlobal = AppChatData.chats[index].members.any(
+                    (member) =>
+                        member.id.toString().trim() == user.id.trim(),
+                  );
+
+                  if (!existsInGlobal) {
+                    AppChatData.chats[index].members.add(user);
+                  }
+                }
+
+                AppChatData.notify();
+
+                if (mounted) {
+                  setState(() {});
+                }
+
+                if (sheetContext.mounted) {
+                  Navigator.pop(sheetContext);
+                }
+
+                _showSnackBar('${user.name} added to group');
+              } on DioException catch (e) {
+                setModalState(() {
+                  errorText = e.response?.data is Map
+                      ? ((e.response?.data as Map)['error']?.toString() ??
+                          'Could not add member')
+                      : 'Could not add member';
+                });
+              } catch (e) {
+                setModalState(() {
+                  errorText = 'Could not add member';
+                });
+              } finally {
+                setModalState(() {
+                  adding = false;
+                });
+              }
+            }
+
+            return Padding(
+              padding: EdgeInsets.fromLTRB(
+                20,
+                14,
+                20,
+                MediaQuery.of(context).viewInsets.bottom + 22,
+              ),
+              child: SafeArea(
+                top: false,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Add group member',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: mainTextColor,
+                            ),
+                          ),
+                        ),
+                        InkWell(
+                          borderRadius: BorderRadius.circular(20),
+                          onTap: () => Navigator.pop(sheetContext),
+                          child: Container(
+                            width: 38,
+                            height: 38,
+                            decoration: BoxDecoration(
+                              color: isDark
+                                  ? const Color(0xFF334155)
+                                  : const Color(0xFFE4E6EB),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.close_rounded,
+                              size: 24,
+                              color: secondaryTextColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    TextField(
+                      controller: phoneController,
+                      keyboardType: TextInputType.phone,
+                      textInputAction: TextInputAction.search,
+                      style: TextStyle(color: mainTextColor),
+                      decoration: InputDecoration(
+                        hintText: 'Enter phone number',
+                        hintStyle: TextStyle(color: secondaryTextColor),
+                        filled: true,
+                        fillColor: inputColor,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 14,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide.none,
+                        ),
+                        suffixIcon: IconButton(
+                          onPressed: searching ? null : searchUser,
+                          icon: searching
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Icon(Icons.search_rounded, color: themeColor),
+                        ),
+                      ),
+                      onSubmitted: (_) => searchUser(),
+                    ),
+                    if (errorText.trim().isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          errorText,
+                          style: const TextStyle(
+                            color: Color(0xFFEF4444),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (foundUser != null) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(color: borderColor),
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 24,
+                              backgroundImage: foundUser!.avatarUrl.isNotEmpty
+                                  ? NetworkImage(foundUser!.avatarUrl)
+                                  : null,
+                              child: foundUser!.avatarUrl.isEmpty
+                                  ? Text(
+                                      foundUser!.name.isNotEmpty
+                                          ? foundUser!.name[0].toUpperCase()
+                                          : 'U',
+                                    )
+                                  : null,
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                foundUser!.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: mainTextColor,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 16,
+                                ),
+                              ),
+                            ),
+                            ElevatedButton(
+                              onPressed: adding ? null : addUser,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: themeColor,
+                                foregroundColor: Colors.white,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                              child: adding
+                                  ? const SizedBox(
+                                      width: 16,
+                                      height: 16,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text('Add'),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    phoneController.dispose();
+  }
+
+
   void _startCall(bool isVideo) {
     final targetUserId = _targetUserIdForBlock();
 
@@ -1111,30 +1471,37 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
   }
 
  Widget _buildQuickCallActions() {
+  final actions = <Widget>[
+    _CircleActionButton(
+      icon: Icons.call_rounded,
+      iconColor: themeColor,
+      label: 'Audio call',
+      onTap: () => _startCall(false),
+    ),
+    _CircleActionButton(
+      icon: Icons.videocam_rounded,
+      iconColor: themeColor,
+      label: 'Video call',
+      onTap: () => _startCall(true),
+    ),
+  ];
+
+  if (isGroupChat) {
+    actions.add(
+      _CircleActionButton(
+        icon: Icons.person_add_alt_1_rounded,
+        iconColor: themeColor,
+        label: 'Add member',
+        onTap: _openAddGroupMemberSheet,
+      ),
+    );
+  }
+
   return Padding(
     padding: const EdgeInsets.symmetric(horizontal: 18),
     child: Row(
       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: [
-        _CircleActionButton(
-          icon: Icons.call_rounded,
-          iconColor: themeColor,
-          label: 'Audio call',
-          onTap: () => _startCall(false),
-        ),
-        _CircleActionButton(
-          icon: Icons.videocam_rounded,
-          iconColor: themeColor,
-          label: 'Video call',
-          onTap: () => _startCall(true),
-        ),
-        // _CircleActionButton(
-        //   icon: Icons.person_rounded,
-        //   iconColor: themeColor,
-        //   label: 'View profile',
-        //   onTap: _viewProfile,
-        // ),
-      ],
+      children: actions,
     ),
   );
 }

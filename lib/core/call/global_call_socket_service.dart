@@ -27,8 +27,11 @@ class GlobalCallSocketService {
 
   bool _connected = false;
   bool _connecting = false;
+  bool _manualDisconnect = false;
+
   String? _url;
   Completer<void>? _connectCompleter;
+  Timer? _reconnectTimer;
 
   bool get isConnected => _connected;
   bool get isConnecting => _connecting;
@@ -49,7 +52,7 @@ class GlobalCallSocketService {
   Future<void> connect({required String url}) async {
     final fixedUrl = _sanitizeWsUrl(url);
 
-    if (fixedUrl.trim().isEmpty) {
+    if (fixedUrl.isEmpty) {
       debugPrint('GLOBAL CALL WS CONNECT ERROR: URL empty');
       return;
     }
@@ -64,12 +67,18 @@ class GlobalCallSocketService {
       return _connectCompleter!.future;
     }
 
+    _manualDisconnect = false;
     _connecting = true;
     _connectCompleter = Completer<void>();
+    _reconnectTimer?.cancel();
 
     try {
-      if (_channel != null) {
-        await disconnect(clearHandlers: false);
+      if (_channel != null || _subscription != null) {
+        await disconnect(
+          clearHandlers: false,
+          forgetUrl: false,
+          manual: false,
+        );
       }
 
       _url = fixedUrl;
@@ -81,36 +90,69 @@ class GlobalCallSocketService {
       debugPrint('url: $fixedUrl');
       debugPrint('################################################');
 
-      _channel = WebSocketChannel.connect(Uri.parse(fixedUrl));
+      final channel = WebSocketChannel.connect(Uri.parse(fixedUrl));
+      _channel = channel;
 
-      await _channel!.ready.timeout(
-        const Duration(seconds: 8),
-        onTimeout: () {
-          throw TimeoutException('GLOBAL CALL WS READY TIMEOUT');
-        },
-      );
-
-      _subscription = _channel!.stream.listen(
+      _subscription = channel.stream.listen(
         _handleMessage,
         onError: (error, stack) {
           debugPrint('GLOBAL CALL WS ERROR: $error');
           debugPrint(stack.toString());
+
           _connected = false;
           _channel = null;
           _subscription = null;
+
+          _scheduleReconnect();
         },
         onDone: () {
           debugPrint('GLOBAL CALL WS CLOSED');
+
           _connected = false;
           _channel = null;
           _subscription = null;
+
+          _scheduleReconnect();
         },
         cancelOnError: false,
       );
 
+      try {
+        await channel.ready.timeout(const Duration(seconds: 5));
+        debugPrint('GLOBAL CALL WS READY OK');
+      } catch (e) {
+        debugPrint('GLOBAL CALL WS READY FAILED: $e');
+
+        _connected = false;
+
+        try {
+          await _subscription?.cancel();
+        } catch (_) {}
+
+        _subscription = null;
+
+        try {
+          await _channel?.sink.close();
+        } catch (_) {}
+
+        _channel = null;
+
+        if (!(_connectCompleter?.isCompleted ?? true)) {
+          _connectCompleter?.complete();
+        }
+
+        _scheduleReconnect();
+        return;
+      }
+
+      if (_channel != channel) {
+        debugPrint('GLOBAL CALL WS CONNECT ABORTED: channel changed');
+        return;
+      }
+
       _connected = true;
 
-      debugPrint('GLOBAL CALL WS CONNECTED: $fixedUrl');
+      debugPrint('GLOBAL CALL WS CONNECTED/ACTIVE: $fixedUrl');
 
       if (!(_connectCompleter?.isCompleted ?? true)) {
         _connectCompleter?.complete();
@@ -134,14 +176,19 @@ class GlobalCallSocketService {
       _channel = null;
 
       if (!(_connectCompleter?.isCompleted ?? true)) {
-        _connectCompleter?.completeError(e);
+        _connectCompleter?.complete();
       }
 
-      rethrow;
+      _scheduleReconnect();
     } finally {
       _connecting = false;
       _connectCompleter = null;
     }
+  }
+
+  void _scheduleReconnect() {
+    debugPrint('GLOBAL CALL WS AUTO RECONNECT DISABLED');
+    return;
   }
 
   Future<void> _handleMessage(dynamic message) async {
@@ -278,7 +325,6 @@ class GlobalCallSocketService {
     if (handler == null) return;
 
     final list = _handlers[event];
-
     if (list == null) return;
 
     list.remove(handler);
@@ -290,23 +336,38 @@ class GlobalCallSocketService {
     debugPrint('GLOBAL CALL WS HANDLER REMOVED: $event');
   }
 
-  Future<void> disconnect({bool clearHandlers = false}) async {
+  Future<void> disconnect({
+    bool clearHandlers = false,
+    bool forgetUrl = true,
+    bool manual = true,
+  }) async {
     debugPrint('GLOBAL CALL WS DISCONNECT');
 
+    if (manual) {
+      _manualDisconnect = true;
+    }
+
+    _reconnectTimer?.cancel();
     _connected = false;
     _connecting = false;
 
-    try {
-      await _subscription?.cancel();
-    } catch (_) {}
+    final oldSubscription = _subscription;
+    final oldChannel = _channel;
 
     _subscription = null;
+    _channel = null;
+
+    if (forgetUrl) {
+      _url = null;
+    }
 
     try {
-      await _channel?.sink.close();
+      await oldSubscription?.cancel();
     } catch (_) {}
 
-    _channel = null;
+    try {
+      await oldChannel?.sink.close();
+    } catch (_) {}
 
     if (clearHandlers) {
       _handlers.clear();
@@ -314,20 +375,16 @@ class GlobalCallSocketService {
   }
 
   Future<void> reconnect() async {
-    final oldUrl = _url;
-
-    if (oldUrl == null || oldUrl.trim().isEmpty) {
-      debugPrint('GLOBAL CALL WS RECONNECT FAILED: old url missing');
-      return;
-    }
-
-    await connect(url: oldUrl);
+    debugPrint('GLOBAL CALL WS MANUAL RECONNECT DISABLED');
+    return;
   }
 
   void reset() {
+    _reconnectTimer?.cancel();
     _handlers.clear();
     _connected = false;
     _connecting = false;
+    _manualDisconnect = true;
     _url = null;
     _channel = null;
     _subscription = null;

@@ -664,13 +664,27 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   Future<void> _handleCallReject(Map<String, dynamic> data) async {
-    if (!_canUpdate) return;
-    await _finishCall(CallStatus.rejected, emitSocket: false);
+    if (!_canUpdate || _isFinalStatus(state.status)) return;
+
+    debugPrint('CALL REJECT RECEIVED: $data');
+
+    await _finishCall(
+      CallStatus.rejected,
+      emitSocket: false,
+      disconnectSocket: true,
+    );
   }
 
   Future<void> _handleCallEnd(Map<String, dynamic> data) async {
-    if (!_canUpdate) return;
-    await _finishCall(CallStatus.ended, emitSocket: false);
+    if (!_canUpdate || _isFinalStatus(state.status)) return;
+
+    debugPrint('CALL END RECEIVED: $data');
+
+    await _finishCall(
+      CallStatus.ended,
+      emitSocket: false,
+      disconnectSocket: true,
+    );
   }
 
   Future<void> _handleCallLeave(Map<String, dynamic> data) async {
@@ -684,8 +698,15 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   Future<void> _handleCallTimeout(Map<String, dynamic> data) async {
-    if (!_canUpdate) return;
-    await _finishCall(CallStatus.timeout, emitSocket: false);
+    if (!_canUpdate || _isFinalStatus(state.status)) return;
+
+    debugPrint('CALL TIMEOUT RECEIVED: $data');
+
+    await _finishCall(
+      CallStatus.timeout,
+      emitSocket: false,
+      disconnectSocket: true,
+    );
   }
 
   Future<void> resendOfferToAcceptedReceiver() async {
@@ -1096,12 +1117,16 @@ class CallNotifier extends StateNotifier<CallState> {
     final currentUserId = state.currentUserId;
     final receiverId = state.receiverId;
 
-    if (currentUserId != null && receiverId != null) {
+    if (currentUserId != null &&
+        currentUserId.trim().isNotEmpty &&
+        receiverId != null &&
+        receiverId.trim().isNotEmpty) {
       SocketService.instance.emit(
         CallSocketEvents.callReject,
         {
           'from': currentUserId,
           'from_user': currentUserId,
+          'reason': 'rejected',
           if (_callId != null) 'call_id': _callId,
           if (_callId != null) 'callId': _callId,
           if (_conversationId != null) 'conversation_id': _conversationId,
@@ -1109,11 +1134,18 @@ class CallNotifier extends StateNotifier<CallState> {
         },
         targetUser: receiverId,
         conversationId: _conversationId,
-        queueIfDisconnected: true,
+        queueIfDisconnected: false,
       );
+
+      // Give the socket a very small time window to send call_reject.
+      await Future.delayed(const Duration(milliseconds: 180));
     }
 
-    await _finishCall(CallStatus.rejected, emitSocket: false);
+    await _finishCall(
+      CallStatus.rejected,
+      emitSocket: false,
+      disconnectSocket: true,
+    );
   }
 
   String _backendStatusFor(CallStatus status) {
@@ -1160,6 +1192,7 @@ class CallNotifier extends StateNotifier<CallState> {
   Future<void> _finishCall(
     CallStatus finalStatus, {
     required bool emitSocket,
+    bool disconnectSocket = true,
   }) async {
     if (!_canUpdate) return;
     if (_finishing) return;
@@ -1220,11 +1253,46 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _removeSocketEvents();
 
+    if (disconnectSocket) {
+      await _disconnectConversationCallSocket();
+    }
+
     _conversationId = null;
     _callId = null;
     _waitingForOfferAfterCallKitAccept = false;
     _switchingVideo = false;
     _finishing = false;
+  }
+
+  Future<void> _disconnectConversationCallSocket() async {
+    /*
+      Disconnect only the active /ws/call/<conversation_id>/ socket.
+
+      This is required after:
+      - receiver taps Decline
+      - caller receives call_reject
+      - call_end / call_timeout / busy / failed final cleanup
+
+      Do NOT disconnect the global incoming-call socket here.
+      Global socket must stay alive after login for future incoming calls.
+    */
+    try {
+      if (SocketService.instance.isConnected) {
+        debugPrint('CALL PROVIDER: disconnecting conversation call socket');
+
+        await SocketService.instance.disconnect(
+          clearHandlers: false,
+          clearQueue: true,
+          clearCache: true,
+          forgetUrl: true,
+        );
+
+        debugPrint('CALL PROVIDER: conversation call socket disconnected');
+      }
+    } catch (e, st) {
+      debugPrint('CALL PROVIDER SOCKET DISCONNECT ERROR: $e');
+      debugPrint(st.toString());
+    }
   }
 
   Future<void> resetCall() async {

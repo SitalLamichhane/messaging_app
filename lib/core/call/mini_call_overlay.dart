@@ -1,10 +1,8 @@
 // lib/core/call/mini_call_overlay.dart
 
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
 
 import 'package:messaging_app/call_screen.dart';
 import 'package:messaging_app/core/call/call_overlay_controller.dart';
@@ -20,13 +18,8 @@ class MiniCallOverlay extends ConsumerStatefulWidget {
 }
 
 class _MiniCallOverlayState extends ConsumerState<MiniCallOverlay> {
-  static const double _videoWidth = 126;
-  static const double _videoHeight = 188;
-  static const double _voiceHeight = 76;
-  static const double _edgeMargin = 14;
-
-  Offset? _position;
-  bool _dragging = false;
+  Offset _position = const Offset(16, 120);
+  bool _opening = false;
 
   bool _isFinalStatus(CallStatus status) {
     return status == CallStatus.ended ||
@@ -37,272 +30,158 @@ class _MiniCallOverlayState extends ConsumerState<MiniCallOverlay> {
         status == CallStatus.missed;
   }
 
-  String _formatDuration(Duration duration) {
-    final minutes = duration.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final seconds = duration.inSeconds.remainder(60).toString().padLeft(2, '0');
+  bool _hasActiveCall(CallState state) {
+    final hasUsers = state.currentUserId?.trim().isNotEmpty == true &&
+        state.receiverId?.trim().isNotEmpty == true;
 
-    if (duration.inHours > 0) {
-      return '${duration.inHours.toString().padLeft(2, '0')}:$minutes:$seconds';
-    }
-
-    return '$minutes:$seconds';
+    return hasUsers && !_isFinalStatus(state.status);
   }
 
-  String _statusText(CallState state) {
-    if (state.status == CallStatus.connected) {
-      return _formatDuration(state.duration);
-    }
-
-    if (state.status == CallStatus.calling) {
-      return 'Calling...';
-    }
-
-    if (state.status == CallStatus.ringing) {
-      return 'Ringing...';
-    }
-
-    return state.isVideoCall ? 'Video call' : 'Voice call';
+  String _displayName(CallState state) {
+    final name = state.name?.trim() ?? '';
+    return name.isEmpty ? 'Call' : name;
   }
 
-  Offset _defaultPosition({
-    required Size screenSize,
-    required EdgeInsets safePadding,
-    required Size overlaySize,
-  }) {
-    return Offset(
-      screenSize.width - overlaySize.width - _edgeMargin,
-      safePadding.top + 16,
-    );
-  }
+  Future<void> _restoreSameCallScreen() async {
+    if (_opening) return;
 
-  Offset _clampPosition({
-    required Offset position,
-    required Size screenSize,
-    required EdgeInsets safePadding,
-    required Size overlaySize,
-  }) {
-    final minX = _edgeMargin;
-    final maxX = math.max(
-      minX,
-      screenSize.width - overlaySize.width - _edgeMargin,
-    );
+    final callState = ref.read(callProvider);
+    if (!_hasActiveCall(callState)) return;
 
-    final minY = safePadding.top + 10;
-    final maxY = math.max(
-      minY,
-      screenSize.height - overlaySize.height - safePadding.bottom - 24,
-    );
-
-    return Offset(
-      position.dx.clamp(minX, maxX),
-      position.dy.clamp(minY, maxY),
-    );
-  }
-
-  void _onDragUpdate({
-    required DragUpdateDetails details,
-    required Size screenSize,
-    required EdgeInsets safePadding,
-    required Size overlaySize,
-  }) {
-    final current = _position ??
-        _defaultPosition(
-          screenSize: screenSize,
-          safePadding: safePadding,
-          overlaySize: overlaySize,
-        );
-
-    setState(() {
-      _position = _clampPosition(
-        position: current + details.delta,
-        screenSize: screenSize,
-        safePadding: safePadding,
-        overlaySize: overlaySize,
-      );
-    });
-  }
-
-  void _onDragEnd({
-    required Size screenSize,
-    required EdgeInsets safePadding,
-    required Size overlaySize,
-  }) {
-    final current = _position;
-    if (current == null) return;
-
-    final leftX = _edgeMargin;
-    final rightX = screenSize.width - overlaySize.width - _edgeMargin;
-
-    final shouldSnapLeft = current.dx + (overlaySize.width / 2) < screenSize.width / 2;
-
-    final snapped = Offset(
-      shouldSnapLeft ? leftX : rightX,
-      current.dy,
-    );
-
-    setState(() {
-      _dragging = false;
-      _position = _clampPosition(
-        position: snapped,
-        screenSize: screenSize,
-        safePadding: safePadding,
-        overlaySize: overlaySize,
-      );
-    });
-  }
-
-  void _restoreCall(CallState callState) {
-    if (_isFinalStatus(callState.status)) {
-      ref.read(callScreenMinimizedProvider.notifier).state = false;
+    if (ref.read(callScreenVisibleProvider)) {
+      debugPrint('MINI CALL RESTORE IGNORED: CallScreen already visible');
       return;
     }
 
-    final currentUserId = callState.currentUserId?.trim() ?? '';
-    final receiverId = callState.receiverId?.trim() ?? '';
-
-    if (currentUserId.isEmpty || receiverId.isEmpty) {
+    if (!lockCallScreenOpening(ref)) {
+      debugPrint('MINI CALL RESTORE IGNORED: CallScreen already opening');
       return;
     }
 
-    final name = callState.name?.trim().isNotEmpty == true
-        ? callState.name!.trim()
-        : 'Call';
+    _opening = true;
 
-    final avatarUrl = callState.avatarUrl?.trim() ?? '';
+    try {
+      final navigator = GlobalCallHandler.navigatorKey.currentState;
+      if (navigator == null || !navigator.mounted) {
+        debugPrint('MINI CALL RESTORE ERROR: navigator not ready');
+        restoreInAppOverlayFromPip(ref);
+        return;
+      }
 
-    ref.read(callScreenMinimizedProvider.notifier).state = false;
-
-    final navigator = GlobalCallHandler.navigatorKey.currentState;
-
-    if (navigator == null) {
-      return;
-    }
-
-    navigator.push(
-      MaterialPageRoute(
-        fullscreenDialog: true,
-        builder: (_) => CallScreen(
-          name: name,
-          avatarUrl: avatarUrl,
-          isVideoCall: callState.isVideoCall,
-          currentUserId: currentUserId,
-          currentUserName: '',
-          currentUserAvatar: '',
-          receiverId: receiverId,
-          isCaller: callState.isCaller,
-          incomingOffer: callState.incomingOffer,
-          conversationId: null,
-          callId: null,
-          resumeExistingCall: true,
+      // IMPORTANT:
+      // Back from CallScreen pops the CallScreen route.
+      // So mini overlay must open exactly ONE resumeExistingCall route.
+      // Do NOT use pushAndRemoveUntil here; it can reset routes and cause
+      // black screen / duplicate screen issues.
+      await navigator.push(
+        MaterialPageRoute(
+          fullscreenDialog: false,
+          builder: (_) => CallScreen(
+            name: callState.name?.trim().isNotEmpty == true
+                ? callState.name!.trim()
+                : 'Unknown',
+            avatarUrl: callState.avatarUrl?.trim() ?? '',
+            isVideoCall: callState.isVideoCall,
+            currentUserId: callState.currentUserId?.trim() ?? '',
+            currentUserName: '',
+            currentUserAvatar: '',
+            receiverId: callState.receiverId?.trim() ?? '',
+            isCaller: callState.isCaller,
+            incomingOffer: null,
+            conversationId: null,
+            callId: null,
+            resumeExistingCall: true,
+          ),
         ),
-      ),
-    );
+      );
+    } catch (e, st) {
+      debugPrint('MINI CALL RESTORE ERROR: $e');
+      debugPrint(st.toString());
+      restoreInAppOverlayFromPip(ref);
+    } finally {
+      if (mounted) {
+        _opening = false;
+      }
+      unlockCallScreenOpening(ref);
+    }
+  }
+
+  Future<void> _endCallFromMini() async {
+    final state = ref.read(callProvider);
+    if (!_hasActiveCall(state)) return;
+
+    clearCallOverlayFlags(ref);
+    await ref.read(callProvider.notifier).endCall();
   }
 
   @override
   Widget build(BuildContext context) {
-    final minimized = ref.watch(callScreenMinimizedProvider);
+    final isMinimized = ref.watch(callScreenMinimizedProvider);
     final callState = ref.watch(callProvider);
 
-    if (!minimized) {
-      return const SizedBox.shrink();
-    }
-
-    if (_isFinalStatus(callState.status)) {
-      return const SizedBox.shrink();
-    }
-
-    final currentUserId = callState.currentUserId?.trim() ?? '';
-    final receiverId = callState.receiverId?.trim() ?? '';
-
-    if (currentUserId.isEmpty || receiverId.isEmpty) {
+    if (!isMinimized || !_hasActiveCall(callState)) {
       return const SizedBox.shrink();
     }
 
     final media = MediaQuery.of(context);
     final screenSize = media.size;
-    final safePadding = media.padding;
+    final padding = media.padding;
 
-    final overlayWidth = callState.isVideoCall
-        ? _videoWidth
-        : math.min(screenSize.width - (_edgeMargin * 2), 310.0);
+    const width = 166.0;
+    final height = callState.isVideoCall ? 222.0 : 78.0;
+    const margin = 12.0;
 
-    final overlayHeight = callState.isVideoCall ? _videoHeight : _voiceHeight;
-    final overlaySize = Size(overlayWidth, overlayHeight);
+    final minX = margin;
+    final maxX = screenSize.width - width - margin;
+    final minY = padding.top + margin;
+    final maxY = screenSize.height - height - padding.bottom - margin;
 
-    final rawPosition = _position ??
-        _defaultPosition(
-          screenSize: screenSize,
-          safePadding: safePadding,
-          overlaySize: overlaySize,
-        );
-
-    final position = _clampPosition(
-      position: rawPosition,
-      screenSize: screenSize,
-      safePadding: safePadding,
-      overlaySize: overlaySize,
+    final safePosition = Offset(
+      _position.dx.clamp(minX, maxX).toDouble(),
+      _position.dy.clamp(minY, maxY).toDouble(),
     );
 
-    final name = callState.name?.trim().isNotEmpty == true
-        ? callState.name!.trim()
-        : 'Call';
-
-    final avatarUrl = callState.avatarUrl?.trim() ?? '';
-    final hasAvatar = avatarUrl.isNotEmpty;
-
-    return AnimatedPositioned(
-      duration: _dragging ? Duration.zero : const Duration(milliseconds: 180),
-      curve: Curves.easeOutCubic,
-      left: position.dx,
-      top: position.dy,
-      width: overlaySize.width,
-      height: overlaySize.height,
+    return Positioned(
+      left: safePosition.dx,
+      top: safePosition.dy,
+      width: width,
+      height: height,
       child: Material(
         color: Colors.transparent,
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: () => _restoreCall(callState),
-          onPanStart: (_) {
+          onTap: _restoreSameCallScreen,
+          onPanUpdate: (details) {
             setState(() {
-              _dragging = true;
+              _position = Offset(
+                (_position.dx + details.delta.dx).clamp(minX, maxX).toDouble(),
+                (_position.dy + details.delta.dy).clamp(minY, maxY).toDouble(),
+              );
             });
           },
-          onPanUpdate: (details) {
-            _onDragUpdate(
-              details: details,
-              screenSize: screenSize,
-              safePadding: safePadding,
-              overlaySize: overlaySize,
-            );
-          },
           onPanEnd: (_) {
-            _onDragEnd(
-              screenSize: screenSize,
-              safePadding: safePadding,
-              overlaySize: overlaySize,
-            );
-          },
-          onPanCancel: () {
+            final snapLeft =
+                _position.dx + (width / 2) < screenSize.width / 2;
+
             setState(() {
-              _dragging = false;
+              _position = Offset(
+                snapLeft ? minX : maxX,
+                _position.dy.clamp(minY, maxY).toDouble(),
+              );
             });
           },
           child: callState.isVideoCall
-              ? _VideoMiniWindow(
+              ? _MiniVideoCallCard(
                   callState: callState,
-                  name: name,
-                  avatarUrl: avatarUrl,
-                  hasAvatar: hasAvatar,
-                  statusText: _statusText(callState),
-                  isFinalStatus: _isFinalStatus,
+                  displayName: _displayName(callState),
+                  onExpand: _restoreSameCallScreen,
+                  onEnd: _endCallFromMini,
                 )
-              : _VoiceMiniWindow(
+              : _MiniAudioCallCard(
                   callState: callState,
-                  name: name,
-                  avatarUrl: avatarUrl,
-                  hasAvatar: hasAvatar,
-                  statusText: _statusText(callState),
+                  displayName: _displayName(callState),
+                  onExpand: _restoreSameCallScreen,
+                  onEnd: _endCallFromMini,
                 ),
         ),
       ),
@@ -310,258 +189,220 @@ class _MiniCallOverlayState extends ConsumerState<MiniCallOverlay> {
   }
 }
 
-class _VideoMiniWindow extends StatelessWidget {
+class _MiniVideoCallCard extends StatelessWidget {
   final CallState callState;
-  final String name;
-  final String avatarUrl;
-  final bool hasAvatar;
-  final String statusText;
-  final bool Function(CallStatus status) isFinalStatus;
+  final String displayName;
+  final VoidCallback onExpand;
+  final VoidCallback onEnd;
 
-  const _VideoMiniWindow({
+  const _MiniVideoCallCard({
     required this.callState,
-    required this.name,
-    required this.avatarUrl,
-    required this.hasAvatar,
-    required this.statusText,
-    required this.isFinalStatus,
+    required this.displayName,
+    required this.onExpand,
+    required this.onEnd,
   });
+
+  bool _isFinalStatus(CallStatus status) {
+    return status == CallStatus.ended ||
+        status == CallStatus.failed ||
+        status == CallStatus.rejected ||
+        status == CallStatus.busy ||
+        status == CallStatus.timeout ||
+        status == CallStatus.missed;
+  }
 
   @override
   Widget build(BuildContext context) {
+    final remoteRenderer = callState.remoteRenderer;
+    final localRenderer = callState.localRenderer;
+
+    final hasRemoteVideo = !_isFinalStatus(callState.status) &&
+        !callState.isRemoteCameraOff &&
+        remoteRenderer != null &&
+        remoteRenderer.srcObject != null;
+
+    final hasLocalVideo = !_isFinalStatus(callState.status) &&
+        !callState.isCameraOff &&
+        localRenderer != null &&
+        localRenderer.srcObject != null;
+
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: const Color(0xFF111827),
-        borderRadius: BorderRadius.circular(22),
+        color: Colors.black,
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: Colors.white.withOpacity(0.18),
+          color: Colors.white.withOpacity(0.22),
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.34),
-            blurRadius: 24,
-            offset: const Offset(0, 12),
+            blurRadius: 20,
+            offset: const Offset(0, 10),
           ),
         ],
       ),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          _buildRemoteLayer(),
-
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.22),
-                    Colors.transparent,
-                    Colors.black.withOpacity(0.55),
-                  ],
+          if (hasRemoteVideo)
+            RTCVideoView(
+              remoteRenderer,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            )
+          else if (hasLocalVideo)
+            RTCVideoView(
+              localRenderer,
+              mirror: true,
+              objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+            )
+          else
+            _VideoFallback(
+              name: displayName,
+              avatarUrl: callState.avatarUrl?.trim() ?? '',
+            ),
+          if (hasRemoteVideo && hasLocalVideo)
+            Positioned(
+              top: 8,
+              right: 8,
+              width: 42,
+              height: 58,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: Colors.black,
+                    border: Border.all(
+                      color: Colors.white.withOpacity(0.25),
+                      width: 1,
+                    ),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: RTCVideoView(
+                    localRenderer,
+                    mirror: true,
+                    objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                  ),
                 ),
               ),
             ),
-          ),
-
           Positioned(
             left: 8,
             right: 8,
             top: 8,
             child: Row(
               children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 7,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.42),
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const Icon(
-                        Icons.videocam_rounded,
-                        size: 12,
-                        color: Colors.white,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        statusText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ],
-                  ),
+                _MiniCircleButton(
+                  icon: Icons.open_in_full_rounded,
+                  onPressed: onExpand,
                 ),
                 const Spacer(),
-                const Icon(
-                  Icons.open_in_full_rounded,
-                  color: Colors.white,
-                  size: 17,
-                ),
               ],
             ),
           ),
-
           Positioned(
-            left: 9,
-            right: 9,
-            bottom: 9,
-            child: Text(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                shadows: [
-                  Shadow(
-                    color: Colors.black,
-                    blurRadius: 8,
-                  ),
-                ],
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withOpacity(0.76),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+              child: Text(
+                displayName,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  decoration: TextDecoration.none,
+                ),
               ),
             ),
           ),
-
-          if (callState.isVideoCall)
-            Positioned(
-              right: 8,
-              bottom: 32,
-              width: 42,
-              height: 58,
-              child: _LocalPreview(callState: callState),
-            ),
         ],
       ),
     );
   }
-
-  Widget _buildRemoteLayer() {
-    final remoteRenderer = callState.remoteRenderer;
-
-    final canShowRemoteVideo =
-        callState.isVideoCall &&
-        !callState.isRemoteCameraOff &&
-        !isFinalStatus(callState.status) &&
-        remoteRenderer != null &&
-        remoteRenderer.srcObject != null;
-
-    if (canShowRemoteVideo) {
-      return RTCVideoView(
-        remoteRenderer,
-        objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-      );
-    }
-
-    return _AvatarFallback(
-      name: name,
-      avatarUrl: avatarUrl,
-      hasAvatar: hasAvatar,
-      subtitle: callState.isRemoteCameraOff ? 'Camera off' : 'Connecting...',
-    );
-  }
 }
 
-class _VoiceMiniWindow extends StatelessWidget {
+class _MiniAudioCallCard extends StatelessWidget {
   final CallState callState;
-  final String name;
-  final String avatarUrl;
-  final bool hasAvatar;
-  final String statusText;
+  final String displayName;
+  final VoidCallback onExpand;
+  final VoidCallback onEnd;
 
-  const _VoiceMiniWindow({
+  const _MiniAudioCallCard({
     required this.callState,
-    required this.name,
-    required this.avatarUrl,
-    required this.hasAvatar,
-    required this.statusText,
+    required this.displayName,
+    required this.onExpand,
+    required this.onEnd,
   });
 
   @override
   Widget build(BuildContext context) {
+    final avatar = callState.avatarUrl?.trim() ?? '';
+    final hasAvatar = avatar.isNotEmpty;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+      padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
         color: const Color(0xFF111827),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(
-          color: Colors.white.withOpacity(0.10),
+          color: Colors.white.withOpacity(0.16),
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.28),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
+            blurRadius: 18,
+            offset: const Offset(0, 9),
           ),
         ],
       ),
       child: Row(
         children: [
-          _SmallAvatar(
-            name: name,
-            avatarUrl: avatarUrl,
-            hasAvatar: hasAvatar,
+          CircleAvatar(
             radius: 24,
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+            backgroundColor: const Color(0xFF1877F2),
+            backgroundImage: hasAvatar ? NetworkImage(avatar) : null,
+            child: !hasAvatar
+                ? const Icon(
+                    Icons.call_rounded,
                     color: Colors.white,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.call_rounded,
-                      color: Colors.greenAccent,
-                      size: 14,
-                    ),
-                    const SizedBox(width: 5),
-                    Text(
-                      statusText,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                    size: 24,
+                  )
+                : null,
+          ),
+          const SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              displayName,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                decoration: TextDecoration.none,
+              ),
             ),
           ),
-          const SizedBox(width: 8),
-          const Icon(
-            Icons.open_in_full_rounded,
-            color: Colors.white,
-            size: 20,
+          const SizedBox(width: 6),
+          _MiniCircleButton(
+            icon: Icons.open_in_full_rounded,
+            onPressed: onExpand,
           ),
         ],
       ),
@@ -569,78 +410,56 @@ class _VoiceMiniWindow extends StatelessWidget {
   }
 }
 
-class _LocalPreview extends StatelessWidget {
-  final CallState callState;
+class _MiniCircleButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback onPressed;
+  final Color backgroundColor;
 
-  const _LocalPreview({
-    required this.callState,
+  const _MiniCircleButton({
+    required this.icon,
+    required this.onPressed,
+    this.backgroundColor = const Color(0xAA000000),
   });
 
   @override
   Widget build(BuildContext context) {
-    final localRenderer = callState.localRenderer;
-
-    return Container(
-      clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: const Color(0xFF020617),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.24),
-          width: 1,
-        ),
-      ),
-      child: _buildContent(localRenderer),
-    );
-  }
-
-  Widget _buildContent(RTCVideoRenderer? localRenderer) {
-    if (callState.isCameraOff) {
-      return const Center(
-        child: Icon(
-          Icons.videocam_off_rounded,
-          color: Colors.white70,
-          size: 20,
-        ),
-      );
-    }
-
-    if (localRenderer == null || localRenderer.srcObject == null) {
-      return const Center(
-        child: SizedBox(
-          width: 16,
-          height: 16,
-          child: CircularProgressIndicator(
-            color: Colors.white,
-            strokeWidth: 2,
+    return InkWell(
+      onTap: onPressed,
+      borderRadius: BorderRadius.circular(999),
+      child: Container(
+        width: 28,
+        height: 28,
+        decoration: BoxDecoration(
+          color: backgroundColor,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: Colors.white.withOpacity(0.18),
+            width: 1,
           ),
         ),
-      );
-    }
-
-    return RTCVideoView(
-      localRenderer,
-      mirror: true,
-      objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+        child: Icon(
+          icon,
+          color: Colors.white,
+          size: 16,
+        ),
+      ),
     );
   }
 }
 
-class _AvatarFallback extends StatelessWidget {
+class _VideoFallback extends StatelessWidget {
   final String name;
   final String avatarUrl;
-  final bool hasAvatar;
-  final String subtitle;
 
-  const _AvatarFallback({
+  const _VideoFallback({
     required this.name,
     required this.avatarUrl,
-    required this.hasAvatar,
-    required this.subtitle,
   });
 
   @override
   Widget build(BuildContext context) {
+    final hasAvatar = avatarUrl.trim().isNotEmpty;
+
     return Container(
       color: const Color(0xFF111827),
       child: Stack(
@@ -648,7 +467,7 @@ class _AvatarFallback extends StatelessWidget {
         children: [
           if (hasAvatar)
             Opacity(
-              opacity: 0.20,
+              opacity: 0.22,
               child: Image.network(
                 avatarUrl,
                 fit: BoxFit.cover,
@@ -656,68 +475,25 @@ class _AvatarFallback extends StatelessWidget {
               ),
             ),
           Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _SmallAvatar(
-                  name: name,
-                  avatarUrl: avatarUrl,
-                  hasAvatar: hasAvatar,
-                  radius: 30,
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  subtitle,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+            child: CircleAvatar(
+              radius: 34,
+              backgroundColor: const Color(0xFF1877F2),
+              backgroundImage: hasAvatar ? NetworkImage(avatarUrl) : null,
+              child: !hasAvatar
+                  ? Text(
+                      name.isEmpty ? 'C' : name[0].toUpperCase(),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        decoration: TextDecoration.none,
+                      ),
+                    )
+                  : null,
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class _SmallAvatar extends StatelessWidget {
-  final String name;
-  final String avatarUrl;
-  final bool hasAvatar;
-  final double radius;
-
-  const _SmallAvatar({
-    required this.name,
-    required this.avatarUrl,
-    required this.hasAvatar,
-    required this.radius,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return CircleAvatar(
-      radius: radius,
-      backgroundColor: const Color(0xFF374151),
-      backgroundImage: hasAvatar ? NetworkImage(avatarUrl) : null,
-      onBackgroundImageError: hasAvatar
-          ? (Object error, StackTrace? stackTrace) {
-              debugPrint('MINI CALL AVATAR ERROR: $error');
-            }
-          : null,
-      child: !hasAvatar
-          ? Text(
-              name.isNotEmpty ? name[0].toUpperCase() : '?',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: radius * 0.72,
-                fontWeight: FontWeight.bold,
-              ),
-            )
-          : null,
     );
   }
 }

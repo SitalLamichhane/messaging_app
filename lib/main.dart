@@ -7,11 +7,12 @@ import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart'
-    hide ChangeNotifierProvider;
-import 'package:provider/provider.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart' as riverpod;
+import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
+import 'package:provider/provider.dart' as provider;
 
 import 'package:messaging_app/auth_gate.dart';
+import 'package:messaging_app/call_screen.dart';
 import 'package:messaging_app/features/auth/auth_provider.dart';
 import 'package:messaging_app/theme_controller.dart';
 import 'package:messaging_app/core/chat/chat_provider.dart';
@@ -22,6 +23,9 @@ import 'package:messaging_app/core/call/global_call_handler.dart';
 import 'package:messaging_app/core/call/call_notification.dart';
 import 'package:messaging_app/core/call/mini_call_overlay.dart';
 import 'package:messaging_app/core/call/call_lifecycle_watcher.dart';
+import 'package:messaging_app/core/call/call_provider.dart';
+import 'package:messaging_app/core/call/call_overlay_controller.dart';
+import 'package:messaging_app/core/call/call_state.dart';
 
 bool _handlingColdStartCallKit = false;
 StreamSubscription<CallEvent?>? _callKitSubscription;
@@ -53,19 +57,19 @@ Future<void> main() async {
   _setupCallKitDebugListener();
 
   runApp(
-    ProviderScope(
-      child: MultiProvider(
+    riverpod.ProviderScope(
+      child: provider.MultiProvider(
         providers: [
-          ChangeNotifierProvider<AuthProvider>(
+          provider.ChangeNotifierProvider<AuthProvider>(
             create: (_) => AuthProvider()..checkLogin(),
           ),
-          ChangeNotifierProvider<ChatProvider>(
+          provider.ChangeNotifierProvider<ChatProvider>(
             create: (_) => ChatProvider(),
           ),
-          ChangeNotifierProvider<ProfileProvider>(
+          provider.ChangeNotifierProvider<ProfileProvider>(
             create: (_) => ProfileProvider(),
           ),
-          ChangeNotifierProvider<BlockProvider>(
+          provider.ChangeNotifierProvider<BlockProvider>(
             create: (_) => BlockProvider(),
           ),
         ],
@@ -172,15 +176,10 @@ void _setupCallKitDebugListener() {
 }
 
 Future<void> _checkKilledStateCallKit() async {
-  if (_handlingColdStartCallKit) {
-    debugPrint('[MAIN CALLKIT] killed-state check ignored: already handling');
-    return;
-  }
-
   try {
     debugPrint('');
     debugPrint('################################################');
-    debugPrint('### CHECKING KILLED-STATE CALLKIT ACTIVE CALLS');
+    debugPrint('### CLEARING STALE CALLKIT ACTIVE CALLS');
     debugPrint('################################################');
 
     final activeCalls = await FlutterCallkitIncoming.activeCalls();
@@ -190,50 +189,27 @@ Future<void> _checkKilledStateCallKit() async {
     );
     debugPrint('[MAIN CALLKIT] activeCalls: $activeCalls');
 
-    if (activeCalls is! List || activeCalls.isEmpty) {
-      debugPrint('[MAIN CALLKIT] No active CallKit calls found after cold start');
-      return;
-    }
-
-    final firstRaw = activeCalls.first;
-    final firstCall = _safeMap(firstRaw);
-
-    debugPrint('[MAIN CALLKIT] first active call: $firstCall');
-
-    final resolvedData = _extractCallData(firstCall);
-
-    debugPrint('[MAIN CALLKIT] resolved active call data: $resolvedData');
-
-    final conversationId = _readString(
-      resolvedData,
-      ['conversation_id', 'conversationId'],
-    );
-
-    final callerId = _readString(
-      resolvedData,
-      ['caller_id', 'callerId'],
-    );
-
-    if (conversationId.isEmpty || callerId.isEmpty) {
+    if (activeCalls is List && activeCalls.isNotEmpty) {
       debugPrint(
-        '[MAIN CALLKIT] Active call missing conversationId/callerId. Cannot open direct call screen.',
+        '[MAIN CALLKIT] OLD STALE CALL FOUND. CLEARING ALL SO APP DOES NOT AUTO OPEN CALLSCREEN.',
       );
-      return;
+
+      try {
+        await FlutterCallkitIncoming.endAllCalls();
+        debugPrint('[MAIN CALLKIT] endAllCalls success');
+      } catch (e) {
+        debugPrint('[MAIN CALLKIT] endAllCalls error: $e');
+      }
+    } else {
+      debugPrint('[MAIN CALLKIT] No stale active calls found');
     }
 
-    /*
-      This means app was killed and opened from CallKit.
-      Go directly to Flutter call screen, not IncomingCallScreen.
-    */
-    await _handleCallKitAcceptFromMain(
-      firstCall,
-      source: 'activeCalls_cold_start',
-    );
+    debugPrint('################################################');
   } catch (e, st) {
-    debugPrint('!!!!!!!!!! CHECK KILLED STATE CALLKIT ERROR !!!!!!!!!!');
+    debugPrint('!!!!!!!!!! CLEAR STALE CALLKIT ERROR !!!!!!!!!!');
     debugPrint('error: $e');
     debugPrint('stack: $st');
-    debugPrint('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    debugPrint('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
   }
 }
 
@@ -413,7 +389,12 @@ Future<void> _handleCallKitDeclineFromMain(Map<String, dynamic> rawData) async {
 
     if (callId.isNotEmpty) {
       await FlutterCallkitIncoming.endCall(callId);
-      debugPrint('[MAIN CALLKIT] decline endCall success');
+
+      try {
+        await FlutterCallkitIncoming.endAllCalls();
+      } catch (_) {}
+
+      debugPrint('[MAIN CALLKIT] decline endCall/endAllCalls success');
     }
   } catch (e, st) {
     debugPrint('!!!!!!!!!! HANDLE CALLKIT DECLINE ERROR !!!!!!!!!!');
@@ -439,7 +420,12 @@ Future<void> _handleCallKitEndFromMain(Map<String, dynamic> rawData) async {
 
     if (callId.isNotEmpty) {
       await FlutterCallkitIncoming.endCall(callId);
-      debugPrint('[MAIN CALLKIT] endCall success');
+
+      try {
+        await FlutterCallkitIncoming.endAllCalls();
+      } catch (_) {}
+
+      debugPrint('[MAIN CALLKIT] endCall/endAllCalls success');
     }
   } catch (e, st) {
     debugPrint('!!!!!!!!!! HANDLE CALLKIT END ERROR !!!!!!!!!!');
@@ -560,9 +546,11 @@ extension _StringFallback on String {
 }
 
 /*
-  This class is no longer used in MaterialApp builder because AuthGate starts
-  the global incoming-call socket. Keep it for now if other files reference it,
-  but do not wrap the app with it or you may get duplicate incoming handling.
+  This class is not used in MaterialApp builder because AuthGate starts
+  the global incoming-call socket.
+
+  Keep it only for old references.
+  Do not wrap the app with it, otherwise duplicate incoming screens may appear.
 */
 class GlobalCallBootstrapper extends StatefulWidget {
   final Widget child;
@@ -642,7 +630,10 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
       return;
     }
 
-    final auth = context.read<AuthProvider>();
+    final auth = provider.Provider.of<AuthProvider>(
+      context,
+      listen: false,
+    );
 
     if (!auth.isLoggedIn) {
       debugPrint('[GLOBAL BOOTSTRAP] User not logged in.');
@@ -737,6 +728,7 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+
     super.dispose();
   }
 
@@ -869,6 +861,26 @@ class AppText {
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
+  bool _isPipLikeSize(BoxConstraints constraints) {
+    return constraints.maxWidth < 320 || constraints.maxHeight < 520;
+  }
+
+  bool _isFinalCallStatus(CallStatus status) {
+    return status == CallStatus.ended ||
+        status == CallStatus.failed ||
+        status == CallStatus.rejected ||
+        status == CallStatus.busy ||
+        status == CallStatus.timeout ||
+        status == CallStatus.missed;
+  }
+
+  bool _hasActiveCall(CallState state) {
+    final hasUsers = state.currentUserId?.trim().isNotEmpty == true &&
+        state.receiverId?.trim().isNotEmpty == true;
+
+    return hasUsers && !_isFinalCallStatus(state.status);
+  }
+
   @override
   Widget build(BuildContext context) {
     return ValueListenableBuilder<ThemeMode>(
@@ -920,29 +932,513 @@ class MyApp extends StatelessWidget {
           home: const AuthGate(),
 
           /*
-            Do not wrap with GlobalCallBootstrapper here.
-            AuthGate starts global socket now.
-            This prevents duplicate incoming call screens.
+            Final Messenger-like behavior:
 
-            CallLifecycleWatcher handles:
-            - app background/home -> Android PiP
-            - app detached/killed -> end call best-effort
+            App open:
+            - normal screens show normally
+            - MiniCallOverlay appears only when CallScreen is minimized
 
-            MiniCallOverlay handles:
-            - inside-app minimized call floating screen
+            Back button inside CallScreen:
+            - handled by CallScreen
+            - shows MiniCallOverlay inside app
+
+            Home button from ANY screen while video call is active:
+            - Android shrinks Activity into PiP
+            - this builder detects tiny PiP size
+            - hides Dashboard / ChatList / Profile / ChatDetail
+            - shows only call video surface
+
+            Tap PiP:
+            - CallLifecycleWatcher reopens full CallScreen if it was minimized
+
+            Force close / detached:
+            - handled by CallLifecycleWatcher
+            - do NOT emit call_end from Flutter
           */
           builder: (context, child) {
             return CallLifecycleWatcher(
-              child: Stack(
-                children: [
-                  child ?? const SizedBox.shrink(),
-                  const MiniCallOverlay(),
-                ],
+              child: riverpod.Consumer(
+                builder: (context, ref, _) {
+                  final callState = ref.watch(callProvider);
+                  final forceCallPipSurface =
+                      ref.watch(forceCallPipSurfaceProvider);
+                  final openCallScreenFromPip =
+                      ref.watch(openCallScreenFromPipProvider);
+
+                  return LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isPipLike = _isPipLikeSize(constraints);
+                      final hasActiveCall = _hasActiveCall(callState);
+
+                      /*
+                        ABSOLUTE RULE:
+
+                        If the Android window is PiP-sized OR we are preparing
+                        to enter PiP, NEVER render the normal app.
+
+                        That means:
+                        - no ChatList in PiP
+                        - no Dashboard in PiP
+                        - no Profile in PiP
+                        - no ChatDetail in PiP
+                        - no MiniCallOverlay stacked over app in PiP
+
+                        If active call exists -> show only audio/video call UI.
+                        If Android wrongly enters PiP after call ended -> show
+                        only black safe surface, never normal app.
+                      */
+                      /*
+                        EXACT MESSENGER RULE:
+
+                        1) No active call:
+                           - normal app behaves normally
+                           - Home/back from ChatList/Profile/Dashboard never creates overlay
+
+                        2) Active call:
+                           - Home from any screen captures only call UI into Android PiP
+                           - PiP zoom/tap opens real CallScreen
+                           - never ChatScreen/ChatList/Profile/Dashboard
+
+                        3) If Android is already PiP but call just ended:
+                           - show black safe surface briefly, never leak normal app into PiP
+                      */
+                      if (forceCallPipSurface || isPipLike) {
+                        /*
+                          IMPORTANT FIX:
+
+                          Do NOT remove `child` here.
+
+                          `child` is the MaterialApp Navigator.
+                          If we return only _GlobalPipCallSurface, the Navigator
+                          is removed from the widget tree and
+                          GlobalCallHandler.navigatorKey.currentState becomes null.
+
+                          That was the exact reason PiP zoom could not open
+                          the real CallScreen.
+
+                          So we keep the Navigator alive but hidden behind the
+                          call-only surface.
+                        */
+                        if (hasActiveCall) {
+                          return Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Offstage(
+                                offstage: true,
+                                child: child ?? const SizedBox.shrink(),
+                              ),
+                              Positioned.fill(
+                                child: _GlobalPipCallSurface(
+                                  callState: callState,
+                                  forceOpenRealCallScreen: false,
+                                ),
+                              ),
+                            ],
+                          );
+                        }
+
+                        if (isPipLike) {
+                          return Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              Offstage(
+                                offstage: true,
+                                child: child ?? const SizedBox.shrink(),
+                              ),
+                              const Positioned.fill(
+                                child: _PipSafeBlackSurface(),
+                              ),
+                            ],
+                          );
+                        }
+                      }
+
+                      return Stack(
+                        children: [
+                          child ?? const SizedBox.shrink(),
+                          const MiniCallOverlay(),
+                        ],
+                      );
+                    },
+                  );
+                },
               ),
             );
           },
         );
       },
+    );
+  }
+}
+
+
+class _PipSafeBlackSurface extends StatelessWidget {
+  const _PipSafeBlackSurface();
+
+  @override
+  Widget build(BuildContext context) {
+    /*
+      Failsafe.
+
+      If Android enters PiP when call is already ended/cancelled,
+      do NOT show Dashboard/ChatList/Profile in the PiP window.
+
+      A black surface is better than leaking normal screens into PiP.
+    */
+    return const ColoredBox(
+      color: Colors.black,
+      child: SizedBox.expand(),
+    );
+  }
+}
+
+class _GlobalPipCallSurface extends StatefulWidget {
+  final CallState callState;
+  final bool forceOpenRealCallScreen;
+
+  const _GlobalPipCallSurface({
+    required this.callState,
+    required this.forceOpenRealCallScreen,
+  });
+
+  @override
+  State<_GlobalPipCallSurface> createState() => _GlobalPipCallSurfaceState();
+}
+
+class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
+  static bool _openingRealCallScreen = false;
+  DateTime? _lastOpenAttemptAt;
+
+  bool _isFinalStatus(CallStatus status) {
+    return status == CallStatus.ended ||
+        status == CallStatus.failed ||
+        status == CallStatus.rejected ||
+        status == CallStatus.busy ||
+        status == CallStatus.timeout ||
+        status == CallStatus.missed;
+  }
+
+  bool _hasActiveCall(CallState state) {
+    final hasUsers = state.currentUserId?.trim().isNotEmpty == true &&
+        state.receiverId?.trim().isNotEmpty == true;
+
+    return hasUsers && !_isFinalStatus(state.status);
+  }
+
+  String _displayName() {
+    final name = widget.callState.name?.trim() ?? '';
+    return name.isEmpty ? 'Call' : name;
+  }
+
+  String _avatarUrl() {
+    return widget.callState.avatarUrl?.trim() ?? '';
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _maybeOpenRealCallScreen();
+  }
+
+  @override
+  void didUpdateWidget(covariant _GlobalPipCallSurface oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _maybeOpenRealCallScreen();
+  }
+
+  void _maybeOpenRealCallScreen() {
+    if (!widget.forceOpenRealCallScreen) return;
+    if (!_hasActiveCall(widget.callState)) return;
+
+    final now = DateTime.now();
+
+    if (_lastOpenAttemptAt != null &&
+        now.difference(_lastOpenAttemptAt!).inMilliseconds < 500) {
+      return;
+    }
+
+    _lastOpenAttemptAt = now;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _openRealCallScreen();
+    });
+  }
+
+  Future<void> _openRealCallScreen() async {
+    if (_openingRealCallScreen) return;
+    if (!_hasActiveCall(widget.callState)) return;
+
+    _openingRealCallScreen = true;
+
+    try {
+      debugPrint('GLOBAL PIP SURFACE TAP: OPEN ONE REAL CALLSCREEN');
+
+      final container = riverpod.ProviderScope.containerOf(
+        context,
+        listen: false,
+      );
+
+      if (container.read(openingCallScreenProvider)) {
+        debugPrint('GLOBAL PIP SURFACE OPEN IGNORED: already opening');
+        return;
+      }
+
+      container.read(openingCallScreenProvider.notifier).state = true;
+
+      NavigatorState? navigator;
+
+      for (int attempt = 0; attempt < 20; attempt++) {
+        navigator = GlobalCallHandler.navigatorKey.currentState;
+
+        if (navigator != null && navigator.mounted) {
+          break;
+        }
+
+        debugPrint(
+          'GLOBAL PIP SURFACE WAITING NAVIGATOR: attempt ${attempt + 1}',
+        );
+
+        await Future.delayed(const Duration(milliseconds: 80));
+      }
+
+      if (navigator == null || !navigator.mounted) {
+        debugPrint('GLOBAL PIP SURFACE OPEN ERROR: navigator still null');
+        container.read(openingCallScreenProvider.notifier).state = false;
+        return;
+      }
+
+      // Do NOT use pushAndRemoveUntil. Keep the navigator stable and open
+      // exactly one resumeExistingCall route.
+      await navigator.push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => CallScreen(
+            name: widget.callState.name?.trim().isNotEmpty == true
+                ? widget.callState.name!.trim()
+                : 'Unknown',
+            avatarUrl: widget.callState.avatarUrl?.trim() ?? '',
+            isVideoCall: widget.callState.isVideoCall,
+            currentUserId: widget.callState.currentUserId?.trim() ?? '',
+            currentUserName: '',
+            currentUserAvatar: '',
+            receiverId: widget.callState.receiverId?.trim() ?? '',
+            isCaller: widget.callState.isCaller,
+            incomingOffer: null,
+            conversationId: null,
+            callId: null,
+            resumeExistingCall: true,
+          ),
+        ),
+      );
+
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        container.read(callScreenVisibleProvider.notifier).state = true;
+        container.read(callScreenMinimizedProvider.notifier).state = false;
+        container.read(forceCallPipSurfaceProvider.notifier).state = false;
+        container.read(openCallScreenFromPipProvider.notifier).state = false;
+        container.read(appWasInPhonePipProvider.notifier).state = false;
+      });
+    } catch (e, st) {
+      debugPrint('GLOBAL PIP SURFACE OPEN CALLSCREEN ERROR: $e');
+      debugPrint(st.toString());
+    } finally {
+      final container = riverpod.ProviderScope.containerOf(
+        context,
+        listen: false,
+      );
+      container.read(openingCallScreenProvider.notifier).state = false;
+      _openingRealCallScreen = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final remoteRenderer = widget.callState.remoteRenderer;
+    final localRenderer = widget.callState.localRenderer;
+
+    final isActive = !_isFinalStatus(widget.callState.status);
+
+    final hasRemoteVideo = isActive &&
+        widget.callState.isVideoCall &&
+        !widget.callState.isRemoteCameraOff &&
+        remoteRenderer != null &&
+        remoteRenderer.srcObject != null;
+
+    final hasLocalVideo = isActive &&
+        widget.callState.isVideoCall &&
+        !widget.callState.isCameraOff &&
+        localRenderer != null &&
+        localRenderer.srcObject != null;
+
+    /*
+      Temporary call-only surface.
+
+      This is used only:
+      - while Android is entering PiP
+      - while Android PiP is tiny
+      - for a few milliseconds after PiP expands, until real CallScreen opens
+
+      Tap on this surface also opens real CallScreen.
+      So user never gets stuck on a fullscreen temporary surface without
+      call-end button.
+    */
+    if (widget.callState.isVideoCall) {
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: _openRealCallScreen,
+        child: ColoredBox(
+          color: Colors.black,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (hasRemoteVideo)
+                RTCVideoView(
+                  remoteRenderer,
+                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                )
+              else if (hasLocalVideo)
+                RTCVideoView(
+                  localRenderer,
+                  mirror: true,
+                  objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                )
+              else
+                const Center(
+                  child: SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      color: Colors.white,
+                      strokeWidth: 2,
+                    ),
+                  ),
+                ),
+
+              if (hasRemoteVideo && hasLocalVideo)
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  width: 58,
+                  height: 82,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black,
+                        border: Border.all(
+                          color: Colors.white.withOpacity(0.25),
+                          width: 1,
+                        ),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: RTCVideoView(
+                        localRenderer,
+                        mirror: true,
+                        objectFit:
+                            RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      ),
+                    ),
+                  ),
+                ),
+
+              if (widget.forceOpenRealCallScreen)
+                const Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 22,
+                  child: Center(
+                    child: Text(
+                      'Opening call...',
+                      style: TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    final avatar = _avatarUrl();
+    final hasAvatar = avatar.isNotEmpty;
+
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: _openRealCallScreen,
+      child: ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(
+                    radius: 30,
+                    backgroundColor: const Color(0xFF1877F2),
+                    backgroundImage: hasAvatar ? NetworkImage(avatar) : null,
+                    child: !hasAvatar
+                        ? const Icon(
+                            Icons.call_rounded,
+                            color: Colors.white,
+                            size: 30,
+                          )
+                        : null,
+                  ),
+                  const SizedBox(height: 10),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 120),
+                    child: Text(
+                      _displayName(),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Audio call',
+                    maxLines: 1,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      decoration: TextDecoration.none,
+                    ),
+                  ),
+                  if (widget.forceOpenRealCallScreen) ...[
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Opening call...',
+                      maxLines: 1,
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white54,
+                        fontSize: 11,
+                        decoration: TextDecoration.none,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
