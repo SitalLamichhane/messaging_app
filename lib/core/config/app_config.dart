@@ -1,13 +1,6 @@
 // lib/core/config/app_config.dart
 
 class AppConfig {
-  /*
-    Real mobile/server mode.
-
-    IMPORTANT:
-    useEmulator must be false for VPS/IP testing.
-    If emulator mode exists somewhere else in old code, it can create bad URLs.
-  */
   static const bool useEmulator = false;
 
   static const String host = '2.25.198.109';
@@ -15,12 +8,7 @@ class AppConfig {
   static String get serverUrl => 'http://$host';
   static String get apiBaseUrl => '$serverUrl/api';
 
-  /*
-    Use explicit :80.
-    Your log showed actual connect as:
-    http://2.25.198.109:0/ws/global-call/
-    This avoids bad implicit port parsing.
-  */
+  // Explicit :80 avoids bad :0 URL parsing in old builds.
   static String get wsBaseUrl => 'ws://$host:80';
 
   static String chatSocketUrl({

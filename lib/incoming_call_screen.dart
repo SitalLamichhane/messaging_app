@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 
 import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/call_waiting.dart';
 import 'package:messaging_app/chat_data.dart';
 import 'package:messaging_app/chat_models.dart';
 import 'package:messaging_app/core/api_client.dart';
@@ -24,11 +23,6 @@ class IncomingCallScreen extends StatefulWidget {
   final bool isVideoCall;
   final bool isGroupCall;
 
-  /*
-    IMPORTANT:
-    offer is nullable because FCM/global incoming_call may not contain
-    real WebRTC SDP. It may only contain call_id, conversation_id, caller_id.
-  */
   final Map<String, dynamic>? offer;
 
   final ChatItem? chat;
@@ -65,8 +59,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   String _resolvedCurrentUserAvatar = '';
 
   String get _effectiveConversationId {
-    final value =
-        widget.conversationId?.toString() ??
+    final value = widget.conversationId?.toString() ??
         widget.chat?.id.toString() ??
         widget.offer?['conversation_id']?.toString() ??
         widget.offer?['conversationId']?.toString() ??
@@ -76,8 +69,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   String get _callId {
-    final value =
-        widget.callId ??
+    final value = widget.callId ??
         widget.offer?['call_id']?.toString() ??
         widget.offer?['callId']?.toString() ??
         widget.offer?['id']?.toString() ??
@@ -87,13 +79,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   String get _callKitId {
-    if (_callId.isNotEmpty) {
-      return _callId;
-    }
-
+    if (_callId.isNotEmpty) return _callId;
     return _effectiveConversationId;
   }
-
 
   bool get _isGroupCall {
     return widget.isGroupCall == true ||
@@ -123,7 +111,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     if (freshChat == null) return null;
 
     final cleanCallerId = widget.callerId.trim();
-
     if (cleanCallerId.isEmpty) return null;
 
     for (final member in freshChat.members) {
@@ -143,10 +130,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
       if (cleanCallerId.isNotEmpty) {
         final nickname = freshChat.memberNicknames[cleanCallerId]?.trim() ?? '';
-
-        if (nickname.isNotEmpty) {
-          return nickname;
-        }
+        if (nickname.isNotEmpty) return nickname;
       }
 
       final callerMember = _callerMember(freshChat);
@@ -157,10 +141,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     }
 
     final socketName = widget.callerName.trim();
-
-    if (socketName.isNotEmpty) {
-      return socketName;
-    }
+    if (socketName.isNotEmpty) return socketName;
 
     return 'Unknown';
   }
@@ -204,9 +185,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     final parsedConversationId = int.tryParse(convId);
 
     if (parsedConversationId == null) {
-      debugPrint(
-        'INCOMING CALL SOCKET ERROR: conversationId is not number: $convId',
-      );
+      debugPrint('INCOMING CALL SOCKET ERROR: conversationId invalid: $convId');
       return false;
     }
 
@@ -216,7 +195,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       String? accessToken = await ApiClient.storage.read(key: 'access');
 
       if (accessToken == null || accessToken.trim().isEmpty) {
-        debugPrint('INCOMING CALL SOCKET: access empty, trying refresh');
         accessToken = await ApiClient.refreshAccessToken();
       }
 
@@ -258,30 +236,12 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
         token: accessToken.trim(),
       );
 
-      debugPrint('========== INCOMING CALL SOCKET DEBUG ==========');
-      debugPrint('conversationId: $convId');
-      debugPrint('currentUserId: $_resolvedCurrentUserId');
-      debugPrint('callerId: ${widget.callerId}');
-      debugPrint('AppConfig.wsBaseUrl: ${AppConfig.wsBaseUrl}');
-      debugPrint('INCOMING CALL SOCKET URL: $url');
-      debugPrint('================================================');
-
-      /*
-        Important:
-        Do NOT use GlobalCallHandler.connectCallSocket() here.
-
-        IncomingCallScreen is already opened by GlobalCallHandler.
-        Calling GlobalCallHandler.connectCallSocket() again can register
-        global handlers again and can open another IncomingCallScreen.
-
-        So this screen connects the socket directly.
-      */
       await SocketService.instance.connect(url: url);
 
       await Future.delayed(const Duration(milliseconds: 300));
 
       if (!SocketService.instance.isConnected) {
-        debugPrint('INCOMING CALL SOCKET ERROR: SocketService.isConnected false');
+        debugPrint('INCOMING CALL SOCKET ERROR: socket not connected');
         return false;
       }
 
@@ -335,7 +295,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
           queueIfDisconnected: false,
         );
 
-        // Wait shortly so call_reject reaches caller before closing socket.
         await Future.delayed(const Duration(milliseconds: 180));
       }
 
@@ -356,9 +315,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
       try {
         if (SocketService.instance.isConnected) {
-          debugPrint('INCOMING CALL REJECT: disconnecting conversation socket');
           await SocketService.instance.disconnect();
-          debugPrint('INCOMING CALL REJECT: conversation socket disconnected');
         }
       } catch (e, st) {
         debugPrint('INCOMING CALL REJECT SOCKET DISCONNECT ERROR: $e');
@@ -427,18 +384,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       return;
     }
 
-    /*
-      Do NOT send call_ready here.
-
-      Why:
-      - If valid SDP offer already exists, we open CallScreen directly.
-      - If SDP missing, CallWaitingScreen will send call_ready itself.
-      - Sending call_ready here and again in CallWaitingScreen causes duplicate
-        call_offer resend and duplicate navigation race.
-    */
-
-    final pendingOffer =
-        GlobalCallHandler.instance.takePendingOffer(
+    final pendingOffer = GlobalCallHandler.instance.takePendingOffer(
       callerId: widget.callerId,
       conversationId: convId,
       callId: _callId.isNotEmpty ? _callId : null,
@@ -455,55 +401,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
     if (!context.mounted) return;
 
-    /*
-      No valid WebRTC offer yet.
-      Open CallWaitingScreen and let it:
-      - connect socket
-      - send call_ready
-      - wait for call_offer
-      - open CallScreen
-    */
-    if (!hasValidFinalOffer && !_isGroupCall) {
-      debugPrint('INCOMING CALL ACCEPT: SDP missing.');
-      debugPrint('INCOMING CALL ACCEPT: opening CallWaitingScreen.');
-      debugPrint('INCOMING CALL OFFER DATA: ${widget.offer}');
-      debugPrint('INCOMING CALL PENDING OFFER DATA: $pendingOffer');
-
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CallWaitingScreen(
-            currentUserId: _resolvedCurrentUserId.isNotEmpty
-                ? _resolvedCurrentUserId
-                : widget.currentUserId,
-            currentUserName: _resolvedCurrentUserName.isNotEmpty
-                ? _resolvedCurrentUserName
-                : widget.currentUserName,
-            currentUserAvatar: _resolvedCurrentUserAvatar.isNotEmpty
-                ? _resolvedCurrentUserAvatar
-                : widget.currentUserAvatar,
-            callerId: widget.callerId,
-            callerName: displayName,
-            callerAvatar: displayAvatar,
-            isVideoCall: widget.isVideoCall,
-            conversationId: convId,
-            callId: _callId.isNotEmpty ? _callId : null,
-            chat: widget.chat,
-            emitAcceptOnOpen: false,
-          ),
-        ),
-      );
-
-      return;
-    }
-
-    /*
-      Real WebRTC offer exists.
-      Open CallScreen as receiver.
-      CallScreen should send call_answer after setting remote offer.
-    */
-    debugPrint('INCOMING CALL ACCEPT: valid SDP found.');
-    debugPrint('INCOMING CALL ACCEPT: opening CallScreen.');
+    debugPrint('INCOMING CALL ACCEPT: opening CallScreen directly.');
+    debugPrint('INCOMING CALL ACCEPT: hasValidOffer=$hasValidFinalOffer');
 
     Navigator.pushReplacement(
       context,

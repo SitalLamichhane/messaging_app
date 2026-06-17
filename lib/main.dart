@@ -177,39 +177,35 @@ void _setupCallKitDebugListener() {
 
 Future<void> _checkKilledStateCallKit() async {
   try {
-    debugPrint('');
-    debugPrint('################################################');
-    debugPrint('### CLEARING STALE CALLKIT ACTIVE CALLS');
-    debugPrint('################################################');
+    debugPrint('### CHECK KILLED STATE CALLKIT ###');
 
     final activeCalls = await FlutterCallkitIncoming.activeCalls();
-
-    debugPrint(
-      '[MAIN CALLKIT] activeCalls runtimeType: ${activeCalls.runtimeType}',
-    );
     debugPrint('[MAIN CALLKIT] activeCalls: $activeCalls');
 
-    if (activeCalls is List && activeCalls.isNotEmpty) {
-      debugPrint(
-        '[MAIN CALLKIT] OLD STALE CALL FOUND. CLEARING ALL SO APP DOES NOT AUTO OPEN CALLSCREEN.',
-      );
-
-      try {
-        await FlutterCallkitIncoming.endAllCalls();
-        debugPrint('[MAIN CALLKIT] endAllCalls success');
-      } catch (e) {
-        debugPrint('[MAIN CALLKIT] endAllCalls error: $e');
-      }
-    } else {
-      debugPrint('[MAIN CALLKIT] No stale active calls found');
+    if (activeCalls is! List || activeCalls.isEmpty) {
+      debugPrint('[MAIN CALLKIT] No active calls');
+      return;
     }
 
-    debugPrint('################################################');
+    final first = activeCalls.first;
+
+    if (first is! Map) {
+      debugPrint('[MAIN CALLKIT] active call invalid');
+      return;
+    }
+
+    final raw = Map<String, dynamic>.from(first);
+
+    debugPrint('[MAIN CALLKIT] ACTIVE CALL FOUND -> FORCE OPEN CALLSCREEN');
+    debugPrint('[MAIN CALLKIT] raw active call: $raw');
+
+    await _handleCallKitAcceptFromMain(
+      raw,
+      source: 'activeCalls_cold_start',
+    );
   } catch (e, st) {
-    debugPrint('!!!!!!!!!! CLEAR STALE CALLKIT ERROR !!!!!!!!!!');
-    debugPrint('error: $e');
-    debugPrint('stack: $st');
-    debugPrint('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+    debugPrint('CHECK KILLED STATE CALLKIT ERROR: $e');
+    debugPrint(st.toString());
   }
 }
 

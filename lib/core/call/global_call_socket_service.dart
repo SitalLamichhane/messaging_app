@@ -33,6 +33,8 @@ class GlobalCallSocketService {
   Completer<void>? _connectCompleter;
   Timer? _reconnectTimer;
 
+  int _reconnectAttempt = 0;
+
   bool get isConnected => _connected;
   bool get isConnecting => _connecting;
   String? get currentUrl => _url;
@@ -118,12 +120,13 @@ class GlobalCallSocketService {
       );
 
       try {
-        await channel.ready.timeout(const Duration(seconds: 5));
+        await channel.ready.timeout(const Duration(seconds: 8));
         debugPrint('GLOBAL CALL WS READY OK');
       } catch (e) {
         debugPrint('GLOBAL CALL WS READY FAILED: $e');
 
         _connected = false;
+        _connecting = false; // IMPORTANT: allow reconnect scheduling after ready failure.
 
         try {
           await _subscription?.cancel();
@@ -151,8 +154,17 @@ class GlobalCallSocketService {
       }
 
       _connected = true;
+      _reconnectAttempt = 0;
 
       debugPrint('GLOBAL CALL WS CONNECTED/ACTIVE: $fixedUrl');
+
+      // Fire local connected event so the handler can log/confirm that
+      // the receiver is really listening for incoming calls.
+      unawaited(_dispatchLocalEvent(GlobalCallSocketEvents.connected, {
+        'event': GlobalCallSocketEvents.connected,
+        'type': GlobalCallSocketEvents.connected,
+        'url': fixedUrl,
+      }));
 
       if (!(_connectCompleter?.isCompleted ?? true)) {
         _connectCompleter?.complete();
@@ -187,8 +199,59 @@ class GlobalCallSocketService {
   }
 
   void _scheduleReconnect() {
-    debugPrint('GLOBAL CALL WS AUTO RECONNECT DISABLED');
-    return;
+    if (_manualDisconnect) {
+      debugPrint('GLOBAL CALL WS RECONNECT SKIPPED: manual disconnect');
+      return;
+    }
+
+    if (_url == null || _url!.trim().isEmpty) {
+      debugPrint('GLOBAL CALL WS RECONNECT SKIPPED: url empty');
+      return;
+    }
+
+    if (_connecting) {
+      debugPrint('GLOBAL CALL WS RECONNECT WAIT: currently connecting');
+    }
+
+    _reconnectTimer?.cancel();
+
+    _reconnectAttempt++;
+
+    final delaySeconds = _reconnectAttempt <= 1
+        ? 2
+        : _reconnectAttempt <= 3
+            ? 5
+            : 10;
+
+    debugPrint(
+      'GLOBAL CALL WS RECONNECT SCHEDULED in ${delaySeconds}s attempt=$_reconnectAttempt',
+    );
+
+    _reconnectTimer = Timer(Duration(seconds: delaySeconds), () async {
+      if (_manualDisconnect) {
+        debugPrint('GLOBAL CALL WS RECONNECT CANCELLED: manual disconnect');
+        return;
+      }
+
+      if (_url == null || _url!.trim().isEmpty) {
+        debugPrint('GLOBAL CALL WS RECONNECT CANCELLED: url empty');
+        return;
+      }
+
+      if (_connected && _channel != null) {
+        debugPrint('GLOBAL CALL WS RECONNECT CANCELLED: already connected');
+        return;
+      }
+
+      try {
+        debugPrint('GLOBAL CALL WS AUTO RECONNECT START');
+        await connect(url: _url!);
+      } catch (e, st) {
+        debugPrint('GLOBAL CALL WS AUTO RECONNECT ERROR: $e');
+        debugPrint(st.toString());
+        _scheduleReconnect();
+      }
+    });
   }
 
   Future<void> _handleMessage(dynamic message) async {
@@ -309,6 +372,27 @@ class GlobalCallSocketService {
     }
   }
 
+
+  Future<void> _dispatchLocalEvent(
+    String event,
+    Map<String, dynamic> data,
+  ) async {
+    final handlers = _handlers[event];
+    if (handlers == null || handlers.isEmpty) {
+      debugPrint('GLOBAL CALL WS NO HANDLER FOR LOCAL EVENT: $event');
+      return;
+    }
+
+    for (final handler in List<GlobalSocketHandler>.from(handlers)) {
+      try {
+        await handler(data);
+      } catch (e, st) {
+        debugPrint('GLOBAL CALL WS LOCAL HANDLER ERROR FOR $event: $e');
+        debugPrint(st.toString());
+      }
+    }
+  }
+
   void on(String event, GlobalSocketHandler handler) {
     final list = _handlers.putIfAbsent(event, () => []);
 
@@ -375,8 +459,20 @@ class GlobalCallSocketService {
   }
 
   Future<void> reconnect() async {
-    debugPrint('GLOBAL CALL WS MANUAL RECONNECT DISABLED');
-    return;
+    if (_url == null || _url!.trim().isEmpty) {
+      debugPrint('GLOBAL CALL WS MANUAL RECONNECT FAILED: url empty');
+      return;
+    }
+
+    debugPrint('GLOBAL CALL WS MANUAL RECONNECT START');
+
+    await disconnect(
+      clearHandlers: false,
+      forgetUrl: false,
+      manual: false,
+    );
+
+    await connect(url: _url!);
   }
 
   void reset() {
@@ -389,6 +485,7 @@ class GlobalCallSocketService {
     _channel = null;
     _subscription = null;
     _connectCompleter = null;
+    _reconnectAttempt = 0;
 
     debugPrint('GLOBAL CALL WS RESET');
   }

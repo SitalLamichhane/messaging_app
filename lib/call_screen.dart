@@ -579,8 +579,11 @@ class _CallScreenState extends ConsumerState<CallScreen> {
           );
 
       if (!widget.isCaller && offer == null) {
-        await Future.delayed(const Duration(milliseconds: 200));
-        _sendCallReadyForAcceptedBackgroundCall();
+        await Future.delayed(const Duration(milliseconds: 1000));
+
+       if (SocketService.instance.isConnected) {
+       _sendCallReadyForAcceptedBackgroundCall();
+      }
       }
     });
   }

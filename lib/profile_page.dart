@@ -7,7 +7,9 @@ import 'package:image_picker/image_picker.dart';
 import 'package:messaging_app/calls.dart';
 import 'package:messaging_app/core/profile/profile_provider.dart';
 import 'package:messaging_app/dashboard.dart';
+import 'package:messaging_app/help%20&%20support/help_support_screen.dart';
 import 'package:messaging_app/login_page.dart';
+import 'package:messaging_app/privacy%20&%20security/privacy_security.dart';
 import 'package:messaging_app/profile_data/profile_data_page.dart';
 import 'package:messaging_app/theme_controller.dart';
 // import 'package:messaging_app/pages.dart'; // PagesScreen temporarily commented
@@ -702,7 +704,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               textColor: primaryText,
               subtitleColor: secondaryText,
               dividerColor: dividerColor,
-              onTap: () {},
+              onTap: () {
+                Navigator.push(
+                   context,
+                   MaterialPageRoute(builder: (_) => const PrivacySecurityScreen ()),
+                 );
+              },
             ),
             ProfileMenuTile(
               icon: Icons.help_outline_rounded,
@@ -714,7 +721,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
               subtitleColor: secondaryText,
               dividerColor: dividerColor,
               showDivider: false,
-              onTap: () {},
+              onTap: () {
+                 Navigator.push(
+                   context,
+                   MaterialPageRoute(builder: (_) => const HelpSupportScreen()),
+                 );
+              },
             ),
           ],
         ),

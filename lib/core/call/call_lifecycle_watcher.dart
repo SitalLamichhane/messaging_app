@@ -15,10 +15,7 @@ import 'package:messaging_app/core/call/global_call_handler.dart';
 class CallLifecycleWatcher extends ConsumerStatefulWidget {
   final Widget child;
 
-  const CallLifecycleWatcher({
-    super.key,
-    required this.child,
-  });
+  const CallLifecycleWatcher({super.key, required this.child});
 
   @override
   ConsumerState<CallLifecycleWatcher> createState() =>
@@ -59,15 +56,6 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
     return hasUsers && !_isFinalStatus(state.status);
   }
 
-  /*
-    HOME -> PiP is allowed only from:
-    1. real CallScreen, or
-    2. in-app mini call overlay.
-
-    It is NOT allowed from ChatList/Profile/Settings unless the mini call
-    overlay is already active. This prevents normal app screens from becoming
-    PiP content.
-  */
   bool _isCallUiActiveForHomePip() {
     final isCallScreenVisible = ref.read(callScreenVisibleProvider);
     final isMiniOverlayVisible = ref.read(callScreenMinimizedProvider);
@@ -313,10 +301,6 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
 
       await _syncNativeCallActive(callState);
 
-      /*
-        Force main.dart to draw only the call surface BEFORE Android captures
-        PiP. This prevents ChatList/Profile/Settings from appearing in PiP.
-      */
       preparePhoneHomePip(ref);
 
       await Future.delayed(const Duration(milliseconds: 90));
@@ -387,12 +371,6 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
       return;
     }
 
-    /*
-      Temporary call-only surface is allowed only while we push CallScreen.
-      The permanent black-screen bug happens when forceCallPipSurface remains
-      true after the route is already pushed. So _openFullCallScreenFromPip()
-      always clears forceCallPipSurface immediately after push starts.
-    */
     _setFlags(
       callScreenVisible: false,
       forceCallPipSurface: true,
@@ -453,10 +431,6 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
     }
 
     try {
-      // IMPORTANT:
-      // Do NOT use pushAndRemoveUntil here. It can remove/replace routes while
-      // the call providers/renderers are still active and can create black
-      // screen or duplicate navigation state. We push exactly one resume route.
       await navigator.push(
         MaterialPageRoute(
           fullscreenDialog: true,
@@ -484,7 +458,12 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
       _clearStuckPipSurfaceButKeepCall(callState);
     } finally {
       if (mounted) {
-        markCallScreenVisible(ref);
+        _setFlags(
+          callScreenVisible: true,
+          forceCallPipSurface: false,
+          openCallScreenFromPip: false,
+          minimized: false,
+        );
       }
 
       Future.delayed(const Duration(milliseconds: 450), () {

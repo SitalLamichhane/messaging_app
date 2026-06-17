@@ -8,6 +8,8 @@ import 'package:messaging_app/core/call/call_api.dart';
 import 'package:messaging_app/core/call/call_socket_service.dart';
 import 'package:messaging_app/core/call/call_sound_service.dart';
 import 'package:messaging_app/core/call/call_state.dart';
+import 'package:messaging_app/core/call/global_call_handler.dart';
+import 'package:messaging_app/core/call/call_notification.dart';
 import 'package:messaging_app/core/call/webrct_servide.dart';
 
 final callProvider = StateNotifierProvider<CallNotifier, CallState>((ref) {
@@ -1257,6 +1259,18 @@ class CallNotifier extends StateNotifier<CallState> {
       await _disconnectConversationCallSocket();
     }
 
+    try {
+      await NotificationService.endAllNativeCalls();
+    } catch (e) {
+      debugPrint('CALL PROVIDER CALLKIT CLEANUP ERROR: $e');
+    }
+
+    try {
+      GlobalCallHandler.instance.markCallScreenClosed();
+    } catch (e) {
+      debugPrint('CALL PROVIDER GLOBAL FLAG CLEANUP ERROR: $e');
+    }
+
     _conversationId = null;
     _callId = null;
     _waitingForOfferAfterCallKitAccept = false;
@@ -1311,6 +1325,18 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _removeSocketEvents();
 
+    try {
+      await _disconnectConversationCallSocket();
+    } catch (_) {}
+
+    try {
+      await NotificationService.endAllNativeCalls();
+    } catch (_) {}
+
+    try {
+      GlobalCallHandler.instance.markCallScreenClosed();
+    } catch (_) {}
+
     _safeState(const CallState());
 
     await Future.delayed(const Duration(milliseconds: 200));
@@ -1341,6 +1367,18 @@ class CallNotifier extends StateNotifier<CallState> {
     _timeoutTimer?.cancel();
 
     _removeSocketEvents();
+
+    try {
+      await _disconnectConversationCallSocket();
+    } catch (_) {}
+
+    try {
+      await NotificationService.endAllNativeCalls();
+    } catch (_) {}
+
+    try {
+      GlobalCallHandler.instance.markCallScreenClosed();
+    } catch (_) {}
 
     if (mounted) {
       state = const CallState();

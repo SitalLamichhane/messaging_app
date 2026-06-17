@@ -16,7 +16,6 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 
-import 'package:messaging_app/call_waiting.dart';
 import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/core/call/call_api.dart';
 import 'package:messaging_app/core/call/call_socket_service.dart';
@@ -34,20 +33,14 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   debugPrint('================================================');
 
   final data = Map<String, dynamic>.from(message.data);
+  if (data.isEmpty) return;
 
-  if (data.isEmpty) {
-    debugPrint('BACKGROUND FCM DATA EMPTY');
-    return;
-  }
-
-  final type = data['type']?.toString();
-
-  if (type == 'incoming_call') {
+  if (data['type']?.toString() == 'incoming_call') {
     await NotificationService.showIncomingCall(data);
     return;
   }
 
-  debugPrint('BACKGROUND FCM IGNORED TYPE: $type');
+  debugPrint('BACKGROUND FCM IGNORED TYPE: ${data['type']}');
 }
 
 class NotificationService {
@@ -58,30 +51,20 @@ class NotificationService {
   static bool _initialized = false;
   static bool _callKitListenerRegistered = false;
 
+  static bool _handlingAccept = false;
   static bool _handlingDecline = false;
   static bool _handlingTimeout = false;
-
-  static String? _openingCallKey;
-  static DateTime? _openingCallKeyTime;
 
   static String? _lastShownCallKitKey;
   static DateTime? _lastShownCallKitKeyTime;
 
   static Future<void> init() async {
-    if (_initialized) {
-      debugPrint('NotificationService already initialized');
-      return;
-    }
-
+    if (_initialized) return;
     _initialized = true;
 
     await _requestFirebasePermission();
     await _requestCallKitPermissions();
 
-    /*
-      This listener handles DECLINE and TIMEOUT only.
-      ANSWER is handled in main.dart to avoid duplicate screens.
-    */
     _listenCallKitEvents();
 
     await saveCurrentToken();
@@ -93,59 +76,34 @@ class NotificationService {
     FirebaseMessaging.onMessage.listen((RemoteMessage message) async {
       debugPrint('================ FOREGROUND FCM ================');
       debugPrint('FOREGROUND DATA: ${message.data}');
-      debugPrint('FOREGROUND TITLE: ${message.notification?.title}');
-      debugPrint('FOREGROUND BODY: ${message.notification?.body}');
       debugPrint('================================================');
 
       final data = Map<String, dynamic>.from(message.data);
-
-      if (data.isEmpty) {
-        debugPrint('FOREGROUND FCM DATA EMPTY');
-        return;
-      }
+      if (data.isEmpty) return;
 
       final type = data['type']?.toString();
 
       if (type == 'incoming_call') {
-        debugPrint(
-          'FOREGROUND INCOMING CALL FCM SKIPPED: global socket handles UI',
-        );
+        debugPrint('FOREGROUND FCM INCOMING -> OPEN IN-APP INCOMING SCREEN');
+
+        // Foreground/app-open fallback: if the global websocket misses the event,
+        // FCM still opens the Messenger-style incoming screen. If the websocket
+        // already opened it, GlobalCallHandler duplicate locks will ignore it.
+        await GlobalCallHandler.handleIncomingCall(data);
         return;
       }
 
       debugPrint('FOREGROUND FCM IGNORED TYPE: $type');
     });
 
-    /*
-      User taps the notification body, not ANSWER.
-      In that case, open CallWaitingScreen.
-    */
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
-      debugPrint('OPENED FROM BACKGROUND FCM DATA: ${message.data}');
+  debugPrint('FCM onMessageOpenedApp IGNORED - CallKit handles navigation');
+});
 
-      final data = Map<String, dynamic>.from(message.data);
-
-      if (data['type']?.toString() == 'incoming_call') {
-        await _openCallWaitingScreenFromData(data);
-      }
-    });
-
-    /*
-      App opened from terminated state by tapping notification body.
-      This is not CallKit ANSWER. ANSWER is handled in main.dart.
-    */
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
 
     if (initialMessage != null) {
-      debugPrint('OPENED FROM TERMINATED FCM DATA: ${initialMessage.data}');
-
-      final data = Map<String, dynamic>.from(initialMessage.data);
-
-      if (data['type']?.toString() == 'incoming_call') {
-        Future.delayed(const Duration(milliseconds: 900), () async {
-          await _openCallWaitingScreenFromData(data);
-        });
-      }
+      debugPrint('FCM getInitialMessage IGNORED - CallKit/main handles navigation');
     }
 
     await _debugActiveCallKitCalls();
@@ -200,7 +158,6 @@ class NotificationService {
 
   static void _listenCallKitEvents() {
     if (_callKitListenerRegistered) return;
-
     _callKitListenerRegistered = true;
 
     FlutterCallkitIncoming.onEvent.listen((CallEvent? event) async {
@@ -216,51 +173,51 @@ class NotificationService {
 
       switch (event.event) {
         case Event.actionCallAccept:
-          /*
-            IMPORTANT:
-            Do not open CallWaitingScreen here.
-            main.dart handles ANSWER. If this file also handles ANSWER,
-            two screens can open or the app can fall back to ChatListScreen.
-          */
-          debugPrint(
-            'CALLKIT ACCEPT IGNORED IN NotificationService. main.dart handles ANSWER.',
-          );
+          if (_handlingAccept) return;
+          _handlingAccept = true;
+
+          try {
+            await _acceptCall(extra, body);
+          } catch (e, st) {
+            debugPrint('CALLKIT ACCEPT ERROR: $e');
+            debugPrint(st.toString());
+          } finally {
+            Future.delayed(const Duration(milliseconds: 1500), () {
+              _handlingAccept = false;
+            });
+          }
           break;
 
         case Event.actionCallDecline:
-          if (_handlingDecline) {
-            debugPrint('CALLKIT DECLINE IGNORED: already handling');
-            return;
-          }
-
+          if (_handlingDecline) return;
           _handlingDecline = true;
 
           try {
             await _declineCall(extra, body);
+          } catch (e, st) {
+            debugPrint('CALLKIT DECLINE ERROR: $e');
+            debugPrint(st.toString());
           } finally {
             Future.delayed(const Duration(milliseconds: 1000), () {
               _handlingDecline = false;
             });
           }
-
           break;
 
         case Event.actionCallTimeout:
-          if (_handlingTimeout) {
-            debugPrint('CALLKIT TIMEOUT IGNORED: already handling');
-            return;
-          }
-
+          if (_handlingTimeout) return;
           _handlingTimeout = true;
 
           try {
             await _timeoutCall(extra, body);
+          } catch (e, st) {
+            debugPrint('CALLKIT TIMEOUT ERROR: $e');
+            debugPrint(st.toString());
           } finally {
             Future.delayed(const Duration(milliseconds: 1000), () {
               _handlingTimeout = false;
             });
           }
-
           break;
 
         case Event.actionCallEnded:
@@ -269,7 +226,6 @@ class NotificationService {
             'callId',
             'id',
           ]);
-
           debugPrint('CALLKIT ACTION ENDED IGNORED: $callId');
           break;
 
@@ -281,10 +237,7 @@ class NotificationService {
   }
 
   static Future<void> showIncomingCall(Map<String, dynamic> data) async {
-    if (kIsWeb) {
-      debugPrint('CALLKIT NOT SUPPORTED ON WEB');
-      return;
-    }
+    if (kIsWeb) return;
 
     try {
       final callId = _readFirstString(data, const {}, const [
@@ -323,20 +276,14 @@ class NotificationService {
         'conversationId',
       ]);
 
-      final isVideoCall =
-      _readBool(data['is_video_call']) ||
-      _readBool(data['isVideoCall']) ||
-      _readBool(data['video']) ||
-       data['type'] == 1 ||
-       data['type']?.toString() == '1';
+      final isVideoCall = _readBool(data['is_video_call']) ||
+          _readBool(data['isVideoCall']) ||
+          _readBool(data['video']) ||
+          data['type'] == 1 ||
+          data['type']?.toString() == '1';
 
-      if (callerId.isEmpty) {
-        debugPrint('SHOW INCOMING CALL ERROR: callerId empty');
-        return;
-      }
-
-      if (conversationId.isEmpty) {
-        debugPrint('SHOW INCOMING CALL ERROR: conversationId empty');
+      if (callerId.isEmpty || conversationId.isEmpty) {
+        debugPrint('SHOW INCOMING CALL ERROR: missing caller/conversation');
         return;
       }
 
@@ -427,7 +374,6 @@ class NotificationService {
       );
 
       await FlutterCallkitIncoming.showCallkitIncoming(params);
-
       debugPrint('CALLKIT INCOMING SHOWN: $extra');
     } catch (e, st) {
       debugPrint('SHOW INCOMING CALL ERROR: $e');
@@ -435,10 +381,6 @@ class NotificationService {
     }
   }
 
-  /*
-    Kept as a fallback/helper, but NotificationService does not call this from
-    Event.actionCallAccept anymore. main.dart handles ANSWER.
-  */
   static Future<void> _acceptCall(
     Map<String, dynamic> extra,
     Map<String, dynamic> body,
@@ -447,6 +389,7 @@ class NotificationService {
       'call_id',
       'callId',
       'id',
+      'uuid',
     ]);
 
     final callerId = _readFirstString(extra, body, const [
@@ -487,56 +430,24 @@ class NotificationService {
         body['type'] == 1 ||
         body['type']?.toString() == '1';
 
-    final currentUserId =
-        (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
+    debugPrint('================ CALLKIT ACCEPT ================');
+    debugPrint('callId=$callId');
+    debugPrint('callerId=$callerId');
+    debugPrint('conversationId=$conversationId');
+    debugPrint('isVideoCall=$isVideoCall');
+    debugPrint('===============================================');
 
-    final currentUserName =
-        (await ApiClient.storage.read(key: 'full_name'))?.trim() ?? '';
+    if (callerId.isEmpty || conversationId.isEmpty) return;
 
-    final currentUserAvatar =
-        (await ApiClient.storage.read(key: 'avatar_url'))?.trim() ??
-            (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
-            '';
-
-    debugPrint('================ CALL ACCEPT FALLBACK ================');
-    debugPrint('CALL ACCEPT currentUserId=$currentUserId');
-    debugPrint('CALL ACCEPT callId=$callId');
-    debugPrint('CALL ACCEPT callerId=$callerId');
-    debugPrint('CALL ACCEPT conversationId=$conversationId');
-    debugPrint('CALL ACCEPT isVideoCall=$isVideoCall');
-    debugPrint('=====================================================');
-
-    if (currentUserId.isEmpty) {
-      debugPrint('CALL ACCEPT ERROR: currentUserId empty');
-      return;
-    }
-
-    if (callerId.isEmpty) {
-      debugPrint('CALL ACCEPT ERROR: callerId empty');
-      return;
-    }
-
-    if (conversationId.isEmpty) {
-      debugPrint('CALL ACCEPT ERROR: conversationId empty');
-      return;
-    }
-
-    await _openCallWaitingScreen(
-      currentUserId: currentUserId,
-      currentUserName: currentUserName,
-      currentUserAvatar: currentUserAvatar,
+    await GlobalCallHandler.instance.openIncomingCallFromCallKit(
+      callId: callId,
+      conversationId: conversationId,
       callerId: callerId,
       callerName: callerName,
       callerAvatar: callerAvatar,
       isVideoCall: isVideoCall,
-      conversationId: conversationId,
-      callId: callId,
     );
 
-    /*
-      Do NOT call endCall(callId) here.
-      ANSWER means accepted, not ended.
-    */
     if (callId.isNotEmpty) {
       unawaited(
         _safeUpdateCallStatus(
@@ -544,7 +455,73 @@ class NotificationService {
           status: 'accepted',
         ),
       );
+
+      Future.delayed(const Duration(milliseconds: 900), () async {
+        try {
+          await FlutterCallkitIncoming.endCall(callId);
+          debugPrint('CALLKIT ACCEPT CLEANUP END CALL: $callId');
+        } catch (e) {
+          debugPrint('CALLKIT ACCEPT CLEANUP ERROR: $e');
+        }
+      });
     }
+  }
+
+  static Future<void> _openDirectCallScreenFromData(
+    Map<String, dynamic> data,
+  ) async {
+    final callerId = _readFirstString(data, const {}, const [
+      'caller_id',
+      'callerId',
+      'from',
+      'from_user',
+    ]);
+
+    final callerName = _readFirstString(
+      data,
+      const {},
+      const [
+        'caller_name',
+        'callerName',
+        'nameCaller',
+        'name',
+      ],
+      fallback: 'Incoming call',
+    );
+
+    final callerAvatar = _readFirstString(data, const {}, const [
+      'caller_avatar',
+      'callerAvatar',
+      'avatar',
+    ]);
+
+    final conversationId = _readFirstString(data, const {}, const [
+      'conversation_id',
+      'conversationId',
+    ]);
+
+    final callId = _readFirstString(data, const {}, const [
+      'call_id',
+      'callId',
+      'id',
+    ]);
+
+    final isVideoCall = _readBool(data['is_video_call']) ||
+        _readBool(data['isVideoCall']) ||
+        _readBool(data['video']) ||
+        data['type'] == 1 ||
+        data['type']?.toString() == '1';
+
+    if (callerId.isEmpty || conversationId.isEmpty) return;
+
+    await GlobalCallHandler.instance.openIncomingCallFromCallKit(
+      callId: callId,
+      conversationId: conversationId,
+      callerId: callerId,
+      callerName: callerName,
+      callerAvatar: callerAvatar,
+      isVideoCall: isVideoCall,
+    );
   }
 
   static Future<void> _declineCall(
@@ -616,7 +593,7 @@ class NotificationService {
       await endCall(callId);
     }
 
-    _clearOpeningCallGuard(callId: callId, conversationId: conversationId);
+    await _safeDisconnectCallSocket();
   }
 
   static Future<void> _timeoutCall(
@@ -688,7 +665,7 @@ class NotificationService {
       await endCall(callId);
     }
 
-    _clearOpeningCallGuard(callId: callId, conversationId: conversationId);
+    await _safeDisconnectCallSocket();
   }
 
   static Future<bool> _ensureCallSocketConnectedForPayload(
@@ -713,56 +690,20 @@ class NotificationService {
         'conversationId',
       ]);
 
-      debugPrint('========== CALL SOCKET CONNECT DEBUG ==========');
-      debugPrint('conversationId: $conversationId');
-      debugPrint(
-        'accessToken empty before refresh: ${accessToken == null || accessToken.trim().isEmpty}',
-      );
-      debugPrint('accessToken length before refresh: ${accessToken?.length ?? 0}');
-      debugPrint('currentUserId: $currentUserId');
-      debugPrint('currentUserName: $currentUserName');
-      debugPrint('AppConfig.apiBaseUrl: ${AppConfig.apiBaseUrl}');
-      debugPrint('AppConfig.wsBaseUrl: ${AppConfig.wsBaseUrl}');
-      debugPrint('================================================');
-
-      if (conversationId.isEmpty) {
-        debugPrint('CALL SOCKET CONNECT ERROR: conversation id empty');
-        return false;
-      }
-
-      if (currentUserId.isEmpty) {
-        debugPrint('CALL SOCKET CONNECT ERROR: current user id empty');
-        return false;
-      }
+      if (conversationId.isEmpty || currentUserId.isEmpty) return false;
 
       if (accessToken == null || accessToken.trim().isEmpty) {
-        debugPrint('CALL SOCKET ACCESS EMPTY: trying refresh token');
-
         accessToken = await ApiClient.refreshAccessToken();
-
-        if (accessToken == null || accessToken.trim().isEmpty) {
-          debugPrint(
-            'CALL SOCKET CONNECT ERROR: access token empty after refresh',
-          );
-          return false;
-        }
+        if (accessToken == null || accessToken.trim().isEmpty) return false;
       }
 
       final parsedConversationId = int.tryParse(conversationId);
-
-      if (parsedConversationId == null) {
-        debugPrint(
-          'CALL SOCKET CONNECT ERROR: conversation id is not number: $conversationId',
-        );
-        return false;
-      }
+      if (parsedConversationId == null) return false;
 
       final url = AppConfig.callSocketUrl(
         conversationId: parsedConversationId,
         token: accessToken.trim(),
       );
-
-      debugPrint('CALL SOCKET FINAL URL: $url');
 
       await GlobalCallHandler.connectCallSocket(
         url: url,
@@ -772,14 +713,7 @@ class NotificationService {
       );
 
       await Future.delayed(const Duration(milliseconds: 300));
-
-      if (!SocketService.instance.isConnected) {
-        debugPrint('CALL SOCKET CONNECT ERROR: SocketService.isConnected false');
-        return false;
-      }
-
-      debugPrint('CALL SOCKET CONNECTED FROM CALL NOTIFICATION');
-      return true;
+      return SocketService.instance.isConnected;
     } catch (e, st) {
       debugPrint('CALL SOCKET CONNECT FROM NOTIFICATION ERROR: $e');
       debugPrint(st.toString());
@@ -787,197 +721,17 @@ class NotificationService {
     }
   }
 
-  static Future<void> _openCallWaitingScreenFromData(
-    Map<String, dynamic> data,
-  ) async {
-    final currentUserId =
-        (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
-
-    final currentUserName =
-        (await ApiClient.storage.read(key: 'full_name'))?.trim() ?? '';
-
-    final currentUserAvatar =
-        (await ApiClient.storage.read(key: 'avatar_url'))?.trim() ??
-            (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
-            '';
-
-    final callerId = _readFirstString(data, const {}, const [
-      'caller_id',
-      'callerId',
-      'from',
-      'from_user',
-    ]);
-
-    final callerName = _readFirstString(
-      data,
-      const {},
-      const [
-        'caller_name',
-        'callerName',
-        'nameCaller',
-        'name',
-      ],
-      fallback: 'Incoming call',
-    );
-
-    final callerAvatar = _readFirstString(data, const {}, const [
-      'caller_avatar',
-      'callerAvatar',
-      'avatar',
-    ]);
-
-    final conversationId = _readFirstString(data, const {}, const [
-      'conversation_id',
-      'conversationId',
-    ]);
-
-    final callId = _readFirstString(data, const {}, const [
-      'call_id',
-      'callId',
-      'id',
-    ]);
-
-     final isVideoCall =
-     _readBool(data['is_video_call']) ||
-     _readBool(data['isVideoCall']) ||
-     _readBool(data['video']) ||
-     data['type'] == 1 ||
-     data['type']?.toString() == '1';
-
-    debugPrint('OPEN CALL WAITING FROM FCM CLICK');
-    debugPrint('currentUserId=$currentUserId');
-    debugPrint('callerId=$callerId');
-    debugPrint('conversationId=$conversationId');
-    debugPrint('callId=$callId');
-
-    await _openCallWaitingScreen(
-      currentUserId: currentUserId,
-      currentUserName: currentUserName,
-      currentUserAvatar: currentUserAvatar,
-      callerId: callerId,
-      callerName: callerName,
-      callerAvatar: callerAvatar,
-      isVideoCall: isVideoCall,
-      conversationId: conversationId,
-      callId: callId,
-    );
-  }
-
-  static Future<void> _openCallWaitingScreen({
-    required String currentUserId,
-    required String currentUserName,
-    required String currentUserAvatar,
-    required String callerId,
-    required String callerName,
-    required String callerAvatar,
-    required bool isVideoCall,
-    required String conversationId,
-    required String callId,
-  }) async {
-    if (currentUserId.isEmpty) {
-      debugPrint('OPEN CALL WAITING ERROR: currentUserId empty');
-      return;
+  static Future<void> _safeDisconnectCallSocket() async {
+    try {
+      await SocketService.instance.disconnect(
+        clearHandlers: false,
+        clearQueue: true,
+        clearCache: true,
+        forgetUrl: true,
+      );
+    } catch (e) {
+      debugPrint('CALL SOCKET SAFE DISCONNECT ERROR: $e');
     }
-
-    if (callerId.isEmpty) {
-      debugPrint('OPEN CALL WAITING ERROR: callerId empty');
-      return;
-    }
-
-    if (conversationId.isEmpty) {
-      debugPrint('OPEN CALL WAITING ERROR: conversationId empty');
-      return;
-    }
-
-    final callKey = _buildCallKey(
-      callId: callId,
-      conversationId: conversationId,
-      callerId: callerId,
-    );
-
-    if (_isRecentDuplicate(
-      key: callKey,
-      existingKey: _openingCallKey,
-      existingTime: _openingCallKeyTime,
-      withinSeconds: 30,
-    )) {
-      debugPrint('OPEN CALL WAITING SKIP DUPLICATE: $callKey');
-      return;
-    }
-
-    _openingCallKey = callKey;
-    _openingCallKeyTime = DateTime.now();
-
-    debugPrint('OPEN CALL WAITING SCHEDULED FORCE ROUTE: $callKey');
-
-    unawaited(
-      Future.delayed(const Duration(milliseconds: 1200), () async {
-        final navigator = await _waitForNavigator();
-
-        if (navigator == null) {
-          debugPrint('OPEN CALL WAITING ERROR: navigator still null after retry');
-          _clearOpeningCallGuard(
-            callId: callId,
-            conversationId: conversationId,
-          );
-          return;
-        }
-
-        final context = navigator.context;
-
-        if (!context.mounted) {
-          debugPrint('OPEN CALL WAITING ERROR: navigator context not mounted');
-          _clearOpeningCallGuard(
-            callId: callId,
-            conversationId: conversationId,
-          );
-          return;
-        }
-
-        debugPrint('OPEN CALL WAITING FORCE PUSHING ROUTE: $callKey');
-
-        navigator.pushAndRemoveUntil(
-          MaterialPageRoute(
-            fullscreenDialog: true,
-            builder: (_) => CallWaitingScreen(
-              currentUserId: currentUserId,
-              currentUserName: currentUserName,
-              currentUserAvatar: currentUserAvatar,
-              callerId: callerId,
-              callerName: callerName,
-              callerAvatar: callerAvatar,
-              isVideoCall: isVideoCall,
-              conversationId: conversationId,
-              callId: callId,
-              chat: null,
-              emitAcceptOnOpen: true,
-            ),
-          ),
-          (route) => route.isFirst,
-        );
-
-        Future.delayed(const Duration(seconds: 5), () {
-          _clearOpeningCallGuard(
-            callId: callId,
-            conversationId: conversationId,
-          );
-        });
-      }),
-    );
-  }
-
-  static Future<NavigatorState?> _waitForNavigator() async {
-    for (int i = 0; i < 50; i++) {
-      final navigator = GlobalCallHandler.navigatorKey.currentState;
-
-      if (navigator != null) {
-        return navigator;
-      }
-
-      await Future.delayed(const Duration(milliseconds: 250));
-    }
-
-    return null;
   }
 
   static Future<void> _debugActiveCallKitCalls() async {
@@ -997,13 +751,9 @@ class NotificationService {
       if (kIsWeb) return;
 
       final token = await _messaging.getToken();
-
       debugPrint('FCM TOKEN: $token');
 
-      if (token == null || token.trim().isEmpty) {
-        debugPrint('FCM TOKEN EMPTY');
-        return;
-      }
+      if (token == null || token.trim().isEmpty) return;
 
       await ApiClient.storage.write(
         key: 'fcm_token',
@@ -1020,11 +770,7 @@ class NotificationService {
   static Future<void> _sendTokenToBackend(String token) async {
     try {
       final access = await ApiClient.storage.read(key: 'access');
-
-      if (access == null || access.trim().isEmpty) {
-        debugPrint('FCM TOKEN SKIP BACKEND: user not logged in yet');
-        return;
-      }
+      if (access == null || access.trim().isEmpty) return;
 
       String platform = 'android';
       String deviceName = 'Android';
@@ -1076,6 +822,10 @@ class NotificationService {
     }
   }
 
+  static Future<void> endAllNativeCalls() async {
+    await endAllCalls();
+  }
+
   static Future<void> _safeUpdateCallStatus({
     required String callId,
     required String status,
@@ -1093,35 +843,12 @@ class NotificationService {
     }
   }
 
-  static void _clearOpeningCallGuard({
-    required String callId,
-    required String conversationId,
-  }) {
-    if (_openingCallKey == null) return;
-
-    final currentKey = _openingCallKey ?? '';
-
-    if (callId.isNotEmpty && currentKey == callId) {
-      _openingCallKey = null;
-      _openingCallKeyTime = null;
-      return;
-    }
-
-    if (conversationId.isNotEmpty && currentKey.contains(conversationId)) {
-      _openingCallKey = null;
-      _openingCallKeyTime = null;
-    }
-  }
-
   static String _buildCallKey({
     required String callId,
     required String conversationId,
     required String callerId,
   }) {
-    if (callId.trim().isNotEmpty) {
-      return callId.trim();
-    }
-
+    if (callId.trim().isNotEmpty) return callId.trim();
     return '${conversationId.trim()}_${callerId.trim()}';
   }
 
@@ -1136,9 +863,7 @@ class NotificationService {
     if (existingTime == null) return false;
     if (existingKey != key) return false;
 
-    final diff = DateTime.now().difference(existingTime).inSeconds;
-
-    return diff <= withinSeconds;
+    return DateTime.now().difference(existingTime).inSeconds <= withinSeconds;
   }
 
   static Map<String, dynamic> _asMap(dynamic value) {
@@ -1161,7 +886,6 @@ class NotificationService {
   }) {
     for (final key in keys) {
       final value = primary[key];
-
       if (value != null && value.toString().trim().isNotEmpty) {
         return value.toString().trim();
       }
@@ -1169,7 +893,6 @@ class NotificationService {
 
     for (final key in keys) {
       final value = secondary[key];
-
       if (value != null && value.toString().trim().isNotEmpty) {
         return value.toString().trim();
       }
@@ -1180,11 +903,9 @@ class NotificationService {
 
   static bool _readBool(dynamic value) {
     if (value is bool) return value;
-
     if (value == null) return false;
 
     final text = value.toString().trim().toLowerCase();
-
     return text == 'true' || text == '1' || text == 'yes';
   }
-}
+}///////////  all good

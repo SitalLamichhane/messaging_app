@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:messaging_app/incoming_call_screen.dart';
-import 'package:messaging_app/call_waiting.dart';
 import 'package:messaging_app/call_screen.dart';
 import 'package:messaging_app/core/api_client.dart';
 import 'package:messaging_app/core/config/app_config.dart';
@@ -33,6 +32,9 @@ class GlobalCallHandler {
   String? _lastIncomingKey;
   DateTime? _lastIncomingKeyTime;
 
+  String? _lastCallKitOpenKey;
+  DateTime? _lastCallKitOpenKeyTime;
+
   Map<String, dynamic>? _pendingOffer;
   String? _pendingOfferCallerId;
   String? _pendingOfferConversationId;
@@ -48,14 +50,6 @@ class GlobalCallHandler {
   GlobalSocketHandler? _globalIncomingCallHandler;
   GlobalSocketHandler? _globalCallCancelledHandler;
 
-  /*
-    Old compatibility method.
-
-    This connects the conversation call socket:
-      /ws/call/<conversation_id>/
-
-    Do NOT use this for the global incoming socket.
-  */
   static Future<void> connectCallSocket({
     required String url,
     required String currentUserId,
@@ -63,7 +57,6 @@ class GlobalCallHandler {
     String currentUserAvatar = '',
   }) async {
     final prefs = await SharedPreferences.getInstance();
-
     await prefs.setString('call_ws_url', url);
 
     debugPrint('GLOBAL SAVED CALL WS URL: $url');
@@ -78,12 +71,6 @@ class GlobalCallHandler {
     );
   }
 
-  /*
-    Connect once after login.
-
-    This keeps /ws/global-call/ alive while app is open.
-    It receives incoming_call anywhere: chat list, profile, settings, inside chat.
-  */
   Future<void> connectGlobalIncomingCallSocket({
     required String accessToken,
     required String currentUserId,
@@ -91,29 +78,13 @@ class GlobalCallHandler {
     required String currentUserAvatar,
     bool allowConnect = true,
   }) async {
-    /*
-      Messenger-style incoming calls require /ws/global-call/ to stay connected
-      after login. If this socket is blocked, the receiver will never see
-      IncomingCallScreen.
-    */
     if (!allowConnect) {
-      debugPrint('GLOBAL INCOMING SOCKET CONNECT DISABLED BY CALLER');
+      debugPrint('GLOBAL INCOMING SOCKET CONNECT DISABLED');
       return;
     }
 
-    debugPrint('');
-    debugPrint('################################################');
-    debugPrint('### CONNECT GLOBAL INCOMING CALL SOCKET');
-    debugPrint('################################################');
-    debugPrint('currentUserId: $currentUserId');
-    debugPrint('currentUserName: $currentUserName');
-    debugPrint('token exists: ${accessToken.trim().isNotEmpty}');
-    debugPrint('already connected: ${GlobalCallSocketService.instance.isConnected}');
-    debugPrint('current url: ${GlobalCallSocketService.instance.currentUrl ?? ""}');
-    debugPrint('################################################');
-
     if (accessToken.trim().isEmpty) {
-      debugPrint('GLOBAL INCOMING SOCKET ERROR: access token empty');
+      debugPrint('GLOBAL INCOMING SOCKET ERROR: token empty');
       return;
     }
 
@@ -135,40 +106,27 @@ class GlobalCallHandler {
     _removeGlobalHandlers();
 
     _globalConnectedHandler = (data) async {
-      debugPrint('');
-      debugPrint('################################################');
-      debugPrint('### GLOBAL SOCKET CONNECTED EVENT RECEIVED');
-      debugPrint('################################################');
+      debugPrint('### GLOBAL SOCKET CONNECTED EVENT ###');
       debugPrint('data: $data');
-      debugPrint('################################################');
     };
 
     _globalIncomingCallHandler = (data) async {
-      debugPrint('');
-      debugPrint('################################################');
-      debugPrint('### GLOBAL SOCKET incoming_call RECEIVED');
-      debugPrint('################################################');
+      debugPrint('### GLOBAL SOCKET incoming_call RECEIVED ###');
       debugPrint('raw data: $data');
 
       await _loadCurrentUserFromStorage();
 
       final payload = _payloadFrom(data);
-
       debugPrint('payload: $payload');
-      debugPrint('################################################');
 
       await GlobalCallHandler.handleIncomingCall(payload);
     };
 
     _globalCallCancelledHandler = (data) async {
-      debugPrint('');
-      debugPrint('################################################');
-      debugPrint('### GLOBAL SOCKET call_cancelled RECEIVED');
-      debugPrint('################################################');
+      debugPrint('### GLOBAL SOCKET call_cancelled RECEIVED ###');
       debugPrint('raw data: $data');
 
       final payload = _payloadFrom(data);
-
       _handleRemoteCallClosed(payload, reason: 'call_cancelled');
     };
 
@@ -188,16 +146,11 @@ class GlobalCallHandler {
     );
 
     final url = AppConfig.globalCallSocketUrl(token: accessToken.trim());
-
     await GlobalCallSocketService.instance.connect(url: url);
 
-    debugPrint('');
-    debugPrint('################################################');
-    debugPrint('### GLOBAL INCOMING CALL SOCKET CONNECTED/READY');
-    debugPrint('################################################');
+    debugPrint('### GLOBAL INCOMING CALL SOCKET CONNECTED/READY ###');
     debugPrint('url: $url');
     debugPrint('currentUserId: $_currentUserId');
-    debugPrint('################################################');
   }
 
   Future<void> _saveCurrentUserToStorage({
@@ -208,7 +161,6 @@ class GlobalCallHandler {
     if (currentUserId.trim().isEmpty) return;
 
     final prefs = await SharedPreferences.getInstance();
-
     await prefs.setString('user_id', currentUserId);
     await prefs.setString('user_name', currentUserName);
     await prefs.setString('user_avatar', currentUserAvatar);
@@ -217,8 +169,6 @@ class GlobalCallHandler {
   }
 
   Future<void> _loadCurrentUserFromStorage() async {
-    debugPrint('========== GLOBAL LOAD CURRENT USER ==========');
-
     final prefs = await SharedPreferences.getInstance();
 
     final prefUserId = prefs.getString('user_id') ?? '';
@@ -239,78 +189,59 @@ class GlobalCallHandler {
               (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
               '';
     } catch (e, st) {
-      debugPrint('GLOBAL LOAD SECURE STORAGE ERROR: $e');
+      debugPrint('GLOBAL LOAD STORAGE ERROR: $e');
       debugPrint(st.toString());
     }
 
-    debugPrint('prefUserId: $prefUserId');
-    debugPrint('prefUserName: $prefUserName');
-    debugPrint('secureUserId: $secureUserId');
-    debugPrint('secureUserName: $secureUserName');
-
-    final finalUserId = _firstNotEmpty([
+    _currentUserId = _firstNotEmpty([
       _currentUserId,
       secureUserId,
       prefUserId,
     ]);
 
-    final finalUserName = _firstNotEmpty([
+    _currentUserName = _firstNotEmpty([
       _currentUserName,
       secureUserName,
       prefUserName,
     ]);
 
-    final finalUserAvatar = _firstNotEmpty([
+    _currentUserAvatar = _firstNotEmpty([
       _currentUserAvatar,
       secureUserAvatar,
       prefUserAvatar,
     ]);
 
-    _currentUserId = finalUserId;
-    _currentUserName = finalUserName;
-    _currentUserAvatar = finalUserAvatar;
-
-    if (finalUserId.isNotEmpty) {
-      await prefs.setString('user_id', finalUserId);
-      await prefs.setString('user_name', finalUserName);
-      await prefs.setString('user_avatar', finalUserAvatar);
+    if ((_currentUserId ?? '').isNotEmpty) {
+      await prefs.setString('user_id', _currentUserId ?? '');
+      await prefs.setString('user_name', _currentUserName ?? '');
+      await prefs.setString('user_avatar', _currentUserAvatar ?? '');
     }
 
     debugPrint('GLOBAL FINAL USER ID: ${_currentUserId ?? ''}');
-    debugPrint('GLOBAL FINAL USER NAME: ${_currentUserName ?? ''}');
-    debugPrint('=============================================');
   }
 
   String _firstNotEmpty(List<String?> values) {
     for (final value in values) {
       final clean = value?.trim() ?? '';
-
-      if (clean.isNotEmpty && clean != 'null') {
-        return clean;
-      }
+      if (clean.isNotEmpty && clean != 'null') return clean;
     }
-
     return '';
   }
 
-  /*
-    Registers conversation-call socket handlers.
-    This is for /ws/call/<conversation_id>/ only.
-  */
   void init({
     required String currentUserId,
     required String currentUserName,
     required String currentUserAvatar,
     bool forceRegister = false,
   }) {
-    _currentUserId = currentUserId;
-    _currentUserName = currentUserName;
-    _currentUserAvatar = currentUserAvatar;
+    _currentUserId = currentUserId.trim();
+    _currentUserName = currentUserName.trim();
+    _currentUserAvatar = currentUserAvatar.trim();
 
     _saveCurrentUserToStorage(
-      currentUserId: currentUserId,
-      currentUserName: currentUserName,
-      currentUserAvatar: currentUserAvatar,
+      currentUserId: _currentUserId ?? '',
+      currentUserName: _currentUserName ?? '',
+      currentUserAvatar: _currentUserAvatar ?? '',
     );
 
     if (_registered && !forceRegister) {
@@ -321,24 +252,21 @@ class GlobalCallHandler {
     _removeOldHandlers();
 
     _incomingCallHandler = (data) async {
-      final rawData = Map<String, dynamic>.from(data);
-      final payload = _payloadFrom(rawData);
+  final payload = _payloadFrom(Map<String, dynamic>.from(data));
 
-      debugPrint('CONVERSATION SOCKET incoming_call DATA: $rawData');
-      debugPrint('CONVERSATION SOCKET incoming_call PAYLOAD: $payload');
+  debugPrint(
+    'CONVERSATION SOCKET incoming_call IGNORED: global socket handles incoming UI',
+  );
+  debugPrint('payload: $payload');
 
-      await handleIncomingCall(payload);
-    };
+  return;
+};
 
     _callOfferHandler = (data) async {
       await _loadCurrentUserFromStorage();
 
       final currentId = _currentUserId ?? '';
-
-      if (currentId.trim().isEmpty) {
-        debugPrint('CALL OFFER ERROR: current user id empty');
-        return;
-      }
+      if (currentId.trim().isEmpty) return;
 
       final rawData = Map<String, dynamic>.from(data);
       final payload = _payloadFrom(rawData);
@@ -348,37 +276,22 @@ class GlobalCallHandler {
           payload['from_user']?.toString() ??
           payload['caller_id']?.toString() ??
           payload['callerId']?.toString() ??
-          rawData['from_user']?.toString() ??
-          rawData['from']?.toString() ??
           '';
 
       final conversationId =
-          payload['conversationId']?.toString() ??
           payload['conversation_id']?.toString() ??
-          rawData['conversationId']?.toString() ??
-          rawData['conversation_id']?.toString();
+          payload['conversationId']?.toString();
 
       final callId =
-          payload['call_id']?.toString() ??
-          payload['callId']?.toString() ??
-          rawData['call_id']?.toString() ??
-          rawData['callId']?.toString();
+          payload['call_id']?.toString() ?? payload['callId']?.toString();
 
       final offerRaw = payload['offer'];
 
-      if (callerId.trim().isEmpty) {
-        debugPrint('CALL OFFER ERROR: caller id missing');
-        return;
-      }
-
-      if (callerId == currentId) {
-        debugPrint('CALL OFFER IGNORED: caller is current user');
-        return;
-      }
+      if (callerId.trim().isEmpty) return;
+      if (callerId.trim() == currentId.trim()) return;
 
       if (!_isValidWebRtcOffer(offerRaw)) {
-        debugPrint('CALL OFFER ERROR: valid WebRTC offer missing');
-        debugPrint('CALL OFFER RAW OFFER: $offerRaw');
+        debugPrint('CALL OFFER ERROR: valid offer missing');
         return;
       }
 
@@ -395,32 +308,35 @@ class GlobalCallHandler {
           callId: callId,
           offer: offer,
         );
-
-        debugPrint('CALL OFFER STORED: same incoming screen already open');
         return;
       }
 
       if (_callScreenOpen || _openingIncomingScreen) {
-        _sendBusyToCaller(
-          currentId: currentId,
-          callerId: callerId,
-          conversationId: conversationId,
-          callId: callId,
-          reason: 'busy',
-        );
-        return;
+        if (_isIncomingUiLockExpired()) {
+          forceResetCallUiLocks(reason: 'expired_before_socket_offer');
+        } else {
+          _sendBusyToCaller(
+            currentId: currentId,
+            callerId: callerId,
+            conversationId: conversationId,
+            callId: callId,
+            reason: 'busy',
+          );
+          return;
+        }
       }
 
       final isVideoCall =
           payload['isVideoCall'] == true ||
           payload['is_video_call'] == true ||
           payload['isVideoCall']?.toString() == 'true' ||
-          payload['is_video_call']?.toString() == 'true';
+          payload['is_video_call']?.toString() == 'true' ||
+          payload['video']?.toString() == 'true';
 
       final callerName =
           payload['callerName']?.toString() ??
           payload['caller_name']?.toString() ??
-          'Unknown';
+          'Incoming call';
 
       final callerAvatar =
           payload['callerAvatar']?.toString() ??
@@ -433,13 +349,6 @@ class GlobalCallHandler {
         callId: callId,
         offer: offer,
       );
-
-      debugPrint('OPENING INCOMING CALL SCREEN FROM SOCKET OFFER');
-      debugPrint('CURRENT USER ID: $currentId');
-      debugPrint('CALLER ID: $callerId');
-      debugPrint('CALL ID: ${callId ?? ''}');
-      debugPrint('CONVERSATION ID: ${conversationId ?? ''}');
-      debugPrint('IS VIDEO CALL: $isVideoCall');
 
       await _openIncomingCallScreen(
         currentUserId: currentId,
@@ -470,33 +379,13 @@ class GlobalCallHandler {
       _handleRemoteCallClosed(payload, reason: 'call_timeout');
     };
 
-    SocketService.instance.on(
-      CallSocketEvents.incomingCall,
-      _incomingCallHandler!,
-    );
-
-    SocketService.instance.on(
-      CallSocketEvents.callOffer,
-      _callOfferHandler!,
-    );
-
-    SocketService.instance.on(
-      CallSocketEvents.callEnd,
-      _callEndHandler!,
-    );
-
-    SocketService.instance.on(
-      CallSocketEvents.callReject,
-      _callRejectHandler!,
-    );
-
-    SocketService.instance.on(
-      CallSocketEvents.callTimeout,
-      _callTimeoutHandler!,
-    );
+    SocketService.instance.on(CallSocketEvents.incomingCall, _incomingCallHandler!);
+    SocketService.instance.on(CallSocketEvents.callOffer, _callOfferHandler!);
+    SocketService.instance.on(CallSocketEvents.callEnd, _callEndHandler!);
+    SocketService.instance.on(CallSocketEvents.callReject, _callRejectHandler!);
+    SocketService.instance.on(CallSocketEvents.callTimeout, _callTimeoutHandler!);
 
     _registered = true;
-
     debugPrint('GLOBAL CALL HANDLER REGISTERED FOR CONVERSATION SOCKET');
   }
 
@@ -508,18 +397,7 @@ class GlobalCallHandler {
     required String callerAvatar,
     required bool isVideoCall,
   }) async {
-    debugPrint('');
-    debugPrint('################################################');
-    debugPrint('### GLOBAL CALLKIT ANSWER RECEIVED');
-    debugPrint('### OPEN CALL SCREEN DIRECTLY');
-    debugPrint('################################################');
-    debugPrint('callId: $callId');
-    debugPrint('conversationId: $conversationId');
-    debugPrint('callerId: $callerId');
-    debugPrint('callerName: $callerName');
-    debugPrint('callerAvatar: $callerAvatar');
-    debugPrint('isVideoCall: $isVideoCall');
-    debugPrint('################################################');
+    debugPrint('### CALLKIT ANSWER: FORCE OPEN CALLSCREEN ###');
 
     await _loadCurrentUserFromStorage();
 
@@ -527,76 +405,57 @@ class GlobalCallHandler {
     final currentName = _currentUserName ?? '';
     final currentAvatar = _currentUserAvatar ?? '';
 
-    if (currentId.trim().isEmpty) {
-      debugPrint('CALLKIT ANSWER ERROR: current user id empty');
-      return;
-    }
-
-    if (conversationId.trim().isEmpty) {
-      debugPrint('CALLKIT ANSWER ERROR: conversation id empty');
-      return;
-    }
-
-    if (callerId.trim().isEmpty) {
-      debugPrint('CALLKIT ANSWER ERROR: caller id empty');
-      return;
-    }
-
-    if (callerId.trim() == currentId.trim()) {
-      debugPrint('CALLKIT ANSWER IGNORED: caller is current user');
-      return;
-    }
+    if (currentId.trim().isEmpty) return;
+    if (conversationId.trim().isEmpty) return;
+    if (callerId.trim().isEmpty) return;
+    if (callerId.trim() == currentId.trim()) return;
 
     final cleanCallId = callId.trim().isNotEmpty ? callId.trim() : null;
     final cleanConversationId = conversationId.trim();
     final cleanCallerId = callerId.trim();
 
-    if (_isSameActiveIncomingCall(
-      callerId: cleanCallerId,
-      conversationId: cleanConversationId,
-      callId: cleanCallId,
-    )) {
-      debugPrint('CALLKIT ANSWER IGNORED: same call already open/opening');
+    final callKitKey = cleanCallId ?? '${cleanConversationId}_$cleanCallerId';
+    if (_isRecentDuplicateCallKitOpen(callKitKey)) {
+      debugPrint('CALLKIT ANSWER OPEN SKIPPED DUPLICATE: $callKitKey');
       return;
     }
 
     if (_callScreenOpen || _openingIncomingScreen) {
-      debugPrint(
-        'CALLKIT ANSWER IGNORED: another call screen already open/opening',
-      );
-      return;
+      if (_isSameActiveIncomingCall(
+        callerId: cleanCallerId,
+        conversationId: cleanConversationId,
+        callId: cleanCallId,
+      )) {
+        debugPrint('CALLKIT ANSWER OPEN SKIPPED: same call already open');
+        return;
+      }
     }
+
+    forceResetCallUiLocks(reason: 'callkit_accept_force_open');
+
+    _lastCallKitOpenKey = callKitKey;
+    _lastCallKitOpenKeyTime = DateTime.now();
 
     _openingIncomingScreen = true;
     _callScreenOpen = true;
     _activeIncomingCallerId = cleanCallerId;
     _activeIncomingConversationId = cleanConversationId;
     _activeIncomingCallId = cleanCallId;
-    _lastIncomingKey = _buildIncomingKey(
-      callerId: cleanCallerId,
-      conversationId: cleanConversationId,
-      callId: cleanCallId,
-    );
     _lastIncomingKeyTime = DateTime.now();
 
     final navigator = await _waitForNavigator();
 
     if (navigator == null) {
-      debugPrint('CALLKIT ANSWER ERROR: navigator null after wait');
       markCallScreenClosed();
       return;
     }
 
     try {
-      debugPrint('CALLKIT ANSWER: pushing CallScreen directly');
-
-      navigator.pushAndRemoveUntil(
+      await navigator.push(
         MaterialPageRoute(
           fullscreenDialog: true,
           builder: (_) => CallScreen(
-            name: callerName.trim().isEmpty
-                ? 'Incoming call'
-                : callerName.trim(),
+            name: callerName.trim().isEmpty ? 'Incoming call' : callerName.trim(),
             avatarUrl: callerAvatar.trim(),
             isVideoCall: isVideoCall,
             chat: null,
@@ -605,25 +464,14 @@ class GlobalCallHandler {
             currentUserAvatar: currentAvatar.trim(),
             receiverId: cleanCallerId,
             isCaller: false,
-
-            /*
-              Killed/background CallKit ANSWER:
-              - Open CallScreen directly.
-              - SDP offer may not exist yet.
-              - CallScreen connects /ws/call/<conversation_id>/.
-              - CallProvider waits for call_offer.
-              - CallScreen sends call_ready after provider handlers are ready.
-            */
             incomingOffer: null,
-
             conversationId: cleanConversationId,
             callId: cleanCallId,
           ),
         ),
-        (route) => route.isFirst,
       );
     } catch (e, st) {
-      debugPrint('CALLKIT ANSWER OPEN CALL SCREEN ERROR: $e');
+      debugPrint('CALLKIT ANSWER OPEN CALLSCREEN ERROR: $e');
       debugPrint(st.toString());
       markCallScreenClosed();
     } finally {
@@ -640,16 +488,7 @@ class GlobalCallHandler {
     await _loadCurrentUserFromStorage();
 
     final currentId = _currentUserId ?? '';
-
-    if (currentId.trim().isEmpty) {
-      debugPrint('CALLKIT REJECT ERROR: current user id empty');
-      return;
-    }
-
-    if (callerId.trim().isEmpty) {
-      debugPrint('CALLKIT REJECT ERROR: caller id empty');
-      return;
-    }
+    if (currentId.trim().isEmpty) return;
 
     SocketService.instance.emit(
       CallSocketEvents.callReject,
@@ -673,10 +512,11 @@ class GlobalCallHandler {
 
   static Future<void> handleIncomingCall(Map<String, dynamic> data) async {
     try {
-      await GlobalCallHandler.instance._loadCurrentUserFromStorage();
+      final h = GlobalCallHandler.instance;
 
-      final currentId = GlobalCallHandler.instance._currentUserId ?? '';
+      await h._loadCurrentUserFromStorage();
 
+      final currentId = h._currentUserId ?? '';
       if (currentId.trim().isEmpty) {
         debugPrint('GLOBAL INCOMING CALL ERROR: current user id empty');
         return;
@@ -694,7 +534,7 @@ class GlobalCallHandler {
         return;
       }
 
-      if (callerId == currentId) {
+      if (callerId.trim() == currentId.trim()) {
         debugPrint('GLOBAL INCOMING CALL IGNORED: caller is current user');
         return;
       }
@@ -704,57 +544,61 @@ class GlobalCallHandler {
           data['conversationId']?.toString();
 
       final callId =
-          data['call_id']?.toString() ??
-          data['callId']?.toString();
+          data['call_id']?.toString() ?? data['callId']?.toString();
 
-      if (GlobalCallHandler.instance._isSameActiveIncomingCall(
+      if (h._isSameActiveIncomingCall(
         callerId: callerId,
         conversationId: conversationId,
         callId: callId,
       )) {
-        debugPrint('GLOBAL INCOMING CALL IGNORED: same screen already open');
+        debugPrint('GLOBAL INCOMING CALL IGNORED: same call already open');
         return;
       }
 
-      if (GlobalCallHandler.instance._callScreenOpen ||
-          GlobalCallHandler.instance._openingIncomingScreen) {
-        debugPrint('GLOBAL INCOMING CALL WHILE BUSY');
+      if (h._callScreenOpen || h._openingIncomingScreen) {
+        if (h._isIncomingUiLockExpired()) {
+          h.forceResetCallUiLocks(reason: 'stale_incoming_call_lock');
+        } else {
+          debugPrint('GLOBAL INCOMING CALL WHILE REAL BUSY');
 
-        GlobalCallHandler.instance._sendBusyToCaller(
-          currentId: currentId,
-          callerId: callerId,
-          conversationId: conversationId,
-          callId: callId,
-          reason: 'busy',
-        );
-
-        return;
+          h._sendBusyToCaller(
+            currentId: currentId,
+            callerId: callerId,
+            conversationId: conversationId,
+            callId: callId,
+            reason: 'busy',
+          );
+          return;
+        }
       }
 
       final isVideoCall =
           data['is_video_call'] == true ||
           data['isVideoCall'] == true ||
           data['is_video_call']?.toString() == 'true' ||
-          data['isVideoCall']?.toString() == 'true';
+          data['isVideoCall']?.toString() == 'true' ||
+          data['video']?.toString() == 'true' ||
+          data['type']?.toString() == '1';
 
       final callerName =
           data['caller_name']?.toString() ??
           data['callerName']?.toString() ??
+          data['nameCaller']?.toString() ??
+          data['name']?.toString() ??
           'Incoming call';
 
       final callerAvatar =
           data['caller_avatar']?.toString() ??
           data['callerAvatar']?.toString() ??
+          data['avatar']?.toString() ??
           '';
 
       final offerRaw = data['offer'];
-
       Map<String, dynamic>? offer;
 
-      if (GlobalCallHandler.instance._isValidWebRtcOffer(offerRaw)) {
+      if (h._isValidWebRtcOffer(offerRaw)) {
         offer = Map<String, dynamic>.from(offerRaw as Map);
-
-        GlobalCallHandler.instance._savePendingOffer(
+        h._savePendingOffer(
           callerId: callerId,
           conversationId: conversationId,
           callId: callId,
@@ -762,23 +606,19 @@ class GlobalCallHandler {
         );
       } else {
         offer = null;
-        debugPrint(
-          'GLOBAL INCOMING CALL: no WebRTC offer yet. Opening screen anyway.',
-        );
-        debugPrint('GLOBAL INCOMING CALL RAW OFFER: $offerRaw');
+        debugPrint('GLOBAL INCOMING CALL: no offer yet, opening anyway');
       }
 
-      debugPrint('GLOBAL INCOMING CALL RECEIVED');
-      debugPrint('CURRENT USER ID: $currentId');
-      debugPrint('CALLER ID: $callerId');
-      debugPrint('CALL ID: ${callId ?? ''}');
-      debugPrint('CONVERSATION ID: ${conversationId ?? ''}');
-      debugPrint('IS VIDEO CALL: $isVideoCall');
+      debugPrint('### GLOBAL INCOMING CALL RECEIVED ###');
+      debugPrint('currentId: $currentId');
+      debugPrint('callerId: $callerId');
+      debugPrint('conversationId: ${conversationId ?? ''}');
+      debugPrint('callId: ${callId ?? ''}');
 
-      await GlobalCallHandler.instance._openIncomingCallScreen(
+      await h._openIncomingCallScreen(
         currentUserId: currentId,
-        currentUserName: GlobalCallHandler.instance._currentUserName ?? '',
-        currentUserAvatar: GlobalCallHandler.instance._currentUserAvatar ?? '',
+        currentUserName: h._currentUserName ?? '',
+        currentUserAvatar: h._currentUserAvatar ?? '',
         callerId: callerId,
         callerName: callerName,
         callerAvatar: callerAvatar,
@@ -787,9 +627,9 @@ class GlobalCallHandler {
         conversationId: conversationId,
         callId: callId,
       );
-    } catch (e, stack) {
+    } catch (e, st) {
       debugPrint('GLOBAL INCOMING CALL ERROR: $e');
-      debugPrint(stack.toString());
+      debugPrint(st.toString());
     }
   }
 
@@ -800,15 +640,6 @@ class GlobalCallHandler {
     required String? callId,
     required String reason,
   }) {
-    debugPrint('========== GLOBAL SEND BUSY ==========');
-    debugPrint('from: $currentId');
-    debugPrint('to: $callerId');
-    debugPrint('conversationId: ${conversationId ?? ''}');
-    debugPrint('callId: ${callId ?? ''}');
-    debugPrint('reason: $reason');
-    debugPrint('SocketService connected: ${SocketService.instance.isConnected}');
-    debugPrint('=====================================');
-
     SocketService.instance.emit(
       CallSocketEvents.callBusy,
       {
@@ -826,88 +657,6 @@ class GlobalCallHandler {
     );
   }
 
-  Future<void> _openCallWaitingScreen({
-    required String currentUserId,
-    required String currentUserName,
-    required String currentUserAvatar,
-    required String callerId,
-    required String callerName,
-    required String callerAvatar,
-    required bool isVideoCall,
-    required String conversationId,
-    required String? callId,
-  }) async {
-    final incomingKey = _buildIncomingKey(
-      callerId: callerId,
-      conversationId: conversationId,
-      callId: callId,
-    );
-
-    debugPrint('========== GLOBAL OPEN CALL WAITING ==========');
-    debugPrint('incomingKey: $incomingKey');
-    debugPrint('callScreenOpen: $_callScreenOpen');
-    debugPrint('openingIncomingScreen: $_openingIncomingScreen');
-    debugPrint('currentUserId: $currentUserId');
-    debugPrint('callerId: $callerId');
-    debugPrint('conversationId: $conversationId');
-    debugPrint('callId: ${callId ?? ''}');
-    debugPrint('=============================================');
-
-    if (_isRecentDuplicateIncoming(incomingKey)) {
-      debugPrint('GLOBAL OPEN CALL WAITING SKIP DUPLICATE KEY: $incomingKey');
-      return;
-    }
-
-    if (_callScreenOpen || _openingIncomingScreen) {
-      debugPrint('GLOBAL OPEN CALL WAITING: call screen already open/opening');
-      return;
-    }
-
-    _openingIncomingScreen = true;
-    _callScreenOpen = true;
-    _activeIncomingCallerId = callerId;
-    _activeIncomingConversationId = conversationId;
-    _activeIncomingCallId = callId;
-    _lastIncomingKey = incomingKey;
-    _lastIncomingKeyTime = DateTime.now();
-
-    final navigator = await _waitForNavigator();
-
-    if (navigator == null) {
-      debugPrint('GLOBAL OPEN CALL WAITING ERROR: navigator null after wait');
-      markCallScreenClosed();
-      return;
-    }
-
-    try {
-      debugPrint('');
-      debugPrint('################################################');
-      debugPrint('### GLOBAL PUSHING CallWaitingScreen NOW');
-      debugPrint('################################################');
-
-      await navigator.push(
-        MaterialPageRoute(
-          fullscreenDialog: true,
-          builder: (_) => CallWaitingScreen(
-            currentUserId: currentUserId,
-            currentUserName: currentUserName,
-            currentUserAvatar: currentUserAvatar,
-            callerId: callerId,
-            callerName: callerName,
-            callerAvatar: callerAvatar,
-            isVideoCall: isVideoCall,
-            conversationId: conversationId,
-            callId: callId,
-            chat: null,
-            emitAcceptOnOpen: true,
-          ),
-        ),
-      );
-    } finally {
-      markCallScreenClosed();
-    }
-  }
-
   Future<void> _openIncomingCallScreen({
     required String currentUserId,
     required String currentUserName,
@@ -920,6 +669,12 @@ class GlobalCallHandler {
     required String? conversationId,
     required String? callId,
   }) async {
+    final conv = conversationId?.trim() ?? '';
+    if (conv.isEmpty) {
+      debugPrint('GLOBAL OPEN INCOMING ERROR: conversationId empty');
+      return;
+    }
+
     final incomingKey = _buildIncomingKey(
       callerId: callerId,
       conversationId: conversationId,
@@ -927,13 +682,17 @@ class GlobalCallHandler {
     );
 
     if (_isRecentDuplicateIncoming(incomingKey)) {
-      debugPrint('GLOBAL OPEN INCOMING SKIP DUPLICATE KEY: $incomingKey');
+      debugPrint('GLOBAL OPEN INCOMING SKIP DUPLICATE: $incomingKey');
       return;
     }
 
     if (_callScreenOpen || _openingIncomingScreen) {
-      debugPrint('GLOBAL CALL HANDLER: incoming screen already opening/open');
-      return;
+      if (_isIncomingUiLockExpired()) {
+        forceResetCallUiLocks(reason: 'expired_before_open_incoming');
+      } else {
+        debugPrint('GLOBAL OPEN INCOMING BLOCKED: already open/opening');
+        return;
+      }
     }
 
     _openingIncomingScreen = true;
@@ -947,17 +706,11 @@ class GlobalCallHandler {
     final navigator = await _waitForNavigator();
 
     if (navigator == null) {
-      debugPrint('GLOBAL CALL HANDLER ERROR: navigator null after wait');
       markCallScreenClosed();
       return;
     }
 
     try {
-      debugPrint('');
-      debugPrint('################################################');
-      debugPrint('### GLOBAL PUSHING IncomingCallScreen NOW');
-      debugPrint('################################################');
-
       await navigator.push(
         MaterialPageRoute(
           fullscreenDialog: true,
@@ -981,16 +734,11 @@ class GlobalCallHandler {
   }
 
   Future<NavigatorState?> _waitForNavigator() async {
-    for (int i = 0; i < 30; i++) {
+    for (int i = 0; i < 40; i++) {
       final navigator = navigatorKey.currentState;
-
-      if (navigator != null) {
-        return navigator;
-      }
-
-      await Future.delayed(const Duration(milliseconds: 250));
+      if (navigator != null) return navigator;
+      await Future.delayed(const Duration(milliseconds: 200));
     }
-
     return null;
   }
 
@@ -1009,12 +757,9 @@ class GlobalCallHandler {
   }
 
   bool _isValidWebRtcOffer(dynamic offerRaw) {
-    if (offerRaw is! Map) {
-      return false;
-    }
+    if (offerRaw is! Map) return false;
 
     final offer = Map<String, dynamic>.from(offerRaw);
-
     final type = offer['type']?.toString() ?? '';
     final sdp = offer['sdp']?.toString() ?? '';
 
@@ -1031,11 +776,6 @@ class GlobalCallHandler {
     _pendingOfferCallerId = callerId;
     _pendingOfferConversationId = conversationId;
     _pendingOfferCallId = callId;
-
-    debugPrint('PENDING OFFER SAVED');
-    debugPrint('PENDING OFFER CALLER ID: $callerId');
-    debugPrint('PENDING OFFER CONVERSATION ID: ${conversationId ?? ''}');
-    debugPrint('PENDING OFFER CALL ID: ${callId ?? ''}');
   }
 
   Map<String, dynamic>? takePendingOffer({
@@ -1043,10 +783,7 @@ class GlobalCallHandler {
     String? conversationId,
     String? callId,
   }) {
-    if (_pendingOffer == null) {
-      debugPrint('PENDING OFFER NOT FOUND');
-      return null;
-    }
+    if (_pendingOffer == null) return null;
 
     final sameCaller = _pendingOfferCallerId == callerId;
 
@@ -1056,29 +793,12 @@ class GlobalCallHandler {
         _pendingOfferConversationId == conversationId;
 
     final sameCall =
-        callId == null ||
-        _pendingOfferCallId == null ||
-        _pendingOfferCallId == callId;
+        callId == null || _pendingOfferCallId == null || _pendingOfferCallId == callId;
 
-    if (!sameCaller || !sameConversation || !sameCall) {
-      debugPrint('PENDING OFFER NOT MATCHED');
-      debugPrint('EXPECTED CALLER: $_pendingOfferCallerId GOT: $callerId');
-      debugPrint(
-        'EXPECTED CONVERSATION: $_pendingOfferConversationId GOT: $conversationId',
-      );
-      debugPrint('EXPECTED CALL ID: $_pendingOfferCallId GOT: $callId');
-      return null;
-    }
+    if (!sameCaller || !sameConversation || !sameCall) return null;
 
     final offer = Map<String, dynamic>.from(_pendingOffer!);
-
-    _pendingOffer = null;
-    _pendingOfferCallerId = null;
-    _pendingOfferConversationId = null;
-    _pendingOfferCallId = null;
-
-    debugPrint('PENDING OFFER TAKEN');
-
+    clearPendingOffer();
     return offer;
   }
 
@@ -1105,8 +825,7 @@ class GlobalCallHandler {
         payload['conversationId']?.toString();
 
     final callId =
-        payload['call_id']?.toString() ??
-        payload['callId']?.toString();
+        payload['call_id']?.toString() ?? payload['callId']?.toString();
 
     final sameCaller =
         fromUser.trim().isEmpty ||
@@ -1119,33 +838,35 @@ class GlobalCallHandler {
         _activeIncomingConversationId == conversationId;
 
     final sameCall =
-        callId != null &&
-        callId.trim().isNotEmpty &&
-        _activeIncomingCallId != null &&
-        _activeIncomingCallId!.trim().isNotEmpty &&
+        callId == null ||
+        callId.trim().isEmpty ||
+        _activeIncomingCallId == null ||
+        _activeIncomingCallId!.trim().isEmpty ||
         _activeIncomingCallId == callId;
 
     if (!sameCaller || !sameConversation || !sameCall) {
       debugPrint('GLOBAL REMOTE CLOSE IGNORED: not same call');
-      debugPrint('REASON: $reason');
-      debugPrint('FROM USER: $fromUser');
-      debugPrint('CONVERSATION ID: ${conversationId ?? ''}');
-      debugPrint('CALL ID: ${callId ?? ''}');
-      debugPrint('ACTIVE CALL ID: ${_activeIncomingCallId ?? ''}');
       return;
     }
 
-    debugPrint('GLOBAL CALL CLOSED BY REMOTE: $reason');
-
-    clearPendingOffer();
-
     final navigator = navigatorKey.currentState;
-
     if (_callScreenOpen && navigator != null && navigator.canPop()) {
       navigator.pop();
     }
 
     markCallScreenClosed();
+  }
+
+  bool _isIncomingUiLockExpired() {
+    if (!_callScreenOpen && !_openingIncomingScreen) return false;
+
+    final t = _lastIncomingKeyTime;
+
+    if (t == null) {
+      return true;
+    }
+
+    return DateTime.now().difference(t).inSeconds > 15;
   }
 
   bool _isSameActiveIncomingCall({
@@ -1164,9 +885,7 @@ class GlobalCallHandler {
         _activeIncomingConversationId == conversationId;
 
     final sameCall =
-        callId == null ||
-        _activeIncomingCallId == null ||
-        _activeIncomingCallId == callId;
+        callId == null || _activeIncomingCallId == null || _activeIncomingCallId == callId;
 
     return sameCaller && sameConversation && sameCall;
   }
@@ -1181,23 +900,28 @@ class GlobalCallHandler {
     }
 
     final conv = conversationId?.trim() ?? '';
-
-    if (conv.isNotEmpty) {
-      return 'conversation_${conv}_caller_${callerId.trim()}';
-    }
+    if (conv.isNotEmpty) return 'conversation_${conv}_caller_${callerId.trim()}';
 
     return 'caller_${callerId.trim()}';
   }
 
+
+  bool _isRecentDuplicateCallKitOpen(String key) {
+    if (key.trim().isEmpty) return false;
+    if (_lastCallKitOpenKey == null || _lastCallKitOpenKeyTime == null) {
+      return false;
+    }
+    if (_lastCallKitOpenKey != key) return false;
+
+    return DateTime.now().difference(_lastCallKitOpenKeyTime!).inSeconds <= 3;
+  }
+
   bool _isRecentDuplicateIncoming(String incomingKey) {
     if (incomingKey.trim().isEmpty) return false;
-    if (_lastIncomingKey == null) return false;
-    if (_lastIncomingKeyTime == null) return false;
+    if (_lastIncomingKey == null || _lastIncomingKeyTime == null) return false;
     if (_lastIncomingKey != incomingKey) return false;
 
-    final diff = DateTime.now().difference(_lastIncomingKeyTime!).inSeconds;
-
-    return diff <= 30;
+    return DateTime.now().difference(_lastIncomingKeyTime!).inSeconds <= 5;
   }
 
   void markCallScreenClosed() {
@@ -1208,90 +932,72 @@ class GlobalCallHandler {
     _activeIncomingCallId = null;
     _lastIncomingKey = null;
     _lastIncomingKeyTime = null;
+    clearPendingOffer();
+  }
+
+  void forceResetCallUiLocks({String reason = 'manual_cleanup'}) {
+    debugPrint('GLOBAL FORCE RESET CALL UI LOCKS: $reason');
+    markCallScreenClosed();
   }
 
   void _removeOldHandlers() {
     if (_incomingCallHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.incomingCall,
-        _incomingCallHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.incomingCall, _incomingCallHandler);
       _incomingCallHandler = null;
     }
 
     if (_callOfferHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.callOffer,
-        _callOfferHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.callOffer, _callOfferHandler);
       _callOfferHandler = null;
     }
 
     if (_callEndHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.callEnd,
-        _callEndHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.callEnd, _callEndHandler);
       _callEndHandler = null;
     }
 
     if (_callRejectHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.callReject,
-        _callRejectHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.callReject, _callRejectHandler);
       _callRejectHandler = null;
     }
 
     if (_callTimeoutHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.callTimeout,
-        _callTimeoutHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.callTimeout, _callTimeoutHandler);
       _callTimeoutHandler = null;
     }
   }
 
   void _removeGlobalHandlers() {
-    if (_globalConnectedHandler != null) {
-      GlobalCallSocketService.instance.off(
-        GlobalCallSocketEvents.connected,
-        _globalConnectedHandler!,
-      );
-      _globalConnectedHandler = null;
-    }
-
-    if (_globalIncomingCallHandler != null) {
-      GlobalCallSocketService.instance.off(
-        GlobalCallSocketEvents.incomingCall,
-        _globalIncomingCallHandler!,
-      );
-      _globalIncomingCallHandler = null;
-    }
-
-    if (_globalCallCancelledHandler != null) {
-      GlobalCallSocketService.instance.off(
-        GlobalCallSocketEvents.callCancelled,
-        _globalCallCancelledHandler!,
-      );
-      _globalCallCancelledHandler = null;
-    }
+  if (_globalConnectedHandler != null) {
+    GlobalCallSocketService.instance.off(
+      GlobalCallSocketEvents.connected,
+      _globalConnectedHandler!,
+    );
+    _globalConnectedHandler = null;
   }
 
+  if (_globalIncomingCallHandler != null) {
+    GlobalCallSocketService.instance.off(
+      GlobalCallSocketEvents.incomingCall,
+      _globalIncomingCallHandler!,
+    );
+    _globalIncomingCallHandler = null;
+  }
+
+  if (_globalCallCancelledHandler != null) {
+    GlobalCallSocketService.instance.off(
+      GlobalCallSocketEvents.callCancelled,
+      _globalCallCancelledHandler!,
+    );
+    _globalCallCancelledHandler = null;
+  }
+}
   void dispose() {
     _registered = false;
-    _callScreenOpen = false;
-    _openingIncomingScreen = false;
+    markCallScreenClosed();
     _currentUserId = null;
     _currentUserName = null;
     _currentUserAvatar = null;
-    _activeIncomingCallerId = null;
-    _activeIncomingConversationId = null;
-    _activeIncomingCallId = null;
-    _lastIncomingKey = null;
-    _lastIncomingKeyTime = null;
-
-    clearPendingOffer();
     _removeGlobalHandlers();
     _removeOldHandlers();
   }
