@@ -2,10 +2,10 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:intl/intl.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/chat/chat_api.dart';
-import 'package:messaging_app/core/chat/chat_socket_service.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/chat/chat_api.dart';
+import 'package:hiddenly/core/chat/chat_socket_service.dart';
 
 class ChatProvider extends ChangeNotifier {
   bool isLoading = false;

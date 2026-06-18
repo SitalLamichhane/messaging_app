@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:messaging_app/core/profile/profile_provider.dart';
+import 'package:hiddenly/core/profile/profile_provider.dart';
 import 'package:provider/provider.dart';
 
 class ProfileDataPage extends StatefulWidget {

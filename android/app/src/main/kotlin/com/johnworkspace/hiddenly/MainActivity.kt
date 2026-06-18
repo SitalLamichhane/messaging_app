@@ -1,6 +1,6 @@
 // android/app/src/main/kotlin/com/example/messaging_app/MainActivity.kt
 
-package com.example.messaging_app
+package com.johnworkspace.hiddenly
 
 import android.app.KeyguardManager
 import android.app.Notification

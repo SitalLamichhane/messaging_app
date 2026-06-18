@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:video_player/video_player.dart';
-import 'package:messaging_app/theme_controller.dart';
+import 'package:hiddenly/theme_controller.dart';
 
 class PhotosMediaPage extends StatefulWidget {
   final String chatId;

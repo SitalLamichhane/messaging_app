@@ -23,7 +23,7 @@ fun requireKeystoreProperty(name: String): String {
 }
 
 android {
-    namespace = "com.example.messaging_app"
+    namespace = "com.johnworkspace.hiddenly"
 
     compileSdk = 36
 
@@ -40,7 +40,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.example.messaging_app"
+        applicationId = "com.johnworkspace.hiddenly"
 
         minSdk = 24
         targetSdk = 36

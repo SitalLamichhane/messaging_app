@@ -1,6 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:messaging_app/core/api_client.dart';
+import 'package:hiddenly/core/api_client.dart';
 
 class BlockProvider extends ChangeNotifier {
   bool _isLoading = false;

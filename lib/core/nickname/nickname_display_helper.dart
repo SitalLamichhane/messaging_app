@@ -1,6 +1,6 @@
 // lib/nickname_display_helper.dart
 
-import 'package:messaging_app/chat_models.dart';
+import 'package:hiddenly/chat_models.dart';
 
 class NicknameDisplayHelper {
   NicknameDisplayHelper._();

@@ -1,21 +1,21 @@
-import 'package:messaging_app/core/api_client.dart';
+import 'package:hiddenly/core/api_client.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:dio/dio.dart';
 import 'dart:io';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:messaging_app/profile_data/block_page.dart';
+import 'package:hiddenly/profile_data/block_page.dart';
 import 'package:provider/provider.dart';
-import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/chat_data.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/config/app_config.dart';
-import 'package:messaging_app/core/block/block_provider.dart';
-import 'package:messaging_app/group/create_group_chat_screen.dart';
-import 'package:messaging_app/profile_data/conversation_search_page.dart';
-import 'package:messaging_app/profile_data/photos_media_page.dart';
-// import 'package:messaging_app/profile_data/profile_data_page.dart';
-import 'package:messaging_app/theme_controller.dart';
+import 'package:hiddenly/call_screen.dart';
+import 'package:hiddenly/chat_data.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/config/app_config.dart';
+import 'package:hiddenly/core/block/block_provider.dart';
+import 'package:hiddenly/group/create_group_chat_screen.dart';
+import 'package:hiddenly/profile_data/conversation_search_page.dart';
+import 'package:hiddenly/profile_data/photos_media_page.dart';
+// import 'package:hiddenly/profile_data/profile_data_page.dart';
+import 'package:hiddenly/theme_controller.dart';
 
 class ChatSettingsScreen extends StatefulWidget {
   final ChatItem chat;

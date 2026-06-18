@@ -5,11 +5,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 
-import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/call/call_socket_service.dart';
-import 'package:messaging_app/core/config/app_config.dart';
+import 'package:hiddenly/call_screen.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/call/call_socket_service.dart';
+import 'package:hiddenly/core/config/app_config.dart';
 
 class CallWaitingScreen extends StatefulWidget {
   final String currentUserId;

@@ -3,10 +3,10 @@ import 'dart:io';
 
 
 import 'package:flutter/material.dart';
-import 'package:messaging_app/chat_detail.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/chat/chat_provider.dart';
-import 'package:messaging_app/core/config/app_config.dart';
+import 'package:hiddenly/chat_detail.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/chat/chat_provider.dart';
+import 'package:hiddenly/core/config/app_config.dart';
 import 'package:provider/provider.dart';
 
 class CreateGroupChatScreen extends StatefulWidget {

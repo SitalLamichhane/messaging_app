@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/chat_models.dart';
+import 'package:hiddenly/call_screen.dart';
+import 'package:hiddenly/chat_models.dart';
 
 /// Production-safe wrapper around the real WebRTC CallScreen.
 ///

@@ -4,8 +4,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
 
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/call/call_socket_service.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/call/call_socket_service.dart';
 
 class GroupCallView extends StatefulWidget {
   final ChatItem chat;

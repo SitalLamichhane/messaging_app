@@ -6,17 +6,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
 
-import 'package:messaging_app/chat_data.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/call_waiting.dart';
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/config/app_config.dart';
-import 'package:messaging_app/core/call/call_socket_service.dart';
-import 'package:messaging_app/core/call/call_overlay_controller.dart';
-import 'package:messaging_app/core/call/call_provider.dart';
-import 'package:messaging_app/core/call/call_state.dart';
-import 'package:messaging_app/core/call/global_call_handler.dart';
-import 'package:messaging_app/core/call/group_call_view.dart';
+import 'package:hiddenly/chat_data.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/call_waiting.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/config/app_config.dart';
+import 'package:hiddenly/core/call/call_socket_service.dart';
+import 'package:hiddenly/core/call/call_overlay_controller.dart';
+import 'package:hiddenly/core/call/call_provider.dart';
+import 'package:hiddenly/core/call/call_state.dart';
+import 'package:hiddenly/core/call/global_call_handler.dart';
+import 'package:hiddenly/core/call/group_call_view.dart';
 
 class CallScreen extends ConsumerStatefulWidget {
   final String name;

@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 
 class PrivacySecurityScreen extends StatelessWidget {
@@ -23,6 +24,56 @@ class PrivacySecurityScreen extends StatelessWidget {
               _privacyBanner(),
 
               const SizedBox(height: 28),
+
+              // ================= INFO TEXT BELOW BANNER =================
+
+              const Text(
+                "Control Your Privacy & Security",
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: darkText,
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              const Text(
+                "Hiddenly gives you full control over your account privacy and security settings. "
+                "You can manage your personal data, control profile visibility, and secure your account easily.",
+                style: TextStyle(
+                  fontSize: 16,
+                  height: 1.5,
+                  color: greyText,
+                ),
+              ),
+
+              const SizedBox(height: 18),
+
+              const Text(
+                "Data Protection",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              const Text(
+                "All your data is encrypted and stored securely. "
+                "We never sell your personal information. You can download or delete your data anytime.",
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: greyText,
+                ),
+              ),
+
+              const SizedBox(height: 26),
+
+              // ================= END INFO TEXT =================
 
               /*
               
@@ -208,9 +259,9 @@ class PrivacySecurityScreen extends StatelessWidget {
                 ),
                 SizedBox(height: 14),
                 Text(
-                  "Manage your data, security settings,\nand control your privacy.",
+                  "Manage your privacy, security and account settings easily in one place.",
                   style: TextStyle(
-                    fontSize: 18,
+                    fontSize: 16,
                     height: 1.4,
                     color: greyText,
                   ),
@@ -255,9 +306,7 @@ class PrivacySecurityScreen extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 18),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(18),
-            border: Border.all(
-              color: const Color(0xFFE7E8F0),
-            ),
+            border: Border.all(color: const Color(0xFFE7E8F0)),
           ),
           child: Row(
             children: [
@@ -268,16 +317,11 @@ class PrivacySecurityScreen extends StatelessWidget {
                   color: bgColor,
                   borderRadius: BorderRadius.circular(15),
                 ),
-                child: Icon(
-                  icon,
-                  color: iconColor,
-                  size: 32,
-                ),
+                child: Icon(icon, color: iconColor, size: 32),
               ),
               const SizedBox(width: 18),
               Expanded(
                 child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
@@ -292,7 +336,7 @@ class PrivacySecurityScreen extends StatelessWidget {
                     Text(
                       subtitle,
                       style: const TextStyle(
-                        fontSize: 16,
+                        fontSize: 15,
                         color: greyText,
                       ),
                     ),
@@ -300,22 +344,15 @@ class PrivacySecurityScreen extends StatelessWidget {
                 ),
               ),
               if (trailingText != null)
-                Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: Text(
-                    trailingText,
-                    style: const TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: green,
-                    ),
+                Text(
+                  trailingText,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: green,
                   ),
                 ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                size: 32,
-                color: darkText,
-              ),
+              const Icon(Icons.chevron_right_rounded, size: 32),
             ],
           ),
         ),

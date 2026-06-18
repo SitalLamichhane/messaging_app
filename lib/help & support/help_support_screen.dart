@@ -1,3 +1,4 @@
+
 import 'package:flutter/material.dart';
 
 class HelpSupportScreen extends StatefulWidget {
@@ -52,7 +53,58 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               _topBar(context),
               const SizedBox(height: 20),
               _helpBanner(),
+
               const SizedBox(height: 18),
+
+              // ================= HELP INFO TEXT =================
+
+              const Text(
+                "We’re here to help you",
+                style: TextStyle(
+                  fontSize: 22,
+                  fontWeight: FontWeight.w800,
+                  color: darkText,
+                ),
+              ),
+
+              const SizedBox(height: 10),
+
+              const Text(
+                "Find answers quickly using search or browse help articles below. "
+                "If you still need help, you can create a support ticket or contact our support team anytime.",
+                style: TextStyle(
+                  fontSize: 16,
+                  height: 1.5,
+                  color: greyText,
+                ),
+              ),
+
+              const SizedBox(height: 18),
+
+              const Text(
+                "24/7 Support",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: darkText,
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              const Text(
+                "Our support system is available 24/7. "
+                "We respond to tickets as quickly as possible to resolve your issues.",
+                style: TextStyle(
+                  fontSize: 15,
+                  height: 1.5,
+                  color: greyText,
+                ),
+              ),
+
+              const SizedBox(height: 24),
+
+              // ================= END HELP TEXT =================
 
               if (_searchController.text.isNotEmpty)
                 ...searchResults.map(
@@ -66,16 +118,16 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                   ),
                 ),
 
-              const SizedBox(height: 18),
+              // const SizedBox(height: 18),
 
-              const Text(
-                "Quick Actions",
-                style: TextStyle(
-                  fontSize: 20,
-                  fontWeight: FontWeight.w800,
-                  color: darkText,
-                ),
-              ),
+              // const Text(
+              //   "Quick Actions",
+              //   style: TextStyle(
+              //     fontSize: 20,
+              //     fontWeight: FontWeight.w800,
+              //     color: darkText,
+              //   ),
+              // ),
 
               const SizedBox(height: 14),
 
@@ -208,7 +260,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                     ),
                     SizedBox(height: 8),
                     Text(
-                      "Search for help articles or\ncreate a support ticket",
+                      "Search help articles or create a support ticket anytime",
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 15,

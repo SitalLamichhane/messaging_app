@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:messaging_app/profile.dart';
-import 'package:messaging_app/dashboard.dart';
-import 'package:messaging_app/features/auth/auth_api.dart';
-import 'package:messaging_app/core/api_client.dart';
+import 'package:hiddenly/profile.dart';
+import 'package:hiddenly/dashboard.dart';
+import 'package:hiddenly/features/auth/auth_api.dart';
+import 'package:hiddenly/core/api_client.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phoneNumber;

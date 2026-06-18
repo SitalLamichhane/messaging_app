@@ -4,13 +4,13 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:messaging_app/core/call/call_api.dart';
-import 'package:messaging_app/core/call/call_socket_service.dart';
-import 'package:messaging_app/core/call/call_sound_service.dart';
-import 'package:messaging_app/core/call/call_state.dart';
-import 'package:messaging_app/core/call/global_call_handler.dart';
-import 'package:messaging_app/core/call/call_notification.dart';
-import 'package:messaging_app/core/call/webrct_servide.dart';
+import 'package:hiddenly/core/call/call_api.dart';
+import 'package:hiddenly/core/call/call_socket_service.dart';
+import 'package:hiddenly/core/call/call_sound_service.dart';
+import 'package:hiddenly/core/call/call_state.dart';
+import 'package:hiddenly/core/call/global_call_handler.dart';
+import 'package:hiddenly/core/call/call_notification.dart';
+import 'package:hiddenly/core/call/webrct_servide.dart';
 
 final callProvider = StateNotifierProvider<CallNotifier, CallState>((ref) {
   final notifier = CallNotifier();

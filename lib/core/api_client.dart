@@ -1,7 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:messaging_app/core/config/app_config.dart';
+import 'package:hiddenly/core/config/app_config.dart';
 
 class ApiClient {
   static const FlutterSecureStorage storage = FlutterSecureStorage();
@@ -38,44 +38,42 @@ class ApiClient {
           if (_isAuthRoute(options.path)) {
             options.headers.remove('Authorization');
           } else {
-            final hasAuth =
-                options.headers['Authorization']?.toString().trim().isNotEmpty ==
-                    true;
+            final access = await storage.read(key: 'access');
 
-            if (!hasAuth) {
-              final access = await storage.read(key: 'access');
-
-              if (access != null && access.trim().isNotEmpty) {
-                options.headers['Authorization'] = 'Bearer ${access.trim()}';
-              }
+            if (access != null && access.isNotEmpty) {
+              options.headers['Authorization'] =
+                  'Bearer ${access.trim()}';
             }
           }
 
           _logRequest(options);
           handler.next(options);
         },
+
         onResponse: (response, handler) {
           _logResponse(response);
           handler.next(response);
         },
+
         onError: (DioException e, handler) async {
           _logError(e);
 
-          final isAuthRoute = _isAuthRoute(e.requestOptions.path);
+          final isAuth = _isAuthRoute(e.requestOptions.path);
 
-          if (e.response?.statusCode == 401 && !isAuthRoute) {
-            final newAccess = await refreshAccessToken();
+          if (e.response?.statusCode == 401 && !isAuth) {
+            final newAccess = await _refreshToken();
 
-            if (newAccess != null && newAccess.trim().isNotEmpty) {
+            if (newAccess != null && newAccess.isNotEmpty) {
               try {
-                final retryOptions = e.requestOptions;
-                retryOptions.headers['Authorization'] =
-                    'Bearer ${newAccess.trim()}';
+                final request = e.requestOptions;
 
-                final retryResponse = await dio.fetch(retryOptions);
+                request.headers['Authorization'] =
+                    'Bearer $newAccess';
+
+                final retryResponse = await dio.fetch(request);
                 return handler.resolve(retryResponse);
               } catch (retryError) {
-                debugPrint('RETRY ERROR: $retryError');
+                debugPrint('RETRY FAILED: $retryError');
               }
             }
           }
@@ -85,6 +83,9 @@ class ApiClient {
       ),
     );
 
+  // ---------------------------
+  // AUTH ROUTES
+  // ---------------------------
   static bool _isAuthRoute(String path) {
     return path.contains('/accounts/otp/send/') ||
         path.contains('/accounts/otp/verify/') ||
@@ -92,24 +93,23 @@ class ApiClient {
         path.contains('/token/refresh/');
   }
 
-  static Future<String?> refreshAccessToken() async {
+  // ---------------------------
+  // REFRESH TOKEN
+  // ---------------------------
+  static Future<String?> _refreshToken() async {
     try {
       final refresh = await storage.read(key: 'refresh');
 
-      if (refresh == null || refresh.trim().isEmpty) {
-        return null;
-      }
+      if (refresh == null || refresh.isEmpty) return null;
 
       final response = await _refreshDio.post(
         '/token/refresh/',
-        data: {
-          'refresh': refresh.trim(),
-        },
+        data: {'refresh': refresh.trim()},
       );
 
       final newAccess = response.data['access'];
 
-      if (newAccess == null || newAccess.toString().trim().isEmpty) {
+      if (newAccess == null || newAccess.toString().isEmpty) {
         return null;
       }
 
@@ -120,19 +120,22 @@ class ApiClient {
 
       return newAccess.toString();
     } on DioException catch (e) {
-      debugPrint('REFRESH TOKEN ERROR: ${e.message}');
-
-      if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
+      if (e.response?.statusCode == 401 ||
+          e.response?.statusCode == 403) {
         await clearTokens();
       }
 
+      debugPrint('REFRESH ERROR: ${e.message}');
       return null;
     } catch (e) {
-      debugPrint('REFRESH TOKEN ERROR: $e');
+      debugPrint('REFRESH ERROR: $e');
       return null;
     }
   }
 
+  // ---------------------------
+  // TOKEN HELPERS
+  // ---------------------------
   static Future<void> saveTokens({
     required String access,
     required String refresh,
@@ -141,42 +144,55 @@ class ApiClient {
     await storage.write(key: 'refresh', value: refresh.trim());
   }
 
-  static Future<String?> getAccessToken() async {
-    return storage.read(key: 'access');
-  }
+  static Future<String?> getAccessToken() =>
+      storage.read(key: 'access');
 
-  static Future<String?> getRefreshToken() async {
-    return storage.read(key: 'refresh');
-  }
+  static Future<String?> getRefreshToken() =>
+      storage.read(key: 'refresh');
 
   static Future<void> clearTokens() async {
     await storage.delete(key: 'access');
     await storage.delete(key: 'refresh');
   }
 
+  // ---------------------------
+  // SAFE LOGGING
+  // ---------------------------
   static void _logRequest(RequestOptions options) {
-    debugPrint('╔════════ REQUEST ════════');
+    if (!kDebugMode) return;
+
+    final headers = Map<String, dynamic>.from(options.headers);
+
+    if (headers.containsKey('Authorization')) {
+      headers['Authorization'] = 'Bearer ***';
+    }
+
+    debugPrint('╔══ REQUEST');
     debugPrint('URL: ${options.uri}');
     debugPrint('METHOD: ${options.method}');
-    debugPrint('HEADERS: ${options.headers}');
+    debugPrint('HEADERS: $headers');
     debugPrint('BODY: ${options.data}');
-    debugPrint('╚════════════════════════');
+    debugPrint('╚══════════');
   }
 
   static void _logResponse(Response response) {
-    debugPrint('╔════════ RESPONSE ════════');
+    if (!kDebugMode) return;
+
+    debugPrint('╔══ RESPONSE');
     debugPrint('URL: ${response.requestOptions.uri}');
     debugPrint('STATUS: ${response.statusCode}');
     debugPrint('DATA: ${response.data}');
-    debugPrint('╚═════════════════════════');
+    debugPrint('╚══════════');
   }
 
   static void _logError(DioException e) {
-    debugPrint('╔════════ ERROR ════════');
+    if (!kDebugMode) return;
+
+    debugPrint('╔══ ERROR');
     debugPrint('URL: ${e.requestOptions.uri}');
     debugPrint('STATUS: ${e.response?.statusCode}');
     debugPrint('MESSAGE: ${e.message}');
-    debugPrint('RESPONSE: ${e.response?.data}');
-    debugPrint('╚═══════════════════════');
+    debugPrint('DATA: ${e.response?.data}');
+    debugPrint('╚══════════');
   }
 }

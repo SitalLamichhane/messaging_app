@@ -4,8 +4,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/config/app_config.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/config/app_config.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 class ChatSocketService {

@@ -19,8 +19,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/config/app_config.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/config/app_config.dart';
 import 'package:photo_view/photo_view.dart';
 import 'package:video_player/video_player.dart';
 

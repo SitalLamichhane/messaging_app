@@ -3,13 +3,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:messaging_app/calls.dart';
-import 'package:messaging_app/chat_detail.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/chat/chat_provider.dart';
-import 'package:messaging_app/core/config/app_config.dart';
-import 'package:messaging_app/profile_page.dart';
+import 'package:hiddenly/calls.dart';
+import 'package:hiddenly/chat_detail.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/chat/chat_provider.dart';
+import 'package:hiddenly/core/config/app_config.dart';
+import 'package:hiddenly/profile_page.dart';
 import 'package:provider/provider.dart';
 
 class ChatListScreen extends StatefulWidget {

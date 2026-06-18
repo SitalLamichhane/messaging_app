@@ -1,7 +1,7 @@
 
 import 'package:flutter/material.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/theme_controller.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/theme_controller.dart';
 
 
 class ConversationSearchPage extends StatefulWidget {

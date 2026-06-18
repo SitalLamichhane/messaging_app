@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/chat_detail.dart';
-import 'package:messaging_app/chat_models.dart';
-import 'package:messaging_app/core/chat/chat_provider.dart';
-import 'package:messaging_app/dashboard.dart';
-// import 'package:messaging_app/pages.dart'; // PagesScreen temporarily commented
-import 'package:messaging_app/profile_page.dart';
+import 'package:hiddenly/call_screen.dart';
+import 'package:hiddenly/chat_detail.dart';
+import 'package:hiddenly/chat_models.dart';
+import 'package:hiddenly/core/chat/chat_provider.dart';
+import 'package:hiddenly/dashboard.dart';
+// import 'package:hiddenly/pages.dart'; // PagesScreen temporarily commented
+import 'package:hiddenly/profile_page.dart';
 import 'package:provider/provider.dart';
 
 class CallHistoryScreen extends StatefulWidget {

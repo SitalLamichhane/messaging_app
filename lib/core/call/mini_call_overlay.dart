@@ -4,11 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
 
-import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/core/call/call_overlay_controller.dart';
-import 'package:messaging_app/core/call/call_provider.dart';
-import 'package:messaging_app/core/call/call_state.dart';
-import 'package:messaging_app/core/call/global_call_handler.dart';
+import 'package:hiddenly/call_screen.dart';
+import 'package:hiddenly/core/call/call_overlay_controller.dart';
+import 'package:hiddenly/core/call/call_provider.dart';
+import 'package:hiddenly/core/call/call_state.dart';
+import 'package:hiddenly/core/call/global_call_handler.dart';
 
 class MiniCallOverlay extends ConsumerStatefulWidget {
   const MiniCallOverlay({super.key});

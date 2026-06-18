@@ -16,11 +16,11 @@ import 'package:flutter_callkit_incoming/entities/call_kit_params.dart';
 import 'package:flutter_callkit_incoming/entities/ios_params.dart';
 import 'package:flutter_callkit_incoming/entities/notification_params.dart';
 
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/call/call_api.dart';
-import 'package:messaging_app/core/call/call_socket_service.dart';
-import 'package:messaging_app/core/call/global_call_handler.dart';
-import 'package:messaging_app/core/config/app_config.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/call/call_api.dart';
+import 'package:hiddenly/core/call/call_socket_service.dart';
+import 'package:hiddenly/core/call/global_call_handler.dart';
+import 'package:hiddenly/core/config/app_config.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {

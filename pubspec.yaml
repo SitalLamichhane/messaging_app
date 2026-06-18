@@ -1,4 +1,4 @@
-name: messaging_app
+name: hiddenly
 description: "A new Flutter project."
 publish_to: 'none'
 
@@ -11,25 +11,20 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Networking
   dio: ^5.9.2
   http: ^1.2.2
   http_parser: ^4.0.2
   web_socket_channel: ^3.0.1
 
-  # Storage
   flutter_secure_storage: ^10.2.0
   path_provider: ^2.1.5
-  shared_preferences: 2.3.3
+  shared_preferences: ^2.3.3
 
-  # State Management
   flutter_riverpod: ^2.6.1
   provider: ^6.1.5+1
 
-  # Phone / Auth
   intl_phone_field: ^3.2.0
 
-  # Media
   photo_view: ^0.15.0
   wechat_assets_picker: ^10.1.2
   image_picker: ^1.1.2
@@ -38,29 +33,21 @@ dependencies:
   file_picker: ^8.0.7
   simple_pip_mode: ^1.1.0
 
-  # Audio
   audioplayers: ^6.1.0
   just_audio: ^0.10.5
   record: ^6.1.1
 
-  # Chat
   emoji_picker_flutter: ^4.4.0
 
-  # WebRTC Calling
   flutter_webrtc: ^1.4.1
   flutter_callkit_incoming: ^2.5.0
   uuid: ^4.5.1
 
-  # Permissions
   permission_handler: ^12.0.1
-
-  # Gallery Save
   saver_gallery: ^4.1.1
 
-  # Utilities
   intl: ^0.19.0
 
-  # Firebase / Notifications
   firebase_core: ^3.15.2
   firebase_messaging: ^15.2.10
   flutter_local_notifications: ^22.0.0
@@ -68,19 +55,36 @@ dependencies:
 
   cupertino_icons: ^1.0.8
 
+
 dependency_overrides:
   shared_preferences_android: 2.4.10
+
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+  flutter_native_splash: ^2.4.1
+
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/icon.png"
+
+
+flutter_native_splash:
+  color: "#ffffff"
+  image: assets/icon.png
+  android: true
+  ios: true
+  fullscreen: true
+
 
 flutter:
   uses-material-design: true
 
-  # Keep this commented until these files exist:
-  # assets:
-  #   - assets/sounds/incoming_call.mp3
-  #   - assets/sounds/outgoing_call.mp3
+  assets:
+    - assets/icon.png

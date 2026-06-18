@@ -1,21 +1,21 @@
 {
   "project_info": {
-    "project_number": "1056534237344",
-    "project_id": "chatapp-dfda3",
-    "storage_bucket": "chatapp-dfda3.firebasestorage.app"
+    "project_number": "941631314569",
+    "project_id": "hiddenly-d725a",
+    "storage_bucket": "hiddenly-d725a.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:1056534237344:android:dc93e182805d3dd86079c5",
+        "mobilesdk_app_id": "1:941631314569:android:b99af05995b224f4620458",
         "android_client_info": {
-          "package_name": "com.example.messaging_app"
+          "package_name": "com.johnworkspace.hiddenly"
         }
       },
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyAtSj5_rWmdKCwH4ScjbxaP7szURaRh9Z4"
+          "current_key": "AIzaSyAe6exB3LSYrZo8uRWNzCaoB7n6AjUAXK0"
         }
       ],
       "services": {

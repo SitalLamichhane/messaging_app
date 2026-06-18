@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:messaging_app/dashboard.dart';
-import 'package:messaging_app/features/auth/auth_api.dart';
-import 'package:messaging_app/core/api_client.dart';
+import 'package:hiddenly/dashboard.dart';
+import 'package:hiddenly/features/auth/auth_api.dart';
+import 'package:hiddenly/core/api_client.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   final String signupToken;

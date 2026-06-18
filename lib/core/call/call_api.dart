@@ -1,7 +1,7 @@
 // lib/core/call/call_api.dart
 
 import 'package:dio/dio.dart';
-import 'package:messaging_app/core/api_client.dart';
+import 'package:hiddenly/core/api_client.dart';
 
 class CallApi {
   static Future<Response> startCall({

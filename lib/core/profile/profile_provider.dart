@@ -5,8 +5,8 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/profile/profile_api.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/profile/profile_api.dart';
 
 class UserProfile {
   final String id;

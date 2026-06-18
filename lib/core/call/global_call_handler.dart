@@ -3,12 +3,12 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'package:messaging_app/incoming_call_screen.dart';
-import 'package:messaging_app/call_screen.dart';
-import 'package:messaging_app/core/api_client.dart';
-import 'package:messaging_app/core/config/app_config.dart';
-import 'package:messaging_app/core/call/call_socket_service.dart';
-import 'package:messaging_app/core/call/global_call_socket_service.dart';
+import 'package:hiddenly/incoming_call_screen.dart';
+import 'package:hiddenly/call_screen.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/config/app_config.dart';
+import 'package:hiddenly/core/call/call_socket_service.dart';
+import 'package:hiddenly/core/call/global_call_socket_service.dart';
 
 class GlobalCallHandler {
   static final GlobalCallHandler instance = GlobalCallHandler._internal();

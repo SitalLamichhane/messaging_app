@@ -4,15 +4,15 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:messaging_app/calls.dart';
-import 'package:messaging_app/core/profile/profile_provider.dart';
-import 'package:messaging_app/dashboard.dart';
-import 'package:messaging_app/help%20&%20support/help_support_screen.dart';
-import 'package:messaging_app/login_page.dart';
-import 'package:messaging_app/privacy%20&%20security/privacy_security.dart';
-import 'package:messaging_app/profile_data/profile_data_page.dart';
-import 'package:messaging_app/theme_controller.dart';
-// import 'package:messaging_app/pages.dart'; // PagesScreen temporarily commented
+import 'package:hiddenly/calls.dart';
+import 'package:hiddenly/core/profile/profile_provider.dart';
+import 'package:hiddenly/dashboard.dart';
+import 'package:hiddenly/help%20&%20support/help_support_screen.dart';
+import 'package:hiddenly/login_page.dart';
+import 'package:hiddenly/privacy%20&%20security/privacy_security.dart';
+import 'package:hiddenly/profile_data/profile_data_page.dart';
+import 'package:hiddenly/theme_controller.dart';
+// import 'package:hiddenly/pages.dart'; // PagesScreen temporarily commented
 import 'package:provider/provider.dart';
 
 class ProfileScreen extends StatefulWidget {

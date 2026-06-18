@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:messaging_app/chat_models.dart';
+import 'package:hiddenly/chat_models.dart';
 
 class QuickDialContact {
   final String id;
