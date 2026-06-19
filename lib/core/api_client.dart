@@ -132,6 +132,9 @@ class ApiClient {
       return null;
     }
   }
+  static Future<String?> refreshAccessToken() async {
+  return await _refreshToken();
+ }
 
   // ---------------------------
   // TOKEN HELPERS

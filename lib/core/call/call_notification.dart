@@ -55,6 +55,10 @@ class NotificationService {
   static bool _handlingDecline = false;
   static bool _handlingTimeout = false;
 
+  // Prevent duplicate in-app IncomingCallScreen when app comes foreground
+  // after user taps Answer on CallKit/notification.
+  static bool _answerOpeningCallScreen = false;
+
   static String? _lastShownCallKitKey;
   static DateTime? _lastShownCallKitKeyTime;
 
@@ -84,6 +88,13 @@ class NotificationService {
       final type = data['type']?.toString();
 
       if (type == 'incoming_call') {
+        if (_answerOpeningCallScreen) {
+          debugPrint(
+            'FOREGROUND FCM INCOMING IGNORED: CallKit answer is opening CallScreen',
+          );
+          return;
+        }
+
         debugPrint('FOREGROUND FCM INCOMING -> OPEN IN-APP INCOMING SCREEN');
 
         // Foreground/app-open fallback: if the global websocket misses the event,
@@ -265,11 +276,13 @@ class NotificationService {
         fallback: 'Incoming call',
       );
 
-      final callerAvatar = _readFirstString(data, const {}, const [
+      final rawCallerAvatar = _readFirstString(data, const {}, const [
         'caller_avatar',
         'callerAvatar',
         'avatar',
       ]);
+
+      final callerAvatar = _fixAvatarUrl(rawCallerAvatar);
 
       final conversationId = _readFirstString(data, const {}, const [
         'conversation_id',
@@ -344,17 +357,16 @@ class NotificationService {
           callbackText: 'Call back',
         ),
         android: AndroidParams(
-          isCustomNotification: true,
-          isShowLogo: true,
-          ringtonePath: 'incoming_call',
-          backgroundColor: '#0F172A',
-          backgroundUrl: callerAvatar,
-          actionColor: '#4CAF50',
-          textColor: '#FFFFFF',
-          incomingCallNotificationChannelName: 'Incoming Calls',
-          missedCallNotificationChannelName: 'Missed Calls',
-          isShowCallID: false,
-        ),
+         isCustomNotification: true,
+         isShowLogo: true,
+         backgroundColor: '#0F172A',
+         backgroundUrl: callerAvatar,
+         actionColor: '#4CAF50',
+         textColor: '#FFFFFF',
+         incomingCallNotificationChannelName: 'Incoming Calls',
+         missedCallNotificationChannelName: 'Missed Calls',
+         isShowCallID: false,
+       ),
         ios: const IOSParams(
           iconName: 'CallKitLogo',
           handleType: 'generic',
@@ -369,7 +381,6 @@ class NotificationService {
           supportsHolding: false,
           supportsGrouping: false,
           supportsUngrouping: false,
-          ringtonePath: 'incoming_call.mp3',
         ),
       );
 
@@ -412,16 +423,19 @@ class NotificationService {
       fallback: 'Incoming call',
     );
 
-    final callerAvatar = _readFirstString(extra, body, const [
+    final rawCallerAvatar = _readFirstString(extra, body, const [
       'caller_avatar',
       'callerAvatar',
       'avatar',
     ]);
 
+    final callerAvatar = _fixAvatarUrl(rawCallerAvatar);
+
     final conversationId = _readFirstString(extra, body, const [
       'conversation_id',
       'conversationId',
     ]);
+    
 
     final isVideoCall = _readBool(extra['is_video_call']) ||
         _readBool(extra['isVideoCall']) ||
@@ -439,6 +453,8 @@ class NotificationService {
 
     if (callerId.isEmpty || conversationId.isEmpty) return;
 
+    _answerOpeningCallScreen = true;
+
     await GlobalCallHandler.instance.openIncomingCallFromCallKit(
       callId: callId,
       conversationId: conversationId,
@@ -447,6 +463,10 @@ class NotificationService {
       callerAvatar: callerAvatar,
       isVideoCall: isVideoCall,
     );
+
+    Future.delayed(const Duration(seconds: 6), () {
+      _answerOpeningCallScreen = false;
+    });
 
     if (callId.isNotEmpty) {
       unawaited(
@@ -465,6 +485,21 @@ class NotificationService {
         }
       });
     }
+  }
+  static String _fixAvatarUrl(String url) {
+    final clean = url.trim();
+
+    if (clean.isEmpty) return '';
+
+    if (clean.startsWith('http://') || clean.startsWith('https://')) {
+      return clean;
+    }
+
+    if (clean.startsWith('/')) {
+      return '${AppConfig.serverUrl}$clean';
+    }
+
+    return '${AppConfig.serverUrl}/$clean';
   }
 
   static Future<void> _openDirectCallScreenFromData(
@@ -489,11 +524,13 @@ class NotificationService {
       fallback: 'Incoming call',
     );
 
-    final callerAvatar = _readFirstString(data, const {}, const [
+    final rawCallerAvatar = _readFirstString(data, const {}, const [
       'caller_avatar',
       'callerAvatar',
       'avatar',
     ]);
+
+    final callerAvatar = _fixAvatarUrl(rawCallerAvatar);
 
     final conversationId = _readFirstString(data, const {}, const [
       'conversation_id',
@@ -514,6 +551,8 @@ class NotificationService {
 
     if (callerId.isEmpty || conversationId.isEmpty) return;
 
+    _answerOpeningCallScreen = true;
+
     await GlobalCallHandler.instance.openIncomingCallFromCallKit(
       callId: callId,
       conversationId: conversationId,
@@ -522,6 +561,10 @@ class NotificationService {
       callerAvatar: callerAvatar,
       isVideoCall: isVideoCall,
     );
+
+    Future.delayed(const Duration(seconds: 6), () {
+      _answerOpeningCallScreen = false;
+    });
   }
 
   static Future<void> _declineCall(
@@ -908,4 +951,4 @@ class NotificationService {
     final text = value.toString().trim().toLowerCase();
     return text == 'true' || text == '1' || text == 'yes';
   }
-}///////////  all good
+}

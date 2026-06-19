@@ -1,6 +1,7 @@
 // lib/core/call/global_call_handler.dart
 
 import 'package:flutter/material.dart';
+import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:hiddenly/incoming_call_screen.dart';
@@ -34,6 +35,9 @@ class GlobalCallHandler {
 
   String? _lastCallKitOpenKey;
   DateTime? _lastCallKitOpenKeyTime;
+
+  String? _acceptedOrOpenedCallKey;
+  DateTime? _acceptedOrOpenedCallKeyTime;
 
   Map<String, dynamic>? _pendingOffer;
   String? _pendingOfferCallerId;
@@ -110,17 +114,15 @@ class GlobalCallHandler {
       debugPrint('data: $data');
     };
 
-    _globalIncomingCallHandler = (data) async {
-      debugPrint('### GLOBAL SOCKET incoming_call RECEIVED ###');
-      debugPrint('raw data: $data');
+   _globalIncomingCallHandler = (data) async {
+  debugPrint('### GLOBAL SOCKET incoming_call RECEIVED ###');
 
-      await _loadCurrentUserFromStorage();
+  await _loadCurrentUserFromStorage();
 
-      final payload = _payloadFrom(data);
-      debugPrint('payload: $payload');
+  final payload = _payloadFrom(data);
 
-      await GlobalCallHandler.handleIncomingCall(payload);
-    };
+  await GlobalCallHandler.handleIncomingCall(payload);
+};
 
     _globalCallCancelledHandler = (data) async {
       debugPrint('### GLOBAL SOCKET call_cancelled RECEIVED ###');
@@ -297,52 +299,16 @@ class GlobalCallHandler {
 
       final offer = Map<String, dynamic>.from(offerRaw as Map);
 
-      if (_isSameActiveIncomingCall(
-        callerId: callerId,
-        conversationId: conversationId,
-        callId: callId,
-      )) {
-        _savePendingOffer(
-          callerId: callerId,
-          conversationId: conversationId,
-          callId: callId,
-          offer: offer,
-        );
-        return;
-      }
+      /*
+        IMPORTANT DOUBLE-SCREEN FIX:
+        The global incoming_call socket is responsible for opening
+        IncomingCallScreen. The conversation call_offer socket must NOT
+        open another UI screen, otherwise receiver sees duplicate incoming
+        screens or IncomingCallScreen + CallScreen.
 
-      if (_callScreenOpen || _openingIncomingScreen) {
-        if (_isIncomingUiLockExpired()) {
-          forceResetCallUiLocks(reason: 'expired_before_socket_offer');
-        } else {
-          _sendBusyToCaller(
-            currentId: currentId,
-            callerId: callerId,
-            conversationId: conversationId,
-            callId: callId,
-            reason: 'busy',
-          );
-          return;
-        }
-      }
-
-      final isVideoCall =
-          payload['isVideoCall'] == true ||
-          payload['is_video_call'] == true ||
-          payload['isVideoCall']?.toString() == 'true' ||
-          payload['is_video_call']?.toString() == 'true' ||
-          payload['video']?.toString() == 'true';
-
-      final callerName =
-          payload['callerName']?.toString() ??
-          payload['caller_name']?.toString() ??
-          'Incoming call';
-
-      final callerAvatar =
-          payload['callerAvatar']?.toString() ??
-          payload['caller_avatar']?.toString() ??
-          '';
-
+        Here we only save the WebRTC offer. IncomingCallScreen/CallScreen
+        can take this pending offer when user accepts.
+      */
       _savePendingOffer(
         callerId: callerId,
         conversationId: conversationId,
@@ -350,18 +316,12 @@ class GlobalCallHandler {
         offer: offer,
       );
 
-      await _openIncomingCallScreen(
-        currentUserId: currentId,
-        currentUserName: _currentUserName ?? '',
-        currentUserAvatar: _currentUserAvatar ?? '',
-        callerId: callerId,
-        callerName: callerName,
-        callerAvatar: callerAvatar,
-        isVideoCall: isVideoCall,
-        offer: offer,
-        conversationId: conversationId,
-        callId: callId,
-      );
+      debugPrint('CALL OFFER SAVED ONLY - UI OPEN BLOCKED TO PREVENT DOUBLE SCREEN');
+      debugPrint('callerId: $callerId');
+      debugPrint('conversationId: ${conversationId ?? ''}');
+      debugPrint('callId: ${callId ?? ''}');
+
+      return;
     };
 
     _callEndHandler = (data) async {
@@ -414,7 +374,11 @@ class GlobalCallHandler {
     final cleanConversationId = conversationId.trim();
     final cleanCallerId = callerId.trim();
 
-    final callKitKey = cleanCallId ?? '${cleanConversationId}_$cleanCallerId';
+    final callKitKey = _buildIncomingKey(
+      callerId: cleanCallerId,
+      conversationId: cleanConversationId,
+      callId: cleanCallId,
+    );
     if (_isRecentDuplicateCallKitOpen(callKitKey)) {
       debugPrint('CALLKIT ANSWER OPEN SKIPPED DUPLICATE: $callKitKey');
       return;
@@ -435,6 +399,8 @@ class GlobalCallHandler {
 
     _lastCallKitOpenKey = callKitKey;
     _lastCallKitOpenKeyTime = DateTime.now();
+    _acceptedOrOpenedCallKey = callKitKey;
+    _acceptedOrOpenedCallKeyTime = DateTime.now();
 
     _openingIncomingScreen = true;
     _callScreenOpen = true;
@@ -545,6 +511,17 @@ class GlobalCallHandler {
 
       final callId =
           data['call_id']?.toString() ?? data['callId']?.toString();
+
+      final incomingKey = h._buildIncomingKey(
+        callerId: callerId,
+        conversationId: conversationId,
+        callId: callId,
+      );
+
+      if (h._isAcceptedOrOpenedCall(incomingKey)) {
+        debugPrint('GLOBAL INCOMING CALL IGNORED: already accepted/opened $incomingKey');
+        return;
+      }
 
       if (h._isSameActiveIncomingCall(
         callerId: callerId,
@@ -702,6 +679,8 @@ class GlobalCallHandler {
     _activeIncomingCallId = callId;
     _lastIncomingKey = incomingKey;
     _lastIncomingKeyTime = DateTime.now();
+    _acceptedOrOpenedCallKey = incomingKey;
+    _acceptedOrOpenedCallKeyTime = DateTime.now();
 
     final navigator = await _waitForNavigator();
 
@@ -906,6 +885,23 @@ class GlobalCallHandler {
   }
 
 
+  bool _isAcceptedOrOpenedCall(String key) {
+    if (key.trim().isEmpty) return false;
+    if (_acceptedOrOpenedCallKey == null ||
+        _acceptedOrOpenedCallKeyTime == null) {
+      return false;
+    }
+
+    if (_acceptedOrOpenedCallKey != key) return false;
+
+    // Keep a longer guard window because backend/global socket can resend
+    // incoming_call after receiver already accepted and CallScreen is open.
+    return DateTime.now()
+            .difference(_acceptedOrOpenedCallKeyTime!)
+            .inSeconds <=
+        120;
+  }
+
   bool _isRecentDuplicateCallKitOpen(String key) {
     if (key.trim().isEmpty) return false;
     if (_lastCallKitOpenKey == null || _lastCallKitOpenKeyTime == null) {
@@ -930,14 +926,22 @@ class GlobalCallHandler {
     _activeIncomingCallerId = null;
     _activeIncomingConversationId = null;
     _activeIncomingCallId = null;
-    _lastIncomingKey = null;
-    _lastIncomingKeyTime = null;
+
+    // Do NOT clear _lastIncomingKey or _acceptedOrOpenedCallKey here.
+    // Backend/global socket can resend the same incoming_call after accept.
+    // Keeping these keys briefly prevents the second incoming screen.
     clearPendingOffer();
   }
 
   void forceResetCallUiLocks({String reason = 'manual_cleanup'}) {
     debugPrint('GLOBAL FORCE RESET CALL UI LOCKS: $reason');
     markCallScreenClosed();
+    _lastIncomingKey = null;
+    _lastIncomingKeyTime = null;
+    _lastCallKitOpenKey = null;
+    _lastCallKitOpenKeyTime = null;
+    _acceptedOrOpenedCallKey = null;
+    _acceptedOrOpenedCallKeyTime = null;
   }
 
   void _removeOldHandlers() {
@@ -994,7 +998,7 @@ class GlobalCallHandler {
 }
   void dispose() {
     _registered = false;
-    markCallScreenClosed();
+    forceResetCallUiLocks(reason: 'dispose');
     _currentUserId = null;
     _currentUserName = null;
     _currentUserAvatar = null;

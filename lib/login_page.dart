@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hiddenly/verify.dart';
@@ -22,6 +21,8 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
       fullPhoneNumber.isNotEmpty && !_isLoading;
 
   Future<void> onContinue() async {
+    FocusScope.of(context).unfocus();
+
     if (fullPhoneNumber.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Enter valid phone number')),
@@ -91,97 +92,109 @@ class _WelcomeScreenState extends State<WelcomeScreen> {
     final fieldBorder =
         isDark ? const Color(0xFF334155) : const Color(0xFFD9DEE8);
 
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 16),
-            child: SizedBox(
-              width: cardWidth,
-              child: Column(
-                children: [
-                  const SizedBox(height: 20),
+    return GestureDetector(
+      onTap: () => FocusScope.of(context).unfocus(),
+      child: Scaffold(
+        body: SafeArea(
+          child: Center(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 16),
+              child: SizedBox(
+                width: cardWidth,
+                child: Column(
+                  children: [
+                    const SizedBox(height: 20),
 
-                  // ICON
-                  Container(
-                    width: 108,
-                    height: 108,
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFE6EBF7),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(
-                      Icons.chat_bubble_outline_rounded,
-                      color: Color(0xFF4A73E8),
-                      size: 40,
-                    ),
-                  ),
-
-                  const SizedBox(height: 34),
-
-                  Text(
-                    'Welcome to Hiddenly',
-                    textAlign: TextAlign.center,
-                    style: textTheme.headlineMedium
-                        ?.copyWith(color: titleColor),
-                  ),
-
-                  const SizedBox(height: 14),
-
-                  Text(
-                    'Enter your phone number to get started',
-                    textAlign: TextAlign.center,
-                    style: textTheme.bodyLarge
-                        ?.copyWith(color: subTitleColor),
-                  ),
-
-                  const SizedBox(height: 52),
-
-                  // PHONE FIELD (BEST METHOD)
-                  IntlPhoneField(
-                    initialCountryCode: 'NP',
-                    decoration: InputDecoration(
-                      labelText: 'Phone Number',
-                      filled: true,
-                      fillColor: fieldBg,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(16),
-                        borderSide: BorderSide(color: fieldBorder),
-                      ),
-                    ),
-                    style: TextStyle(color: titleColor),
-                    dropdownTextStyle: TextStyle(color: titleColor),
-
-                    onChanged: (phone) {
-                      fullPhoneNumber = phone.completeNumber;
-                    },
-                  ),
-
-                  const SizedBox(height: 30),
-
-                  // BUTTON
+                    // ICON
+                    // LOGO
                   SizedBox(
-                    width: double.infinity,
-                    height: 50,
-                    child: ElevatedButton(
-                      onPressed:
-                          isButtonEnabled ? onContinue : null,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF4A73E8),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(18),
+                  width: 120,
+                  height: 120,
+                   child: Image.asset(
+                     'assets/icon.png',
+                   fit: BoxFit.contain,
+                     ),
+                     ),
+
+                    const SizedBox(height: 34),
+
+                    Text(
+                 'Welcome to Hiddenly',
+                  textAlign: TextAlign.center,
+                   style: TextStyle(
+                      color: titleColor,
+                    fontSize: 32,
+                      fontWeight: FontWeight.w700,
+                     letterSpacing: 0.3,
+                     ),
+                    ),
+
+                    const SizedBox(height: 14),
+
+                    Text(
+                      'Enter your phone number to get started',
+                      textAlign: TextAlign.center,
+                      style: textTheme.bodyLarge
+                          ?.copyWith(color: subTitleColor),
+                    ),
+
+                    const SizedBox(height: 52),
+
+                    // PHONE FIELD (BEST METHOD)
+                    IntlPhoneField(
+                      initialCountryCode: 'NP',
+                      keyboardType: TextInputType.phone,
+                      decoration: InputDecoration(
+                        labelText: 'Phone Number',
+                        filled: true,
+                        fillColor: fieldBg,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(16),
+                          borderSide: BorderSide(color: fieldBorder),
                         ),
                       ),
-                      child: _isLoading
-                          ? const CircularProgressIndicator(
-                              color: Colors.white,
-                            )
-                          : const Text("Continue"),
-                    ),
-                  ),
+                      style: TextStyle(color: titleColor),
+                      dropdownTextStyle: TextStyle(color: titleColor),
 
-                  const SizedBox(height: 40),
-                ],
+                      onChanged: (phone) {
+                        setState(() {
+                          fullPhoneNumber = phone.completeNumber;
+                        });
+
+                        if (phone.countryISOCode == 'NP' &&
+                            phone.number.length >= 10) {
+                          FocusScope.of(context).unfocus();
+                        }
+                      },
+                    ),
+
+                    const SizedBox(height: 30),
+
+                    // BUTTON
+                    SizedBox(
+                      width: double.infinity,
+                      height: 50,
+                      child: ElevatedButton(
+                        onPressed:
+                            isButtonEnabled ? onContinue : null,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF4A73E8),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                        ),
+                        child: _isLoading
+                            ? const CircularProgressIndicator(
+                                color: Colors.white,
+                              )
+                            : const Text("Continue"),
+                      ),
+                    ),
+
+                    const SizedBox(height: 40),
+                  ],
+                ),
               ),
             ),
           ),

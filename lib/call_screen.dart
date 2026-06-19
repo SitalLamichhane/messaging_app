@@ -118,18 +118,34 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     return _getRemoteDisplayName(callState);
   }
 
+  String _fixAvatarUrl(String url) {
+    final clean = url.trim();
+
+    if (clean.isEmpty) return '';
+
+    if (clean.startsWith('http://') || clean.startsWith('https://')) {
+      return clean;
+    }
+
+    if (clean.startsWith('/')) {
+      return '${AppConfig.serverUrl}$clean';
+    }
+
+    return '${AppConfig.serverUrl}/$clean';
+  }
+
   String _getDisplayAvatarUrl(CallState callState) {
     final stateAvatar = callState.avatarUrl;
 
     if (stateAvatar != null && stateAvatar.trim().isNotEmpty) {
-      return stateAvatar.trim();
+      return _fixAvatarUrl(stateAvatar);
     }
 
-    return widget.avatarUrl.trim();
+    return _fixAvatarUrl(widget.avatarUrl);
   }
 
   String _getCurrentUserAvatarUrl() {
-    return widget.currentUserAvatar.trim();
+    return _fixAvatarUrl(widget.currentUserAvatar);
   }
 
   Map<String, dynamic>? _normalizedIncomingOffer() {

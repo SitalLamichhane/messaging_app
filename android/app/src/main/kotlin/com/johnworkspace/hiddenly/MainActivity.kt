@@ -10,7 +10,8 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.res.Configuration
 import android.media.AudioAttributes
-import android.net.Uri
+import android.media.Ringtone
+import android.media.RingtoneManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
@@ -23,13 +24,10 @@ class MainActivity : FlutterActivity() {
     private val nativePipChannelName = "messaging_app/native_pip"
     private var nativePipChannel: MethodChannel? = null
 
-    /*
-     * Flutter updates this using setCallActive.
-     *
-     * Android PiP is allowed ONLY when this is true.
-     * This prevents ChatList/Dashboard/Profile from being captured into PiP
-     * after a call ends.
-     */
+    private val systemRingtoneChannelName = "hiddenly/system_ringtone"
+    private var systemRingtoneChannel: MethodChannel? = null
+    private var ringtone: Ringtone? = null
+
     private var callActiveFromFlutter: Boolean = false
     private var wasInPictureInPicture: Boolean = false
 
@@ -43,9 +41,7 @@ class MainActivity : FlutterActivity() {
 
         nativePipChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
-                "isPipAvailable" -> {
-                    result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                }
+                "isPipAvailable" -> result.success(Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
 
                 "setCallActive" -> {
                     callActiveFromFlutter = when (val value = call.arguments) {
@@ -54,7 +50,6 @@ class MainActivity : FlutterActivity() {
                         is Number -> value.toInt() == 1
                         else -> false
                     }
-
                     result.success(true)
                 }
 
@@ -66,24 +61,39 @@ class MainActivity : FlutterActivity() {
                 else -> result.notImplemented()
             }
         }
+
+        systemRingtoneChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            systemRingtoneChannelName
+        )
+
+        systemRingtoneChannel?.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "start" -> {
+                    startSystemRingtone()
+                    result.success(true)
+                }
+
+                "stop" -> {
+                    stopSystemRingtone()
+                    result.success(true)
+                }
+
+                else -> result.notImplemented()
+            }
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         makeAppVisibleForIncomingCall()
         createCallNotificationChannel()
     }
 
     override fun onResume() {
         super.onResume()
-
         makeAppVisibleForIncomingCall()
 
-        /*
-         * If user expanded/tapped PiP and call is still active,
-         * Flutter must open CallScreen, not ChatList.
-         */
         if (wasInPictureInPicture || callActiveFromFlutter) {
             nativePipChannel?.invokeMethod("onActivityResume", null)
         }
@@ -91,21 +101,15 @@ class MainActivity : FlutterActivity() {
         wasInPictureInPicture = false
     }
 
+    override fun onDestroy() {
+        stopSystemRingtone()
+        super.onDestroy()
+    }
+
     override fun onUserLeaveHint() {
-        /*
-         * Manual PiP only.
-         *
-         * Never let Android enter PiP from ChatList/Dashboard/Profile
-         * unless Flutter says an active call exists.
-         */
         if (callActiveFromFlutter) {
             nativePipChannel?.invokeMethod("onUserLeaveHint", null)
         }
-        /*
-         * If no active call, do nothing.
-         * That means normal Home/back from ChatList/Profile/Dashboard never
-         * creates any call overlay/PiP.
-         */
 
         super.onUserLeaveHint()
     }
@@ -126,24 +130,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun enterCallPictureInPicture(): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            return false
-        }
-
-        if (!callActiveFromFlutter) {
-            return false
-        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return false
+        if (!callActiveFromFlutter) return false
 
         return try {
             val builder = PictureInPictureParams.Builder()
                 .setAspectRatio(Rational(9, 16))
 
-            /*
-             * DO NOT call setAutoEnterEnabled(true).
-             *
-             * Auto PiP is what causes normal screens to appear in PiP after
-             * the call has ended.
-             */
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 builder.setAutoEnterEnabled(false)
                 builder.setSeamlessResizeEnabled(true)
@@ -177,25 +170,58 @@ class MainActivity : FlutterActivity() {
         }
 
         @Suppress("DEPRECATION")
-        window.addFlags(
-            WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-        )
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    private fun startSystemRingtone() {
+        try {
+            stopSystemRingtone()
+
+            val ringtoneUri = RingtoneManager.getDefaultUri(
+                RingtoneManager.TYPE_RINGTONE
+            )
+
+            ringtone = RingtoneManager.getRingtone(
+                applicationContext,
+                ringtoneUri
+            )
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                ringtone?.audioAttributes = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            }
+
+            ringtone?.play()
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun stopSystemRingtone() {
+        try {
+            ringtone?.stop()
+            ringtone = null
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     private fun createCallNotificationChannel() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
 
-        val channelId = "call_channel"
+        val channelId = "call_channel_v2"
         val channelName = "Incoming Calls"
-
-        val soundUri = Uri.parse(
-            "android.resource://$packageName/raw/incoming_call"
-        )
 
         val audioAttributes = AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_NOTIFICATION_RINGTONE)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
+
+        val systemRingtoneUri = RingtoneManager.getDefaultUri(
+            RingtoneManager.TYPE_RINGTONE
+        )
 
         val channel = NotificationChannel(
             channelId,
@@ -203,7 +229,7 @@ class MainActivity : FlutterActivity() {
             NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Incoming call alerts"
-            setSound(soundUri, audioAttributes)
+            setSound(systemRingtoneUri, audioAttributes)
             enableVibration(true)
             enableLights(true)
             lockscreenVisibility = Notification.VISIBILITY_PUBLIC

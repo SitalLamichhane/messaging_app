@@ -48,6 +48,7 @@ class CallNotifier extends StateNotifier<CallState> {
   bool _switchingVideo = false;
   bool _socketEventsListening = false;
   bool _waitingForOfferAfterCallKitAccept = false;
+  bool _iceRestarting = false;
 
   String? _conversationId;
   String? _callId;
@@ -104,6 +105,7 @@ class CallNotifier extends StateNotifier<CallState> {
       _finishing = false;
       _switchingVideo = false;
       _waitingForOfferAfterCallKitAccept = false;
+      _iceRestarting = false;
 
       _conversationId = conversationId;
       _callId = callId;
@@ -194,6 +196,9 @@ class CallNotifier extends StateNotifier<CallState> {
           );
 
           setConnected();
+        },
+        onIceRestartNeeded: () async {
+          await _restartIceAndSendOffer();
         },
       );
 
@@ -532,6 +537,59 @@ class CallNotifier extends StateNotifier<CallState> {
 
     if (rawOffer is! Map) return;
 
+    final requestType = payload['requestType']?.toString() ??
+        payload['request_type']?.toString() ??
+        '';
+
+    /*
+      ICE restart must be answered automatically.
+      Do NOT show video upgrade popup for this renegotiation.
+    */
+    if (requestType == 'ice_restart') {
+      final currentUserId = state.currentUserId;
+      final receiverId = state.receiverId;
+
+      if (currentUserId == null || receiverId == null) return;
+
+      try {
+        final answer = await webrtc.handleRenegotiationOffer(
+          Map<String, dynamic>.from(rawOffer),
+        );
+
+        SocketService.instance.emit(
+          CallSocketEvents.callRenegotiateAnswer,
+          {
+            'from': currentUserId,
+            'from_user': currentUserId,
+            'answer': answer.toMap(),
+            'requestType': 'ice_restart',
+            'request_type': 'ice_restart',
+            if (_callId != null) 'call_id': _callId,
+            if (_callId != null) 'callId': _callId,
+            if (_conversationId != null) 'conversation_id': _conversationId,
+            if (_conversationId != null) 'conversationId': _conversationId,
+          },
+          targetUser: receiverId,
+          conversationId: _conversationId,
+          queueIfDisconnected: true,
+        );
+
+        _safeState(
+          state.copyWith(
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+
+        debugPrint('ICE RESTART ANSWER SENT');
+      } catch (e, st) {
+        debugPrint('ICE RESTART OFFER HANDLE ERROR: $e');
+        debugPrint(st.toString());
+      }
+
+      return;
+    }
+
     _safeState(
       state.copyWith(
         hasPendingVideoUpgrade: true,
@@ -553,12 +611,28 @@ class CallNotifier extends StateNotifier<CallState> {
 
     if (rawAnswer is! Map) return;
 
+    final requestType = payload['requestType']?.toString() ??
+        payload['request_type']?.toString() ??
+        '';
+
     try {
       await webrtc.handleRenegotiationAnswer(
         Map<String, dynamic>.from(rawAnswer),
       );
 
       await webrtc.setSpeaker(true);
+
+      if (requestType == 'ice_restart') {
+        _safeState(
+          state.copyWith(
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+
+        debugPrint('ICE RESTART ANSWER SET');
+        return;
+      }
 
       _safeState(
         state.copyWith(
@@ -575,6 +649,10 @@ class CallNotifier extends StateNotifier<CallState> {
       debugPrint('Renegotiation answer error: $e');
       debugPrint(st.toString());
 
+      if (requestType == 'ice_restart') {
+        return;
+      }
+
       await webrtc.disableVideoHard();
 
       _safeState(
@@ -588,7 +666,9 @@ class CallNotifier extends StateNotifier<CallState> {
         ),
       );
     } finally {
-      _switchingVideo = false;
+      if (requestType != 'ice_restart') {
+        _switchingVideo = false;
+      }
     }
   }
 
@@ -709,6 +789,50 @@ class CallNotifier extends StateNotifier<CallState> {
       emitSocket: false,
       disconnectSocket: true,
     );
+  }
+
+  Future<void> _restartIceAndSendOffer() async {
+    if (!_canUpdate) return;
+    if (_iceRestarting) return;
+    if (_isFinalStatus(state.status)) return;
+
+    final currentUserId = state.currentUserId;
+    final receiverId = state.receiverId;
+
+    if (currentUserId == null || receiverId == null) return;
+
+    _iceRestarting = true;
+
+    try {
+      final offer = await webrtc.restartIce();
+
+      SocketService.instance.emit(
+        CallSocketEvents.callRenegotiateOffer,
+        {
+          'from': currentUserId,
+          'from_user': currentUserId,
+          'offer': offer.toMap(),
+          'requestType': 'ice_restart',
+          'request_type': 'ice_restart',
+          if (_callId != null) 'call_id': _callId,
+          if (_callId != null) 'callId': _callId,
+          if (_conversationId != null) 'conversation_id': _conversationId,
+          if (_conversationId != null) 'conversationId': _conversationId,
+        },
+        targetUser: receiverId,
+        conversationId: _conversationId,
+        queueIfDisconnected: true,
+      );
+
+      debugPrint('ICE RESTART OFFER SENT');
+    } catch (e, st) {
+      debugPrint('ICE RESTART SEND ERROR: $e');
+      debugPrint(st.toString());
+    } finally {
+      Future.delayed(const Duration(seconds: 4), () {
+        _iceRestarting = false;
+      });
+    }
   }
 
   Future<void> resendOfferToAcceptedReceiver() async {
@@ -1274,6 +1398,7 @@ class CallNotifier extends StateNotifier<CallState> {
     _conversationId = null;
     _callId = null;
     _waitingForOfferAfterCallKitAccept = false;
+    _iceRestarting = false;
     _switchingVideo = false;
     _finishing = false;
   }
@@ -1320,6 +1445,7 @@ class CallNotifier extends StateNotifier<CallState> {
     _finishing = false;
     _switchingVideo = false;
     _waitingForOfferAfterCallKitAccept = false;
+    _iceRestarting = false;
     _conversationId = null;
     _callId = null;
 
@@ -1387,6 +1513,7 @@ class CallNotifier extends StateNotifier<CallState> {
     _conversationId = null;
     _callId = null;
     _waitingForOfferAfterCallKitAccept = false;
+    _iceRestarting = false;
     _finishing = false;
     _switchingVideo = false;
 

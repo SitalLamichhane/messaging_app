@@ -492,33 +492,47 @@ class SocketService {
     );
   }
 
-  void _sendNow(
-    String event,
-    Map<String, dynamic> payload, {
-    String? targetUser,
-    String? conversationId,
-  }) {
-    if (_channel == null || !_connected) {
-      debugPrint('CALL WS SEND FAILED NOT CONNECTED: $event');
-      return;
-    }
-
-    final message = <String, dynamic>{
-      'event': event,
-      'type': event,
-      'payload': payload,
-      if (targetUser != null) 'target_user': targetUser,
-      if (conversationId != null) 'conversation_id': conversationId,
-    };
-
-    try {
-      _channel!.sink.add(jsonEncode(message));
-      debugPrint('CALL WS SENT: $message');
-    } catch (e, stack) {
-      debugPrint('CALL WS SEND ERROR: $e');
-      debugPrint(stack.toString());
-    }
+ void _sendNow(
+  String event,
+  Map<String, dynamic> payload, {
+  String? targetUser,
+  String? conversationId,
+}) {
+  if (_channel == null || !_connected) {
+    debugPrint('CALL WS SEND FAILED NOT CONNECTED: $event');
+    return;
   }
+
+  final fixedPayload = Map<String, dynamic>.from(payload);
+
+  if (targetUser != null && targetUser.trim().isNotEmpty) {
+    fixedPayload['target_user'] = targetUser;
+    fixedPayload['targetUser'] = targetUser;
+    fixedPayload['receiver_id'] = targetUser;
+    fixedPayload['receiverId'] = targetUser;
+  }
+
+  if (conversationId != null && conversationId.trim().isNotEmpty) {
+    fixedPayload['conversation_id'] = conversationId;
+    fixedPayload['conversationId'] = conversationId;
+  }
+
+  final message = <String, dynamic>{
+    'event': event,
+    'type': event,
+    'payload': fixedPayload,
+    if (targetUser != null) 'target_user': targetUser,
+    if (conversationId != null) 'conversation_id': conversationId,
+  };
+
+  try {
+    _channel!.sink.add(jsonEncode(message));
+    debugPrint('CALL WS SENT: $message');
+  } catch (e, stack) {
+    debugPrint('CALL WS SEND ERROR: $e');
+    debugPrint(stack.toString());
+  }
+}
 
   void _queue(
     String event,

@@ -9,6 +9,7 @@ import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/call/call_socket_service.dart';
 import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:hiddenly/core/call/global_call_handler.dart';
+import 'package:hiddenly/core/call/system_ringtone_service.dart';
 import 'package:hiddenly/core/config/app_config.dart';
 
 class IncomingCallScreen extends StatefulWidget {
@@ -57,6 +58,18 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   String _resolvedCurrentUserId = '';
   String _resolvedCurrentUserName = '';
   String _resolvedCurrentUserAvatar = '';
+
+  @override
+  void initState() {
+    super.initState();
+    SystemRingtoneService.start();
+  }
+
+  @override
+  void dispose() {
+    SystemRingtoneService.stop();
+    super.dispose();
+  }
 
   String get _effectiveConversationId {
     final value = widget.conversationId?.toString() ??
@@ -237,7 +250,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       );
 
       await SocketService.instance.connect(url: url);
-
       await Future.delayed(const Duration(milliseconds: 300));
 
       if (!SocketService.instance.isConnected) {
@@ -257,6 +269,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   Future<void> _reject(BuildContext context) async {
+    await SystemRingtoneService.stop();
+
     if (_rejecting) return;
     _rejecting = true;
 
@@ -348,6 +362,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   Future<void> _accept(BuildContext context) async {
+    await SystemRingtoneService.stop();
+
     if (_accepting) return;
     _accepting = true;
 

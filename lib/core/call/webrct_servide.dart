@@ -162,6 +162,7 @@ class WebRTCService {
     required bool isVideoCall,
     required Function(RTCIceCandidate candidate) onIceCandidate,
     required VoidCallback onRemoteStream,
+    Future<void> Function()? onIceRestartNeeded,
   }) async {
     _disposed = false;
     _remoteDescriptionSet = false;
@@ -281,12 +282,48 @@ class WebRTCService {
         debugPrint('=======================================================');
       };
 
-      pc.onConnectionState = (state) {
-        debugPrint('WEBRTC CONNECTION STATE: $state');
-      };
+     pc.onConnectionState = (state) async {
+  debugPrint('WEBRTC CONNECTION STATE: $state');
 
-      pc.onIceConnectionState = (state) {
+  if (state ==
+      RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+
+    debugPrint('WEBRTC DISCONNECTED');
+
+    Future.delayed(const Duration(seconds: 5), () async {
+      try {
+        await onIceRestartNeeded?.call();
+      } catch (e) {
+        debugPrint('ICE RESTART CALLBACK ERROR: $e');
+      }
+    });
+  }
+
+  if (state ==
+      RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
+
+    debugPrint('WEBRTC FAILED -> REQUEST ICE RESTART SIGNALING');
+
+    try {
+      await onIceRestartNeeded?.call();
+    } catch (e) {
+      debugPrint('ICE RESTART CALLBACK ERROR: $e');
+    }
+  }
+};
+
+      pc.onIceConnectionState = (state) async {
         debugPrint('WEBRTC ICE STATE: $state');
+
+        if (state == RTCIceConnectionState.RTCIceConnectionStateFailed) {
+          debugPrint('ICE FAILED -> REQUEST ICE RESTART SIGNALING');
+
+          try {
+            await onIceRestartNeeded?.call();
+          } catch (e) {
+            debugPrint('ICE RESTART CALLBACK ERROR: $e');
+          }
+        }
       };
 
       pc.onSignalingState = (state) {
@@ -376,40 +413,60 @@ class WebRTCService {
   }
 
   Future<RTCSessionDescription> createOffer() async {
-    final pc = _peerConnection;
+  final pc = _peerConnection;
 
-    if (pc == null || _disposed) {
-      throw Exception('Peer connection is null/disposed');
-    }
-
-    final offer = await pc.createOffer({
-      'offerToReceiveAudio': true,
-      'offerToReceiveVideo': true,
-    });
-
-    await pc.setLocalDescription(offer);
-
-    debugPrint('WEBRTC LOCAL OFFER CREATED');
-    return offer;
+  if (pc == null || _disposed) {
+    throw Exception('Peer connection is null/disposed');
   }
+
+  final offer = await pc.createOffer({
+    'offerToReceiveAudio': true,
+    'offerToReceiveVideo': true,
+  });
+
+  await pc.setLocalDescription(offer);
+
+  debugPrint('WEBRTC LOCAL OFFER CREATED');
+  return offer;
+}
 
   Future<RTCSessionDescription> createAnswer() async {
-    final pc = _peerConnection;
+   final pc = _peerConnection;
 
-    if (pc == null || _disposed) {
-      throw Exception('Peer connection is null/disposed');
-    }
-
-    final answer = await pc.createAnswer({
-      'offerToReceiveAudio': true,
-      'offerToReceiveVideo': true,
-    });
-
-    await pc.setLocalDescription(answer);
-
-    debugPrint('WEBRTC LOCAL ANSWER CREATED');
-    return answer;
+  if (pc == null || _disposed) {
+    throw Exception('Peer connection is null/disposed');
   }
+
+  final answer = await pc.createAnswer({
+    'offerToReceiveAudio': true,
+    'offerToReceiveVideo': true,
+  });
+
+  await pc.setLocalDescription(answer);
+
+  debugPrint('WEBRTC LOCAL ANSWER CREATED');
+  return answer;
+}
+
+Future<RTCSessionDescription> restartIce() async {
+  final pc = _peerConnection;
+
+  if (pc == null || _disposed) {
+    throw Exception('Peer connection is null/disposed');
+  }
+
+  final offer = await pc.createOffer({
+    'iceRestart': true,
+    'offerToReceiveAudio': true,
+    'offerToReceiveVideo': true,
+  });
+
+  await pc.setLocalDescription(offer);
+
+  debugPrint('WEBRTC ICE RESTART OFFER CREATED');
+
+  return offer;
+}
 
   Future<void> setRemoteDescription(Map data) async {
     final pc = _peerConnection;
