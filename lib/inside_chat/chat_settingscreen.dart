@@ -673,8 +673,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
     debugPrint('UPDATED GROUP IMAGE URL: $_updatedGroupImageUrl');
 
-    _notifyDataChanged();
-    _showSnackBar('Group image updated');
+    // _notifyDataChanged();
+    // _showSnackBar('Group image updated');
   }
 
   Future<String?> _uploadGroupImage({
@@ -1972,13 +1972,13 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                                     );
                                   });
 
-                                  setModalState(() {});
-                                  _notifyDataChanged();
-                                  _showSnackBar(
-                                    cleanedValue.isEmpty
-                                        ? 'Nickname removed'
-                                        : 'Nickname updated',
-                                  );
+                                  // setModalState(() {});
+                                  // _notifyDataChanged();
+                                  // _showSnackBar(
+                                  //   cleanedValue.isEmpty
+                                  //       ? 'Nickname removed'
+                                  //       : 'Nickname updated',
+                                  // );
                                 },
                               );
                             }).toList(),
@@ -2029,13 +2029,13 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                             );
                           });
 
-                          setModalState(() {});
-                          _notifyDataChanged();
-                          _showSnackBar(
-                            cleanedValue.isEmpty
-                                ? 'Nickname removed'
-                                : 'Nickname updated',
-                          );
+                          // setModalState(() {});
+                          // _notifyDataChanged();
+                          // _showSnackBar(
+                          //   cleanedValue.isEmpty
+                          //       ? 'Nickname removed'
+                          //       : 'Nickname updated',
+                          // );
                         },
                       ),
                       _NicknameRowTile(
@@ -2085,13 +2085,13 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                             );
                           });
 
-                          setModalState(() {});
-                          _notifyDataChanged();
-                          _showSnackBar(
-                            cleanedValue.isEmpty
-                                ? 'Nickname removed'
-                                : 'Nickname updated',
-                          );
+                          // setModalState(() {});
+                          // _notifyDataChanged();
+                          // _showSnackBar(
+                          //   cleanedValue.isEmpty
+                          //       ? 'Nickname removed'
+                          //       : 'Nickname updated',
+                          // );
                         },
                       ),
                     ],

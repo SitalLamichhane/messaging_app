@@ -68,12 +68,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profile updated'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      // ScaffoldMessenger.of(context).showSnackBar(
+      //   const SnackBar(
+      //     content: Text('Profile updated'),
+      //     behavior: SnackBarBehavior.floating,
+      //   ),
+      // );
     }
   }
 
@@ -98,12 +98,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (!mounted) return;
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(ok ? 'Profile image updated' : 'Image upload failed'),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      // ScaffoldMessenger.of(context).showSnackBar(
+      //   SnackBar(
+      //     content: Text(ok ? 'Profile image updated' : 'Image upload failed'),
+      //     behavior: SnackBarBehavior.floating,
+      //   ),
+      // );
 
       if (!ok) {
         setState(() {

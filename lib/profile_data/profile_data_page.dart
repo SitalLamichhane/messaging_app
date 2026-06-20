@@ -179,14 +179,14 @@ class _ProfileDataPageState extends State<ProfileDataPage> {
       return;
     }
 
-    final error = context.read<ProfileProvider>().error ?? 'Profile update failed';
+    // final error = context.read<ProfileProvider>().error ?? 'Profile update failed';
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(error),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+    // ScaffoldMessenger.of(context).showSnackBar(
+    //   SnackBar(
+    //     content: Text(error),
+    //     behavior: SnackBarBehavior.floating,
+    //   ),
+    // );
   }
 
   String _initial() {
