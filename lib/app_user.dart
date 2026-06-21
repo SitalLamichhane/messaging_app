@@ -6,7 +6,7 @@
 //     required this.name,
 //     required this.phone,
 //   });
-
+// signed app
 //   AppUser copyWith({
 //     String? name,
 //     String? phone,
