@@ -772,4 +772,4 @@ class CallEntry {
 
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
-}
+}// end
