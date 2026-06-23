@@ -493,4 +493,4 @@ class _BottomNavItemData {
   final String label;
 
   const _BottomNavItemData(this.icon, this.label);
-}
+} //Gitpush
