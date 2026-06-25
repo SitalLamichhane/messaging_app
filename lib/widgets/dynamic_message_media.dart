@@ -1,17 +1,4 @@
-// lib/widgets/dynamic_message_media.dart
-//
-// Messenger-style media rendering:
-// - Images: tap to fullscreen, pinch zoom, drag, double-tap zoom via PhotoView
-// - Videos: inline preview/play + fullscreen player with pinch zoom
-// - Albums: 2/3/4+ image grid like Messenger + fullscreen swipe gallery
-// - Files: tappable file bubble; image/video files open in viewer
-//
-// Updated video behavior:
-// - Inline videos DO NOT autoplay
-// - Fullscreen videos DO NOT autoplay
-// - Videos DO NOT loop
-// - Videos DO NOT force auto-resume after user pause/end
-// - Buffering only shows loader; user controls playback like Messenger
+
 
 import 'dart:async';
 import 'dart:io';

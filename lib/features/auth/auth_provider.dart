@@ -151,4 +151,4 @@ class AuthProvider extends ChangeNotifier {
 
     notifyListeners();
   }
-}
+}//Gitpush
