@@ -381,4 +381,4 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       currentUserAvatar: currentUserAvatar,
     );
   }
-} //Gitpush
+} //push
