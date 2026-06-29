@@ -779,4 +779,4 @@ class _Avatar extends StatelessWidget {
       ],
     );
   }
-}//push
+}
