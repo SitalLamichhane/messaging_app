@@ -1,14 +1,11 @@
-// lib/core/config/app_config.dart
-
 class AppConfig {
   static const bool useEmulator = false;
 
-  static const String host = '2.25.198.109';
+  static const String host = '147.93.40.65';
 
   static String get serverUrl => 'http://$host';
   static String get apiBaseUrl => '$serverUrl/api';
 
-  // Explicit :80 avoids bad :0 URL parsing in old builds.
   static String get wsBaseUrl => 'ws://$host:80';
 
   static String chatSocketUrl({

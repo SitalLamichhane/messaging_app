@@ -1585,32 +1585,47 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   }
 
   Widget _buildVoiceCallBackground(bool hasAvatar, String displayAvatarUrl) {
-    return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color(0xFF111827),
-            Color(0xFF0F172A),
-            Color(0xFF030712),
-          ],
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
+    // Keep audio calls clean. The previous implementation stretched the
+    // contact avatar over the whole screen, creating an unwanted image/shadow
+    // behind the profile photo and controls.
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Color(0xFF172033),
+                Color(0xFF0D1422),
+                Color(0xFF030712),
+              ],
+              stops: [0.0, 0.52, 1.0],
+            ),
+          ),
         ),
-      ),
-      child: hasAvatar
-          ? Center(
-              child: Opacity(
-                opacity: 0.12,
-                child: Image.network(
-                  displayAvatarUrl,
-                  fit: BoxFit.cover,
-                  width: double.infinity,
-                  height: double.infinity,
-                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+        Align(
+          alignment: const Alignment(0, -0.62),
+          child: IgnorePointer(
+            child: Container(
+              width: 310,
+              height: 310,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF1877F2).withOpacity(0.16),
+                    const Color(0xFF1877F2).withOpacity(0.05),
+                    Colors.transparent,
+                  ],
+                  stops: const [0.0, 0.48, 1.0],
                 ),
               ),
-            )
-          : null,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

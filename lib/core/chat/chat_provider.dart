@@ -6,6 +6,7 @@ import 'package:hiddenly/chat_models.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/chat/chat_api.dart';
 import 'package:hiddenly/core/chat/chat_socket_service.dart';
+import 'package:hiddenly/core/chat/global_chat_socket_service.dart';
 
 class ChatProvider extends ChangeNotifier {
   bool isLoading = false;
@@ -28,6 +29,7 @@ class ChatProvider extends ChangeNotifier {
   final Map<String, Set<String>> conversationPinnedMessageIds = {};
 
   final ChatSocketService socket = ChatSocketService();
+  final GlobalChatSocketService globalSocket = GlobalChatSocketService();
   final List<dynamic> searchedUsers = [];
 
   Future<String> _myUserId() async {
@@ -203,6 +205,169 @@ class ChatProvider extends ChangeNotifier {
     Future.microtask(() {
       notifyListeners();
     });
+  }
+
+
+  // ============================================================
+  // GLOBAL CHAT SOCKET
+  // Keeps ChatListScreen updated in real time for every chat.
+  // ============================================================
+
+  Future<void> connectGlobalSocket() async {
+    if (globalSocket.isConnected || globalSocket.isConnecting) {
+      return;
+    }
+
+    final myIdString = await _myUserId();
+    currentUserId = int.tryParse(myIdString) ?? currentUserId;
+
+    await globalSocket.connect(
+      onMessage: (data) async {
+        debugPrint('GLOBAL CHAT PROVIDER EVENT: $data');
+
+        final action = data['action']?.toString().trim().toLowerCase() ?? '';
+        final type = data['type']?.toString().trim().toLowerCase() ?? '';
+
+        // Connection acknowledgement / heartbeat events are not messages.
+        if (action == 'global_chat_connected' ||
+            type == 'global_chat_connected' ||
+            action == 'pong' ||
+            type == 'pong') {
+          return;
+        }
+
+        final isNewMessage = action == 'new_message' ||
+            action == 'message_created' ||
+            type == 'message' ||
+            type == 'new_message' ||
+            type == 'message_created';
+
+        // New messages are the events that must immediately update the list.
+        if (isNewMessage) {
+          final rawMessage = data['message'] ?? data['payload'] ?? data['data'];
+
+          if (rawMessage is! Map) {
+            debugPrint('GLOBAL CHAT: message payload missing/invalid');
+            return;
+          }
+
+          final rawConversation = data['conversation_id'] ??
+              data['conversation'] ??
+              rawMessage['conversation_id'] ??
+              rawMessage['conversation'];
+
+          String conversationIdString = '';
+
+          if (rawConversation is Map) {
+            conversationIdString = rawConversation['id']?.toString() ?? '';
+          } else {
+            conversationIdString = rawConversation?.toString() ?? '';
+          }
+
+          final conversationId = int.tryParse(conversationIdString.trim());
+
+          if (conversationId == null) {
+            debugPrint('GLOBAL CHAT: conversation id missing/invalid');
+            return;
+          }
+
+          final message = await _mapMessage(rawMessage);
+
+          if (message.type == MessageType.text && message.text.trim().isEmpty) {
+            return;
+          }
+
+          _syncMessageMetaFromJson(
+            conversationId: conversationId,
+            messageId: message.id,
+            json: rawMessage,
+          );
+
+          final key = '$conversationId';
+          conversationMessages.putIfAbsent(key, () => []);
+
+          // The same message can arrive through both the open-chat socket and
+          // the global socket. Message id de-duplication prevents double bubbles
+          // and double unread counts.
+          final alreadyExists = conversationMessages[key]!.any(
+            (existing) => existing.id == message.id,
+          );
+
+          if (alreadyExists) {
+            return;
+          }
+
+          final existingConversationIndex = conversations.indexWhere(
+            (chat) => chat.id == key,
+          );
+
+          if (existingConversationIndex == -1) {
+            // We do not have enough metadata here to safely manufacture a
+            // ChatItem (name/avatar/members). Reload the authoritative list.
+            await loadConversations();
+            return;
+          }
+
+          _addLocalMessage(conversationId, message);
+
+          // _addLocalMessage moves the conversation to the top. Find it again
+          // rather than assuming index 0, keeping this safe if that behavior
+          // changes later.
+          if (!message.isMe && connectedConversationId != conversationId) {
+            final updatedIndex = conversations.indexWhere(
+              (chat) => chat.id == key,
+            );
+
+            if (updatedIndex != -1) {
+              conversations[updatedIndex].unreadCount++;
+              notifyListeners();
+            }
+          }
+
+          return;
+        }
+
+        // Keep the chat-list preview correct after delete events. For the
+        // currently loaded conversation we can apply the same local helper.
+        if (action == 'delete_message' ||
+            action == 'message_deleted' ||
+            type == 'delete_message' ||
+            type == 'message_deleted') {
+          final rawConversation = data['conversation_id'] ?? data['conversation'];
+          final conversationId = int.tryParse(rawConversation?.toString() ?? '');
+          final rawMessage = data['message'] ?? data['payload'] ?? data['data'];
+
+          if (conversationId != null && rawMessage is Map) {
+            _applyDeletePayload(
+              conversationId: conversationId,
+              data: rawMessage,
+            );
+          }
+          return;
+        }
+
+        // Editing can change the last-message preview. The current provider has
+        // no dedicated local edit helper, so refresh the compact conversation
+        // list only for this relatively rare event.
+        if (action == 'edit_message' ||
+            action == 'message_edited' ||
+            type == 'edit_message' ||
+            type == 'message_edited') {
+          await loadConversations();
+          return;
+        }
+      },
+      onError: (err) {
+        debugPrint('GLOBAL CHAT PROVIDER ERROR: $err');
+      },
+      onDisconnected: () {
+        debugPrint('GLOBAL CHAT PROVIDER DISCONNECTED');
+      },
+    );
+  }
+
+  Future<void> disconnectGlobalSocket() async {
+    await globalSocket.disconnect();
   }
 
   void sendSocketTyping({required bool typing}) {
@@ -1265,8 +1430,57 @@ class ChatProvider extends ChangeNotifier {
         json['isMe'] == true ||
         json['mine'] == true;
 
-    final messageType = json['message_type']?.toString() ?? 'text';
-    final type = _backendTypeToMessageType(messageType);
+    final messageType = (json['message_type'] ??
+            json['content_type'] ??
+            json['media_type'] ??
+            '')
+        .toString();
+
+    var type = _backendTypeToMessageType(messageType);
+
+    // WebSocket/API compatibility fallback: some payloads omit message_type
+    // and only send media/attachments. Infer the type so received photo/video
+    // messages do not become empty text messages.
+    if (type == MessageType.text && messageType.trim().isEmpty) {
+      final albumSource = json['media_urls'] ??
+          json['files'] ??
+          json['album_items'] ??
+          json['attachments'];
+
+      if (albumSource is List && albumSource.isNotEmpty) {
+        type = MessageType.mediaAlbum;
+      } else {
+        final mediaValue = (json['media'] ??
+                json['media_url'] ??
+                json['file'] ??
+                json['url'] ??
+                '')
+            .toString()
+            .toLowerCase()
+            .split('?')
+            .first
+            .split('#')
+            .first;
+
+        if (mediaValue.endsWith('.mp4') ||
+            mediaValue.endsWith('.mov') ||
+            mediaValue.endsWith('.m4v') ||
+            mediaValue.endsWith('.webm') ||
+            mediaValue.endsWith('.avi') ||
+            mediaValue.endsWith('.mkv') ||
+            mediaValue.endsWith('.3gp')) {
+          type = MessageType.video;
+        } else if (mediaValue.endsWith('.jpg') ||
+            mediaValue.endsWith('.jpeg') ||
+            mediaValue.endsWith('.png') ||
+            mediaValue.endsWith('.webp') ||
+            mediaValue.endsWith('.gif') ||
+            mediaValue.endsWith('.heic') ||
+            mediaValue.endsWith('.heif')) {
+          type = MessageType.image;
+        }
+      }
+    }
 
     return ChatMessage(
       id: '${json['id']}',
@@ -1339,6 +1553,11 @@ class ChatProvider extends ChangeNotifier {
       case 'mediaalbum':
       case 'album':
       case 'images':
+      case 'mixed_media':
+      case 'mixed-media':
+      case 'media_group':
+      case 'media-group':
+      case 'gallery':
         return MessageType.mediaAlbum;
       case 'video':
         return MessageType.video;
@@ -1609,9 +1828,37 @@ class ChatProvider extends ChangeNotifier {
               item['media'] ??
               item['media_url'] ??
               item['image'] ??
+              item['video'] ??
               item['path'];
+
           final cleanUrl = url?.toString().trim() ?? '';
-          if (cleanUrl.isNotEmpty && cleanUrl != 'null') {
+          if (cleanUrl.isEmpty || cleanUrl == 'null') continue;
+
+          // Preserve attachment type when the backend provides it. We encode
+          // it into the string instead of changing ChatMessage, so this remains
+          // compatible with your existing model and copyWith implementation.
+          final rawType = item['type'] ??
+              item['media_type'] ??
+              item['attachment_type'] ??
+              item['kind'] ??
+              item['file_type'] ??
+              item['content_type'] ??
+              item['mime_type'];
+
+          final type = rawType?.toString().trim().toLowerCase() ?? '';
+          final isVideo = type == 'video' ||
+              type.startsWith('video/') ||
+              type.contains('video');
+          final isImage = type == 'image' ||
+              type == 'photo' ||
+              type.startsWith('image/') ||
+              type.contains('image');
+
+          if (isVideo) {
+            urls.add('video::$cleanUrl');
+          } else if (isImage) {
+            urls.add('image::$cleanUrl');
+          } else {
             urls.add(cleanUrl);
           }
           continue;
@@ -1650,7 +1897,7 @@ class ChatProvider extends ChangeNotifier {
   String _preview(ChatMessage message) {
     switch (message.type) {
       case MessageType.mediaAlbum:
-        return '📷 ${message.mediaUrls?.length ?? 0} Photos';
+        return '🖼️ ${message.mediaUrls?.length ?? 0} media items';
       case MessageType.text:
         return message.text.isEmpty ? 'Message' : message.text;
       case MessageType.image:

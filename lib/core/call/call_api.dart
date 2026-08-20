@@ -26,8 +26,7 @@ class CallApi {
     return ApiClient.dio.post(
       '/chat/calls/$callId/status/',
       data: {
-        // Backend now accepts both action/status if you used my fixed view.
-        // Keeping both makes it safe.
+       
         'action': status,
         'status': status,
       },

@@ -16,10 +16,25 @@ String get baseServerUrl => AppConfig.serverUrl;
 String fixedMediaUrl(String? url) {
   if (url == null || url.trim().isEmpty) return '';
 
-  final decoded = Uri.decodeFull(url.trim());
+  var value = url.trim();
+
+  // Internal album metadata prefixes used by ChatProvider. They let the UI
+  // preserve a backend attachment's declared type without changing ChatMessage.
+  if (value.startsWith('video::')) value = value.substring('video::'.length);
+  if (value.startsWith('image::')) value = value.substring('image::'.length);
+
+  final decoded = Uri.decodeFull(value);
 
   if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
     return decoded;
+  }
+
+  if (decoded.startsWith('file://')) {
+    try {
+      return Uri.parse(decoded).toFilePath();
+    } catch (_) {
+      return decoded.replaceFirst('file://', '');
+    }
   }
 
   if (decoded.startsWith('/media/')) {
@@ -28,6 +43,17 @@ String fixedMediaUrl(String? url) {
 
   if (decoded.startsWith('media/')) {
     return '$baseServerUrl/$decoded';
+  }
+
+  // Local Android/iOS/desktop paths must stay local. The old generic "/"
+  // handling accidentally converted /data/... and /storage/... into server
+  // URLs while the sender was still showing an optimistic local message.
+  if (decoded.startsWith('/data/') ||
+      decoded.startsWith('/storage/') ||
+      decoded.startsWith('/sdcard/') ||
+      decoded.startsWith('/private/') ||
+      RegExp(r'^[A-Za-z]:[\\/]').hasMatch(decoded)) {
+    return decoded;
   }
 
   if (decoded.startsWith('/')) {
@@ -1710,6 +1736,155 @@ class _BrokenMediaBox extends StatelessWidget {
   }
 }
 
+class _AlbumMediaItem {
+  final String path;
+  final _ViewerMediaType type;
+
+  const _AlbumMediaItem({
+    required this.path,
+    required this.type,
+  });
+}
+
+_AlbumMediaItem? _resolveAlbumMediaItem(String rawValue) {
+  var raw = rawValue.trim();
+  if (raw.isEmpty) return null;
+
+  _ViewerMediaType? explicitType;
+
+  if (raw.startsWith('video::')) {
+    explicitType = _ViewerMediaType.video;
+    raw = raw.substring('video::'.length);
+  } else if (raw.startsWith('image::')) {
+    explicitType = _ViewerMediaType.image;
+    raw = raw.substring('image::'.length);
+  }
+
+  final path = fixedMediaUrl(raw);
+  if (path.trim().isEmpty) return null;
+
+  final type = explicitType ??
+      (_looksLikeVideoPath(path)
+          ? _ViewerMediaType.video
+          : _ViewerMediaType.image);
+
+  return _AlbumMediaItem(path: path, type: type);
+}
+
+class _AlbumVideoThumbnail extends StatefulWidget {
+  final String path;
+
+  const _AlbumVideoThumbnail({required this.path});
+
+  @override
+  State<_AlbumVideoThumbnail> createState() => _AlbumVideoThumbnailState();
+}
+
+class _AlbumVideoThumbnailState extends State<_AlbumVideoThumbnail> {
+  VideoPlayerController? _controller;
+  bool _ready = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final path = widget.path;
+      _controller = _isNetworkPath(path)
+          ? VideoPlayerController.networkUrl(Uri.parse(path))
+          : VideoPlayerController.file(File(path));
+
+      await _controller!.initialize();
+      await _controller!.setVolume(0);
+      await _controller!.pause();
+
+      if (!mounted) return;
+      setState(() => _ready = true);
+    } catch (e) {
+      debugPrint('ALBUM VIDEO THUMBNAIL ERROR: $e');
+      if (!mounted) return;
+      setState(() => _failed = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_failed) {
+      return Container(
+        color: Colors.black87,
+        alignment: Alignment.center,
+        child: const Icon(
+          Icons.videocam_off_rounded,
+          color: Colors.white70,
+          size: 34,
+        ),
+      );
+    }
+
+    if (!_ready || _controller == null) {
+      return Container(
+        color: Colors.black87,
+        alignment: Alignment.center,
+        child: const SizedBox(
+          width: 24,
+          height: 24,
+          child: CircularProgressIndicator(
+            strokeWidth: 2.4,
+            color: Colors.white,
+          ),
+        ),
+      );
+    }
+
+    final size = _controller!.value.size;
+    final width = size.width <= 0 ? 16.0 : size.width;
+    final height = size.height <= 0 ? 9.0 : size.height;
+
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ClipRect(
+          child: FittedBox(
+            fit: BoxFit.cover,
+            child: SizedBox(
+              width: width,
+              height: height,
+              child: VideoPlayer(_controller!),
+            ),
+          ),
+        ),
+        Container(color: Colors.black.withOpacity(0.10)),
+        const Center(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black54,
+              shape: BoxShape.circle,
+            ),
+            child: Padding(
+              padding: EdgeInsets.all(7),
+              child: Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 30,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
 class _MediaAlbumBubble extends StatelessWidget {
   final ChatMessage message;
 
@@ -1719,20 +1894,18 @@ class _MediaAlbumBubble extends StatelessWidget {
 
   void _openAlbumViewer(
     BuildContext context,
-    List<String> images,
+    List<_AlbumMediaItem> media,
     int initialIndex,
   ) {
     final items = <_ViewerMedia>[];
 
-    for (var i = 0; i < images.length; i++) {
-      final path = fixedMediaUrl(images[i]);
-      if (path.trim().isEmpty) continue;
-
+    for (var i = 0; i < media.length; i++) {
+      final item = media[i];
       items.add(
         _ViewerMedia(
-          path: path,
-          type: _ViewerMediaType.image,
-          heroTag: 'album_${message.id}_${i}_${path.hashCode}',
+          path: item.path,
+          type: item.type,
+          heroTag: 'album_${message.id}_${i}_${item.path.hashCode}',
         ),
       );
     }
@@ -1746,82 +1919,96 @@ class _MediaAlbumBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final images = (message.mediaUrls ?? [])
-        .map(fixedMediaUrl)
-        .where((path) => path.trim().isNotEmpty)
+    final media = (message.mediaUrls ?? const <String>[])
+        .map(_resolveAlbumMediaItem)
+        .whereType<_AlbumMediaItem>()
         .toList();
 
-    if (images.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (media.isEmpty) return const SizedBox.shrink();
 
-    if (images.length == 1) {
+    if (media.length == 1) {
+      final only = media.first;
+
+      if (only.type == _ViewerMediaType.video) {
+        return _VideoBubble(
+          message: message.copyWith(filePath: only.path),
+        );
+      }
+
       return _ImageBubble(
-        message: message.copyWith(
-          filePath: images.first,
-        ),
+        message: message.copyWith(filePath: only.path),
       );
     }
 
-    final visible = images.take(4).toList();
-    final extra = images.length - 4;
+    final visible = media.take(4).toList();
+    final extra = media.length - 4;
 
-    Widget imageTile(
-      String path,
+    Widget mediaTile(
+      _AlbumMediaItem item,
       int index, {
       bool showOverlay = false,
     }) {
-      return GestureDetector(
-        onTap: () {
-          _openAlbumViewer(context, images, index);
-        },
-        child: Hero(
-          tag: 'album_${message.id}_${index}_${path.hashCode}',
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              _isNetworkPath(path)
-                  ? Image.network(
-                      path,
-                      fit: BoxFit.cover,
-                      filterQuality: FilterQuality.medium,
-                      gaplessPlayback: true,
-                      errorBuilder: (_, __, ___) {
-                        return const _BrokenMediaBox(
-                          icon: Icons.broken_image_rounded,
-                          text: 'Image not found',
-                        );
-                      },
-                    )
-                  : Image.file(
-                      File(path),
-                      fit: BoxFit.cover,
-                      filterQuality: FilterQuality.medium,
-                      gaplessPlayback: true,
-                      errorBuilder: (_, __, ___) {
-                        return const _BrokenMediaBox(
-                          icon: Icons.broken_image_rounded,
-                          text: 'Image not found',
-                        );
-                      },
-                    ),
-              if (showOverlay)
-                Container(
-                  color: Colors.black54,
-                  alignment: Alignment.center,
-                  child: Text(
-                    '+$extra',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w800,
-                      decoration: TextDecoration.none,
-                    ),
-                  ),
+      final content = item.type == _ViewerMediaType.video
+          ? _AlbumVideoThumbnail(path: item.path)
+          : (_isNetworkPath(item.path)
+              ? Image.network(
+                  item.path,
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) {
+                    return const _BrokenMediaBox(
+                      icon: Icons.broken_image_rounded,
+                      text: 'Image not found',
+                    );
+                  },
+                )
+              : Image.file(
+                  File(item.path),
+                  fit: BoxFit.cover,
+                  filterQuality: FilterQuality.medium,
+                  gaplessPlayback: true,
+                  errorBuilder: (_, __, ___) {
+                    return const _BrokenMediaBox(
+                      icon: Icons.broken_image_rounded,
+                      text: 'Image not found',
+                    );
+                  },
+                ));
+
+      Widget tile = Stack(
+        fit: StackFit.expand,
+        children: [
+          content,
+          if (showOverlay)
+            Container(
+              color: Colors.black54,
+              alignment: Alignment.center,
+              child: Text(
+                '+$extra',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.w800,
+                  decoration: TextDecoration.none,
                 ),
-            ],
-          ),
-        ),
+              ),
+            ),
+        ],
+      );
+
+      // Hero is useful for photos. Do not Hero-wrap a live VideoPlayer widget.
+      if (item.type == _ViewerMediaType.image) {
+        tile = Hero(
+          tag: 'album_${message.id}_${index}_${item.path.hashCode}',
+          child: tile,
+        );
+      }
+
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => _openAlbumViewer(context, media, index),
+        child: tile,
       );
     }
 
@@ -1830,32 +2017,28 @@ class _MediaAlbumBubble extends StatelessWidget {
       child: SizedBox(
         width: 244,
         height: 196,
-        child: images.length == 2
+        child: media.length == 2
             ? Row(
                 children: [
-                  Expanded(child: imageTile(visible[0], 0)),
+                  Expanded(child: mediaTile(visible[0], 0)),
                   const SizedBox(width: 2),
-                  Expanded(child: imageTile(visible[1], 1)),
+                  Expanded(child: mediaTile(visible[1], 1)),
                 ],
               )
-            : images.length == 3
+            : media.length == 3
                 ? Row(
                     children: [
                       Expanded(
                         flex: 2,
-                        child: imageTile(visible[0], 0),
+                        child: mediaTile(visible[0], 0),
                       ),
                       const SizedBox(width: 2),
                       Expanded(
                         child: Column(
                           children: [
-                            Expanded(
-                              child: imageTile(visible[1], 1),
-                            ),
+                            Expanded(child: mediaTile(visible[1], 1)),
                             const SizedBox(height: 2),
-                            Expanded(
-                              child: imageTile(visible[2], 2),
-                            ),
+                            Expanded(child: mediaTile(visible[2], 2)),
                           ],
                         ),
                       ),
@@ -1866,13 +2049,9 @@ class _MediaAlbumBubble extends StatelessWidget {
                       Expanded(
                         child: Row(
                           children: [
-                            Expanded(
-                              child: imageTile(visible[0], 0),
-                            ),
+                            Expanded(child: mediaTile(visible[0], 0)),
                             const SizedBox(width: 2),
-                            Expanded(
-                              child: imageTile(visible[1], 1),
-                            ),
+                            Expanded(child: mediaTile(visible[1], 1)),
                           ],
                         ),
                       ),
@@ -1880,12 +2059,10 @@ class _MediaAlbumBubble extends StatelessWidget {
                       Expanded(
                         child: Row(
                           children: [
-                            Expanded(
-                              child: imageTile(visible[2], 2),
-                            ),
+                            Expanded(child: mediaTile(visible[2], 2)),
                             const SizedBox(width: 2),
                             Expanded(
-                              child: imageTile(
+                              child: mediaTile(
                                 visible[3],
                                 3,
                                 showOverlay: extra > 0,

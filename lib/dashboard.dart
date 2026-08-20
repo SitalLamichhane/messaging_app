@@ -54,7 +54,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
             : storedUserId;
       });
 
-      await context.read<ChatProvider>().loadConversations();
+      final provider = context.read<ChatProvider>();
+      await provider.loadConversations();
+      await provider.connectGlobalSocket();
     });
   }
 
@@ -125,8 +127,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   String _buildPreview(ChatItem chat) {
+    // ChatProvider updates chat.message immediately for real-time events.
+    // Prefer it over chat.messages.last, which may only contain the message
+    // snapshot returned by the last REST conversation-list request.
+    final preview = chat.message.trim();
+
+    if (preview.isNotEmpty) {
+      return preview;
+    }
+
     if (chat.messages.isEmpty) {
-      return chat.message;
+      return 'Start chatting';
     }
 
     final latest = chat.messages.last;

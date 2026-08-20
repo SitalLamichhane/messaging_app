@@ -2,7 +2,7 @@ name: hiddenly
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.10.7
@@ -54,6 +54,7 @@ dependencies:
   device_info_plus: ^11.3.0
 
   cupertino_icons: ^1.0.8
+  livekit_client: ^2.5.0+hotfix.3
 
 
 dependency_overrides:

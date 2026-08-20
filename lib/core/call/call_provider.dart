@@ -1,6 +1,7 @@
 // lib/core/call/call_provider.dart
 
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -49,6 +50,9 @@ class CallNotifier extends StateNotifier<CallState> {
   bool _socketEventsListening = false;
   bool _waitingForOfferAfterCallKitAccept = false;
   bool _iceRestarting = false;
+  bool _answeringOffer = false;
+  bool _remoteAnswerApplied = false;
+  String? _lastAnsweredOfferFingerprint;
 
   String? _conversationId;
   String? _callId;
@@ -84,6 +88,97 @@ class CallNotifier extends StateNotifier<CallState> {
     return value.trim();
   }
 
+  String _generateCallId() {
+    final random = Random.secure();
+    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+
+    String hex(int value) => value.toRadixString(16).padLeft(2, '0');
+    final value = bytes.map(hex).join();
+
+    return '${value.substring(0, 8)}-'
+        '${value.substring(8, 12)}-'
+        '${value.substring(12, 16)}-'
+        '${value.substring(16, 20)}-'
+        '${value.substring(20)}';
+  }
+
+  Map<String, dynamic> _payloadFrom(Map<String, dynamic> data) {
+    final raw = data['payload'];
+    return raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : Map<String, dynamic>.from(data);
+  }
+
+  String _payloadCallId(Map<String, dynamic> payload) {
+    return (payload['call_id'] ?? payload['callId'])?.toString().trim() ?? '';
+  }
+
+  String _payloadConversationId(Map<String, dynamic> payload) {
+    return (payload['conversation_id'] ?? payload['conversationId'])
+            ?.toString()
+            .trim() ??
+        '';
+  }
+
+  String _payloadFromUser(Map<String, dynamic> payload) {
+    return (payload['from'] ??
+                payload['from_user'] ??
+                payload['fromUser'] ??
+                payload['caller_id'] ??
+                payload['callerId'])
+            ?.toString()
+            .trim() ??
+        '';
+  }
+
+  bool _matchesActiveEvent(
+    Map<String, dynamic> payload, {
+    bool allowAdoptCallId = false,
+  }) {
+    final incomingConversationId = _payloadConversationId(payload);
+    final incomingCallId = _payloadCallId(payload);
+    final fromUser = _payloadFromUser(payload);
+
+    final activeConversationId = _conversationId?.trim() ?? '';
+    final activeCallId = _callId?.trim() ?? '';
+    final expectedRemoteUser = state.receiverId?.trim() ?? '';
+
+    if (incomingConversationId.isNotEmpty &&
+        activeConversationId.isNotEmpty &&
+        incomingConversationId != activeConversationId) {
+      return false;
+    }
+
+    if (fromUser.isNotEmpty &&
+        expectedRemoteUser.isNotEmpty &&
+        fromUser != expectedRemoteUser) {
+      return false;
+    }
+
+    if (activeCallId.isNotEmpty && incomingCallId.isEmpty) {
+      return false;
+    }
+
+    if (incomingCallId.isNotEmpty && activeCallId.isNotEmpty) {
+      return incomingCallId == activeCallId;
+    }
+
+    if (incomingCallId.isNotEmpty &&
+        activeCallId.isEmpty &&
+        allowAdoptCallId) {
+      _callId = incomingCallId;
+      SocketService.instance.setActiveCallContext(
+        callId: _callId,
+        conversationId: _conversationId,
+      );
+    }
+
+    return true;
+  }
+
   Future<void> startCall({
     required String currentUserId,
     required String receiverId,
@@ -107,12 +202,35 @@ class CallNotifier extends StateNotifier<CallState> {
       _waitingForOfferAfterCallKitAccept = false;
       _iceRestarting = false;
 
-      _conversationId = conversationId;
-      _callId = callId;
+      final normalizedConversationId = conversationId?.trim() ?? '';
+      if (normalizedConversationId.isEmpty) {
+        throw ArgumentError('conversationId is required for a call');
+      }
+
+      _conversationId = normalizedConversationId;
+
+      final normalizedCallId = callId?.trim() ?? '';
+      _callId = normalizedCallId.isNotEmpty
+          ? normalizedCallId
+          : (isCaller ? _generateCallId() : null);
+
       _currentUserNameForOffer = currentUserName.trim();
       _currentUserAvatarForOffer = currentUserAvatar.trim();
+      _answeringOffer = false;
+      _remoteAnswerApplied = false;
+      _lastAnsweredOfferFingerprint = null;
 
-      debugPrint('CALL PROVIDER BACKEND CALL ID: $_callId');
+      SocketService.instance.setActiveCallContext(
+        callId: _callId,
+        conversationId: _conversationId,
+      );
+
+      await SocketService.instance.ensureConnected();
+      if (!SocketService.instance.isConnected) {
+        throw StateError('Call signaling socket is not connected');
+      }
+
+      debugPrint('CALL PROVIDER CALL ID: $_callId');
 
       _durationTimer?.cancel();
       _timeoutTimer?.cancel();
@@ -147,6 +265,7 @@ class CallNotifier extends StateNotifier<CallState> {
           incomingOffer: incomingOffer,
           isCameraOff: !isVideoCall,
           isRemoteCameraOff: !isVideoCall,
+          isSpeakerOn: isVideoCall,
           duration: Duration.zero,
         ),
       );
@@ -194,8 +313,12 @@ class CallNotifier extends StateNotifier<CallState> {
               remoteRenderer: webrtc.remoteRenderer,
             ),
           );
-
-          setConnected();
+        },
+        onConnectionEstablished: () async {
+          await setConnected();
+        },
+        onConnectionLost: () {
+          debugPrint('CALL MEDIA TEMPORARILY DISCONNECTED');
         },
         onIceRestartNeeded: () async {
           await _restartIceAndSendOffer();
@@ -305,14 +428,12 @@ class CallNotifier extends StateNotifier<CallState> {
     if (!_canUpdate || _isFinalStatus(state.status)) return;
     if (state.isCaller) return;
 
-    final rawPayload = data['payload'];
+    final payload = _payloadFrom(data);
 
-    if (rawPayload is! Map) {
-      debugPrint('CALL OFFER ERROR: payload missing');
+    if (!_matchesActiveEvent(payload, allowAdoptCallId: true)) {
+      debugPrint('CALL OFFER IGNORED: it does not belong to the active call');
       return;
     }
-
-    final payload = Map<String, dynamic>.from(rawPayload);
 
     final fromUser = payload['from']?.toString() ??
         payload['from_user']?.toString() ??
@@ -415,9 +536,30 @@ class CallNotifier extends StateNotifier<CallState> {
     required String currentUserId,
     required String receiverId,
   }) async {
+    final offerType = offer['type']?.toString().trim() ?? '';
+    final offerSdp = offer['sdp']?.toString().trim() ?? '';
+
+    if (offerType.isEmpty || offerSdp.isEmpty) {
+      debugPrint('ANSWER INCOMING OFFER ERROR: invalid offer');
+      return;
+    }
+
+    final fingerprint = '$offerType:${offerSdp.hashCode}';
+
+    if (_lastAnsweredOfferFingerprint == fingerprint) {
+      debugPrint('DUPLICATE CALL OFFER IGNORED');
+      return;
+    }
+
+    if (_answeringOffer) {
+      debugPrint('CALL OFFER IGNORED: answer creation already in progress');
+      return;
+    }
+
+    _answeringOffer = true;
+
     try {
       await webrtc.setRemoteDescription(offer);
-
       final answer = await webrtc.createAnswer();
 
       SocketService.instance.emit(
@@ -436,6 +578,8 @@ class CallNotifier extends StateNotifier<CallState> {
         queueIfDisconnected: true,
       );
 
+      _lastAnsweredOfferFingerprint = fingerprint;
+
       _safeState(
         state.copyWith(
           incomingOffer: offer,
@@ -448,49 +592,49 @@ class CallNotifier extends StateNotifier<CallState> {
     } catch (e, st) {
       debugPrint('ANSWER INCOMING OFFER ERROR: $e');
       debugPrint(st.toString());
-
       await _finishCall(CallStatus.failed, emitSocket: false);
+    } finally {
+      _answeringOffer = false;
     }
   }
 
   Future<void> _handleCallAnswer(Map<String, dynamic> data) async {
     if (!_canUpdate || _isFinalStatus(state.status)) return;
-    if (!state.isCaller) return;
+    if (!state.isCaller || _remoteAnswerApplied) return;
 
-    _timeoutTimer?.cancel();
+    final payload = _payloadFrom(data);
 
-    final rawPayload = data['payload'];
-    if (rawPayload is! Map) return;
-
-    final payload = Map<String, dynamic>.from(rawPayload);
+    if (!_matchesActiveEvent(payload, allowAdoptCallId: false)) {
+      debugPrint('CALL ANSWER IGNORED: it does not belong to the active call');
+      return;
+    }
 
     final rawAnswer = payload['answer'];
-
     Map<String, dynamic>? answer;
 
-    if (rawAnswer is Map<String, dynamic>) {
-      answer = Map<String, dynamic>.from(rawAnswer);
-    } else if (rawAnswer is Map) {
+    if (rawAnswer is Map) {
       answer = Map<String, dynamic>.from(rawAnswer);
     } else {
-      final type = payload['type']?.toString() ?? '';
-      final sdp = payload['sdp']?.toString() ?? '';
+      final type = payload['type']?.toString().trim() ?? '';
+      final sdp = payload['sdp']?.toString().trim() ?? '';
 
-      if (type.trim().isNotEmpty && sdp.trim().isNotEmpty) {
-        answer = {
-          'type': type,
-          'sdp': sdp,
-        };
+      if (type.isNotEmpty && sdp.isNotEmpty) {
+        answer = <String, dynamic>{'type': type, 'sdp': sdp};
       }
     }
 
-    if (answer == null) {
-      debugPrint('CALL ANSWER MISSING SDP: $payload');
+    final type = answer?['type']?.toString().trim() ?? '';
+    final sdp = answer?['sdp']?.toString().trim() ?? '';
+
+    if (type.isEmpty || sdp.isEmpty) {
+      debugPrint('CALL ANSWER MISSING SDP');
       return;
     }
 
     try {
-      await webrtc.setRemoteDescription(answer);
+      await webrtc.setRemoteDescription(answer!);
+      _remoteAnswerApplied = true;
+      _timeoutTimer?.cancel();
 
       _safeState(
         state.copyWith(
@@ -498,10 +642,8 @@ class CallNotifier extends StateNotifier<CallState> {
           remoteRenderer: webrtc.remoteRenderer,
         ),
       );
-
-      await setConnected();
     } catch (e, st) {
-      debugPrint('Call answer error: $e');
+      debugPrint('CALL ANSWER ERROR: $e');
       debugPrint(st.toString());
       await _finishCall(CallStatus.failed, emitSocket: false);
     }
@@ -510,18 +652,20 @@ class CallNotifier extends StateNotifier<CallState> {
   Future<void> _handleIceCandidate(Map<String, dynamic> data) async {
     if (!_canUpdate || _isFinalStatus(state.status)) return;
 
-    final rawPayload = data['payload'];
-    if (rawPayload is! Map) return;
+    final payload = _payloadFrom(data);
 
-    final payload = Map<String, dynamic>.from(rawPayload);
-    final candidate = payload['candidate'];
+    if (!_matchesActiveEvent(payload, allowAdoptCallId: true)) {
+      debugPrint('ICE CANDIDATE IGNORED: wrong active call');
+      return;
+    }
 
-    if (candidate == null) return;
+    final rawCandidate = payload['candidate'];
+    if (rawCandidate is! Map) return;
 
     try {
-      await webrtc.addCandidate(candidate);
+      await webrtc.addCandidate(Map<String, dynamic>.from(rawCandidate));
     } catch (e, st) {
-      debugPrint('ICE error: $e');
+      debugPrint('ICE ERROR: $e');
       debugPrint(st.toString());
     }
   }
@@ -533,6 +677,7 @@ class CallNotifier extends StateNotifier<CallState> {
     if (rawPayload is! Map) return;
 
     final payload = Map<String, dynamic>.from(rawPayload);
+    if (!_matchesActiveEvent(payload)) return;
     final rawOffer = payload['offer'];
 
     if (rawOffer is! Map) return;
@@ -607,6 +752,7 @@ class CallNotifier extends StateNotifier<CallState> {
     if (rawPayload is! Map) return;
 
     final payload = Map<String, dynamic>.from(rawPayload);
+    if (!_matchesActiveEvent(payload)) return;
     final rawAnswer = payload['answer'];
 
     if (rawAnswer is! Map) return;
@@ -639,6 +785,7 @@ class CallNotifier extends StateNotifier<CallState> {
           isVideoCall: true,
           isCameraOff: false,
           isRemoteCameraOff: false,
+          isSpeakerOn: true,
           isVideoUpgradeRequesting: false,
           isVideoUpgradeRejected: false,
           localRenderer: webrtc.localRenderer,
@@ -660,6 +807,7 @@ class CallNotifier extends StateNotifier<CallState> {
           isVideoCall: false,
           isCameraOff: true,
           isRemoteCameraOff: true,
+          isSpeakerOn: false,
           isVideoUpgradeRequesting: false,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
@@ -679,6 +827,7 @@ class CallNotifier extends StateNotifier<CallState> {
     if (rawPayload is! Map) return;
 
     final payload = Map<String, dynamic>.from(rawPayload);
+    if (!_matchesActiveEvent(payload)) return;
 
     final fromUserId = payload['from']?.toString();
 
@@ -710,11 +859,17 @@ class CallNotifier extends StateNotifier<CallState> {
           payload['isVideoCall']?.toString() == 'true' ||
           payload['is_video_call']?.toString() == 'true';
 
+      if (!remoteIsVideoCall) {
+        await webrtc.disableVideoHard();
+        await webrtc.setSpeaker(false);
+      }
+
       _safeState(
         state.copyWith(
           isVideoCall: remoteIsVideoCall,
           isCameraOff: !remoteIsVideoCall,
           isRemoteCameraOff: !remoteIsVideoCall,
+          isSpeakerOn: remoteIsVideoCall ? state.isSpeakerOn : false,
           isVideoUpgradeRequesting: false,
           hasPendingVideoUpgrade: false,
           clearPendingVideoOffer: true,
@@ -728,13 +883,18 @@ class CallNotifier extends StateNotifier<CallState> {
   Future<void> _handleVideoUpgradeRejected(Map<String, dynamic> data) async {
     if (!_canUpdate || _isFinalStatus(state.status)) return;
 
+    final payload = _payloadFrom(data);
+    if (!_matchesActiveEvent(payload)) return;
+
     await webrtc.disableVideoHard();
+    await webrtc.setSpeaker(false);
 
     _safeState(
       state.copyWith(
         isVideoCall: false,
         isCameraOff: true,
         isRemoteCameraOff: true,
+        isSpeakerOn: false,
         isVideoUpgradeRequesting: false,
         isVideoUpgradeRejected: true,
         localRenderer: webrtc.localRenderer,
@@ -746,6 +906,8 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   Future<void> _handleCallReject(Map<String, dynamic> data) async {
+    final payload = _payloadFrom(data);
+    if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate || _isFinalStatus(state.status)) return;
 
     debugPrint('CALL REJECT RECEIVED: $data');
@@ -758,6 +920,8 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   Future<void> _handleCallEnd(Map<String, dynamic> data) async {
+    final payload = _payloadFrom(data);
+    if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate || _isFinalStatus(state.status)) return;
 
     debugPrint('CALL END RECEIVED: $data');
@@ -770,16 +934,22 @@ class CallNotifier extends StateNotifier<CallState> {
   }
 
   Future<void> _handleCallLeave(Map<String, dynamic> data) async {
+    final payload = _payloadFrom(data);
+    if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate) return;
     await _finishCall(CallStatus.ended, emitSocket: false);
   }
 
   Future<void> _handleCallBusy(Map<String, dynamic> data) async {
+    final payload = _payloadFrom(data);
+    if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate) return;
     await _finishCall(CallStatus.busy, emitSocket: false);
   }
 
   Future<void> _handleCallTimeout(Map<String, dynamic> data) async {
+    final payload = _payloadFrom(data);
+    if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate || _isFinalStatus(state.status)) return;
 
     debugPrint('CALL TIMEOUT RECEIVED: $data');
@@ -804,6 +974,9 @@ class CallNotifier extends StateNotifier<CallState> {
     _iceRestarting = true;
 
     try {
+      await SocketService.instance.ensureConnected();
+      if (!SocketService.instance.isConnected) return;
+
       final offer = await webrtc.restartIce();
 
       SocketService.instance.emit(
@@ -846,7 +1019,13 @@ class CallNotifier extends StateNotifier<CallState> {
     if (currentUserId == null || receiverId == null) return;
 
     try {
-      final offer = await webrtc.createOffer();
+      await SocketService.instance.ensureConnected();
+      if (!SocketService.instance.isConnected) return;
+
+      final existing = await webrtc.currentLocalDescription();
+      final offer = existing != null && existing.type == 'offer'
+          ? existing
+          : await webrtc.createOffer();
 
       SocketService.instance.emit(
         CallSocketEvents.callOffer,
@@ -917,6 +1096,7 @@ class CallNotifier extends StateNotifier<CallState> {
       _safeState(
         state.copyWith(
           isCameraOff: false,
+          isSpeakerOn: true,
           isVideoUpgradeRequesting: true,
           isVideoUpgradeRejected: false,
           localRenderer: webrtc.localRenderer,
@@ -930,12 +1110,14 @@ class CallNotifier extends StateNotifier<CallState> {
       _switchingVideo = false;
 
       await webrtc.disableVideoHard();
+      await webrtc.setSpeaker(false);
 
       _safeState(
         state.copyWith(
           isVideoCall: false,
           isCameraOff: true,
           isRemoteCameraOff: true,
+          isSpeakerOn: false,
           isVideoUpgradeRequesting: false,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
@@ -986,6 +1168,7 @@ class CallNotifier extends StateNotifier<CallState> {
           isVideoCall: true,
           isCameraOff: false,
           isRemoteCameraOff: false,
+          isSpeakerOn: true,
           hasPendingVideoUpgrade: false,
           isVideoUpgradeRequesting: false,
           isVideoUpgradeRejected: false,
@@ -1047,7 +1230,7 @@ class CallNotifier extends StateNotifier<CallState> {
 
     try {
       await webrtc.disableVideoHard();
-      await webrtc.setSpeaker(true);
+      await webrtc.setSpeaker(false);
 
       SocketService.instance.emit(
         CallSocketEvents.callVideoToggle,
@@ -1071,6 +1254,7 @@ class CallNotifier extends StateNotifier<CallState> {
           isVideoCall: false,
           isCameraOff: true,
           isRemoteCameraOff: true,
+          isSpeakerOn: false,
           isVideoUpgradeRequesting: false,
           hasPendingVideoUpgrade: false,
           clearPendingVideoOffer: true,
@@ -1177,12 +1361,13 @@ class CallNotifier extends StateNotifier<CallState> {
       await CallSoundService.instance.stop();
     } catch (_) {}
 
-    await webrtc.setSpeaker(true);
+    final useSpeaker = state.isVideoCall;
+    await webrtc.setSpeaker(useSpeaker);
 
     _safeState(
       state.copyWith(
         status: CallStatus.connected,
-        isSpeakerOn: true,
+        isSpeakerOn: useSpeaker,
       ),
     );
 
@@ -1355,7 +1540,7 @@ class CallNotifier extends StateNotifier<CallState> {
           },
           targetUser: receiverId,
           conversationId: _conversationId,
-          queueIfDisconnected: true,
+          queueIfDisconnected: false,
         );
       }
     }
@@ -1395,39 +1580,31 @@ class CallNotifier extends StateNotifier<CallState> {
       debugPrint('CALL PROVIDER GLOBAL FLAG CLEANUP ERROR: $e');
     }
 
+    SocketService.instance.clearActiveCallContext(callId: _callId);
+
     _conversationId = null;
     _callId = null;
     _waitingForOfferAfterCallKitAccept = false;
     _iceRestarting = false;
+    _answeringOffer = false;
+    _remoteAnswerApplied = false;
+    _lastAnsweredOfferFingerprint = null;
     _switchingVideo = false;
     _finishing = false;
   }
 
   Future<void> _disconnectConversationCallSocket() async {
-    /*
-      Disconnect only the active /ws/call/<conversation_id>/ socket.
-
-      This is required after:
-      - receiver taps Decline
-      - caller receives call_reject
-      - call_end / call_timeout / busy / failed final cleanup
-
-      Do NOT disconnect the global incoming-call socket here.
-      Global socket must stay alive after login for future incoming calls.
-    */
     try {
-      if (SocketService.instance.isConnected) {
-        debugPrint('CALL PROVIDER: disconnecting conversation call socket');
+      debugPrint('CALL PROVIDER: disconnecting conversation call socket');
 
-        await SocketService.instance.disconnect(
-          clearHandlers: false,
-          clearQueue: true,
-          clearCache: true,
-          forgetUrl: true,
-        );
+      await SocketService.instance.disconnect(
+        clearHandlers: false,
+        clearQueue: true,
+        clearCache: true,
+        forgetUrl: true,
+      );
 
-        debugPrint('CALL PROVIDER: conversation call socket disconnected');
-      }
+      debugPrint('CALL PROVIDER: conversation call socket disconnected');
     } catch (e, st) {
       debugPrint('CALL PROVIDER SOCKET DISCONNECT ERROR: $e');
       debugPrint(st.toString());
@@ -1446,6 +1623,9 @@ class CallNotifier extends StateNotifier<CallState> {
     _switchingVideo = false;
     _waitingForOfferAfterCallKitAccept = false;
     _iceRestarting = false;
+    _answeringOffer = false;
+    _remoteAnswerApplied = false;
+    _lastAnsweredOfferFingerprint = null;
     _conversationId = null;
     _callId = null;
 
@@ -1514,6 +1694,9 @@ class CallNotifier extends StateNotifier<CallState> {
     _callId = null;
     _waitingForOfferAfterCallKitAccept = false;
     _iceRestarting = false;
+    _answeringOffer = false;
+    _remoteAnswerApplied = false;
+    _lastAnsweredOfferFingerprint = null;
     _finishing = false;
     _switchingVideo = false;
 

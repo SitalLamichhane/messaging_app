@@ -12,6 +12,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/config/app_config.dart';
+import 'package:hiddenly/group/group_call_screen.dart'
+    show GroupCallScreen;
+import 'package:hiddenly/group/group_call_token_service.dart'
+    show GroupCallTokenService;
 import 'package:saver_gallery/saver_gallery.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -250,7 +254,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     return '';
   }
-
 
   String _targetUserIdForBlock({String currentUserId = ''}) {
     if (widget.chat.isGroup) return '';
@@ -765,7 +768,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       case MessageType.image:
         return '📷 Photo';
       case MessageType.mediaAlbum:
-        return '📷 ${msg.mediaUrls?.length ?? 0} Photos';
+        return '🖼️ ${msg.mediaUrls?.length ?? 0} media items';
       case MessageType.video:
         return '🎥 Video';
       case MessageType.file:
@@ -2847,29 +2850,29 @@ void _openReactionPicker(
       });
     }
 
-    final imageFiles = <File>[];
-    final videoFiles = <File>[];
+    // Keep the exact order selected by the user.
+    final validAssets = <AssetEntity>[];
+    final validFiles = <File>[];
     int skippedCount = 0;
 
     try {
       for (final asset in selectedAssets) {
-        final file = await asset.file;
+        if (asset.type != AssetType.image && asset.type != AssetType.video) {
+          skippedCount++;
+          continue;
+        }
 
+        final file = await asset.file;
         if (file == null || file.path.trim().isEmpty) {
           skippedCount++;
           continue;
         }
 
-        if (asset.type == AssetType.image) {
-          imageFiles.add(file);
-        } else if (asset.type == AssetType.video) {
-          videoFiles.add(file);
-        } else {
-          skippedCount++;
-        }
+        validAssets.add(asset);
+        validFiles.add(file);
       }
 
-      if (imageFiles.isEmpty && videoFiles.isEmpty) {
+      if (validFiles.isEmpty) {
         if (!mounted) return;
         _showMessengerPop(
           'Selected media is not supported',
@@ -2879,35 +2882,50 @@ void _openReactionPicker(
       }
 
       final provider = _chatProvider;
+      final pendingImages = <File>[];
 
-      // Messenger-like mixed media rule:
-      // - 1 photo = single image bubble
-      // - many photos = one album/grid bubble
-      // - videos = video messages
-      // - mixed selection = photos first as image/album, then videos
-      if (imageFiles.isNotEmpty) {
-        if (imageFiles.length == 1) {
+      // Consecutive photos are sent as one album. Videos are sent as video
+      // messages. This preserves mixed selection order instead of moving all
+      // photos before all videos.
+      Future<void> flushPendingImages() async {
+        if (pendingImages.isEmpty) return;
+
+        if (pendingImages.length == 1) {
           await provider.sendImage(
             conversationId: conversationId,
-            image: imageFiles.first,
+            image: pendingImages.first,
           );
         } else {
           await provider.sendImages(
             conversationId: conversationId,
-            images: imageFiles,
+            images: List<File>.from(pendingImages),
           );
         }
+
+        pendingImages.clear();
       }
 
-      for (final videoFile in videoFiles) {
-        final duration = await _videoDurationInSeconds(videoFile);
+      for (var i = 0; i < validFiles.length; i++) {
+        final asset = validAssets[i];
+        final file = validFiles[i];
 
+        if (asset.type == AssetType.image) {
+          pendingImages.add(file);
+          continue;
+        }
+
+        // A video breaks the current photo run, so flush the photos first.
+        await flushPendingImages();
+
+        final duration = await _videoDurationInSeconds(file);
         await provider.sendVideo(
           conversationId: conversationId,
-          video: videoFile,
+          video: file,
           duration: duration,
         );
       }
+
+      await flushPendingImages();
 
       if (!mounted) return;
 
@@ -2921,12 +2939,13 @@ void _openReactionPicker(
 
       if (skippedCount > 0) {
         _showMessengerPop(
-          '$skippedCount unsupported file skipped',
+          '$skippedCount unsupported file${skippedCount == 1 ? '' : 's'} skipped',
           icon: Icons.info_rounded,
         );
       }
-    } catch (e) {
+    } catch (e, st) {
       debugPrint('MESSENGER GALLERY SEND ERROR: $e');
+      debugPrint('$st');
 
       if (!mounted) return;
       _showMessengerPop(
@@ -3467,38 +3486,32 @@ Future<void> _startCall(bool isVideo) async {
       return;
     }
 
-    final accessToken = await ApiClient.storage.read(key: 'access');
     final currentUserId =
         ((await ApiClient.storage.read(key: 'user_id')) ?? '').trim();
 
-    final storedName =
-        ((await ApiClient.storage.read(key: 'user_name')) ??
-                (await ApiClient.storage.read(key: 'full_name')) ??
-                '')
-            .trim();
+    final storedUserName =
+        ((await ApiClient.storage.read(key: 'user_name')) ?? '').trim();
 
-    final currentUserName = storedName.isEmpty ? 'You' : storedName;
+    final storedFullName =
+        ((await ApiClient.storage.read(key: 'full_name')) ?? '').trim();
 
-    final currentUserAvatar =
-        ((await ApiClient.storage.read(key: 'user_avatar')) ??
-                (await ApiClient.storage.read(key: 'avatar_url')) ??
-                (await ApiClient.storage.read(key: 'image_url')) ??
-                '')
-            .trim();
+    final currentUserName = storedUserName.isNotEmpty
+        ? storedUserName
+        : storedFullName.isNotEmpty
+            ? storedFullName
+            : 'User';
 
-    if (accessToken == null ||
-        accessToken.trim().isEmpty ||
-        currentUserId.isEmpty) {
+    if (currentUserId.isEmpty) {
       _showMessengerPop(
-        'Login again to start call',
+        'Login again to start the group call',
         icon: Icons.error_rounded,
       );
       return;
     }
 
-    final conversationId = int.tryParse(latestChat.id);
+    final roomName = latestChat.id.toString().trim();
 
-    if (conversationId == null) {
+    if (roomName.isEmpty) {
       _showMessengerPop(
         'Conversation is not ready',
         icon: Icons.error_rounded,
@@ -3507,13 +3520,14 @@ Future<void> _startCall(bool isVideo) async {
     }
 
     final otherMembers = latestChat.members.where((member) {
-      final id = member.id.toString().trim();
-      return id.isNotEmpty && id != currentUserId;
+      final memberId = member.id.toString().trim();
+
+      return memberId.isNotEmpty && memberId != currentUserId;
     }).toList();
 
-    if (otherMembers.length < 2) {
+    if (otherMembers.isEmpty) {
       _showMessengerPop(
-        'Group call needs at least 3 members',
+        'No other group member is available',
         icon: Icons.groups_rounded,
       );
       return;
@@ -3524,16 +3538,11 @@ Future<void> _startCall(bool isVideo) async {
     });
 
     try {
-      await GlobalCallHandler.connectCallSocket(
-        url:
-            '${AppConfig.wsBaseUrl}/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
-        currentUserId: currentUserId,
-        currentUserName: currentUserName,
-        currentUserAvatar: currentUserAvatar,
+      final tokenResponse = await GroupCallTokenService.getToken(
+        userId: currentUserId,
+        userName: currentUserName,
+        roomName: roomName,
       );
-
-      final groupCallId =
-          'group_${latestChat.id}_${DateTime.now().millisecondsSinceEpoch}';
 
       AppChatData.addCallLog(
         chat: latestChat,
@@ -3543,30 +3552,19 @@ Future<void> _startCall(bool isVideo) async {
 
       if (!mounted) return;
 
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => CallScreen(
-            name: latestChat.name.trim().isEmpty
-                ? 'Group call'
-                : latestChat.name,
-            avatarUrl: latestChat.avatarUrl,
-            isVideoCall: isVideo,
-            chat: latestChat,
-            currentUserId: currentUserId,
-            currentUserName: currentUserName,
-            currentUserAvatar: currentUserAvatar,
-            receiverId: '',
-            isCaller: true,
-            conversationId: latestChat.id,
-            callId: groupCallId,
-            isGroupCall: true,
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => GroupCallScreen(
+            serverUrl: tokenResponse.url,
+            token: tokenResponse.token,
+            roomName: tokenResponse.roomName,
+            startWithVideo: isVideo,
           ),
         ),
       );
-    } catch (e, st) {
-      debugPrint('GROUP CALL START ERROR: $e');
-      debugPrint(st.toString());
+    } catch (error, stackTrace) {
+      debugPrint('GROUP CALL START ERROR: $error');
+      debugPrintStack(stackTrace: stackTrace);
 
       if (!mounted) return;
 
@@ -5260,6 +5258,673 @@ class _MediaAlbumGrid extends StatelessWidget {
   }
 }
 
+
+String _resolveMessagePhotoPath(String value) {
+  final cleanValue = value.trim();
+  if (cleanValue.isEmpty) return '';
+
+  if (cleanValue.startsWith('http://') ||
+      cleanValue.startsWith('https://')) {
+    return cleanValue;
+  }
+
+  if (cleanValue.startsWith('file://')) {
+    return Uri.parse(cleanValue).toFilePath();
+  }
+
+  if (cleanValue.startsWith('/media/') ||
+      cleanValue.startsWith('media/')) {
+    final mediaBaseUrl = AppConfig.apiBaseUrl.replaceFirst('/api', '');
+    return cleanValue.startsWith('/')
+        ? '$mediaBaseUrl$cleanValue'
+        : '$mediaBaseUrl/$cleanValue';
+  }
+
+  return cleanValue;
+}
+
+bool _isRemoteMessagePhoto(String value) {
+  final lower = value.trim().toLowerCase();
+  return lower.startsWith('http://') || lower.startsWith('https://');
+}
+
+class _MessengerMessageMedia extends StatelessWidget {
+  final ChatMessage message;
+  final bool isDark;
+
+  const _MessengerMessageMedia({
+    required this.message,
+    required this.isDark,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // IMPORTANT:
+    // mediaAlbum may contain both photos and videos. The old implementation
+    // forced every album URL through Image.file/Image.network, which makes
+    // received video attachments appear broken. DynamicMessageMedia now owns
+    // album rendering because it detects each item's real media type.
+    if (message.type == MessageType.mediaAlbum ||
+        message.type == MessageType.video) {
+      return DynamicMessageMedia(
+        message: message,
+        isDark: isDark,
+      );
+    }
+
+    // Keep the existing Messenger-style single-photo viewer.
+    if (message.type == MessageType.image) {
+      final photo = _resolveMessagePhotoPath(message.filePath ?? '');
+      if (photo.isNotEmpty) {
+        return _MessengerPhotoGrid(photos: <String>[photo]);
+      }
+    }
+
+    return DynamicMessageMedia(
+      message: message,
+      isDark: isDark,
+    );
+  }
+}
+
+class _MessengerPhotoGrid extends StatelessWidget {
+  final List<String> photos;
+
+  const _MessengerPhotoGrid({
+    required this.photos,
+  });
+
+  void _openViewer(BuildContext context, int initialIndex) {
+    Navigator.of(context).push(
+      PageRouteBuilder<void>(
+        opaque: true,
+        transitionDuration: const Duration(milliseconds: 220),
+        reverseTransitionDuration: const Duration(milliseconds: 180),
+        pageBuilder: (_, animation, __) {
+          return FadeTransition(
+            opacity: CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOut,
+              reverseCurve: Curves.easeIn,
+            ),
+            child: _MessengerPhotoViewer(
+              photos: photos,
+              initialIndex: initialIndex,
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _tile(
+    BuildContext context,
+    int index, {
+    int hiddenCount = 0,
+  }) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () => _openViewer(context, index),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          _MessagePhoto(
+            path: photos[index],
+            fit: BoxFit.cover,
+          ),
+          if (hiddenCount > 0) ...[
+            Container(color: Colors.black.withOpacity(0.48)),
+            Center(
+              child: Text(
+                '+$hiddenCount',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 30,
+                  fontWeight: FontWeight.w800,
+                  shadows: [
+                    Shadow(
+                      color: Colors.black54,
+                      blurRadius: 8,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final count = photos.length;
+    final maxWidth = math.min(
+      286.0,
+      MediaQuery.sizeOf(context).width * 0.72,
+    ).toDouble();
+
+    if (count == 1) {
+      return ClipRRect(
+        borderRadius: BorderRadius.circular(18),
+        child: SizedBox(
+          width: maxWidth,
+          height: math.min(330.0, maxWidth * 1.18).toDouble(),
+          child: _tile(context, 0),
+        ),
+      );
+    }
+
+    const gap = 2.0;
+    final gridHeight = count == 2 ? maxWidth * 0.88 : maxWidth * 0.82;
+
+    Widget grid;
+
+    if (count == 2) {
+      grid = Row(
+        children: [
+          Expanded(child: _tile(context, 0)),
+          const SizedBox(width: gap),
+          Expanded(child: _tile(context, 1)),
+        ],
+      );
+    } else if (count == 3) {
+      grid = Row(
+        children: [
+          Expanded(
+            flex: 6,
+            child: _tile(context, 0),
+          ),
+          const SizedBox(width: gap),
+          Expanded(
+            flex: 4,
+            child: Column(
+              children: [
+                Expanded(child: _tile(context, 1)),
+                const SizedBox(height: gap),
+                Expanded(child: _tile(context, 2)),
+              ],
+            ),
+          ),
+        ],
+      );
+    } else {
+      final hiddenCount = count - 4;
+      grid = Column(
+        children: [
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: _tile(context, 0)),
+                const SizedBox(width: gap),
+                Expanded(child: _tile(context, 1)),
+              ],
+            ),
+          ),
+          const SizedBox(height: gap),
+          Expanded(
+            child: Row(
+              children: [
+                Expanded(child: _tile(context, 2)),
+                const SizedBox(width: gap),
+                Expanded(
+                  child: _tile(
+                    context,
+                    3,
+                    hiddenCount: hiddenCount,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(18),
+      child: SizedBox(
+        width: maxWidth,
+        height: gridHeight,
+        child: grid,
+      ),
+    );
+  }
+}
+
+class _MessagePhoto extends StatelessWidget {
+  final String path;
+  final BoxFit fit;
+
+  const _MessagePhoto({
+    required this.path,
+    required this.fit,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedPath = _resolveMessagePhotoPath(path);
+    final placeholderColor = Theme.of(context).brightness == Brightness.dark
+        ? const Color(0xFF1E293B)
+        : const Color(0xFFE5E7EB);
+
+    if (resolvedPath.isEmpty) {
+      return ColoredBox(
+        color: placeholderColor,
+        child: const Center(
+          child: Icon(Icons.broken_image_rounded),
+        ),
+      );
+    }
+
+    if (_isRemoteMessagePhoto(resolvedPath)) {
+      return Image.network(
+        resolvedPath,
+        fit: fit,
+        filterQuality: FilterQuality.medium,
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+
+          final total = progress.expectedTotalBytes;
+          final value = total == null || total <= 0
+              ? null
+              : progress.cumulativeBytesLoaded / total;
+
+          return ColoredBox(
+            color: placeholderColor,
+            child: Center(
+              child: CircularProgressIndicator(
+                value: value,
+                strokeWidth: 2.4,
+                color: const Color(0xFF1877F2),
+              ),
+            ),
+          );
+        },
+        errorBuilder: (_, __, ___) => ColoredBox(
+          color: placeholderColor,
+          child: const Center(
+            child: Icon(Icons.broken_image_rounded),
+          ),
+        ),
+      );
+    }
+
+    return Image.file(
+      File(resolvedPath),
+      fit: fit,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (_, __, ___) => ColoredBox(
+        color: placeholderColor,
+        child: const Center(
+          child: Icon(Icons.broken_image_rounded),
+        ),
+      ),
+    );
+  }
+}
+
+
+class _ZoomableMessagePhoto extends StatefulWidget {
+  final String path;
+
+  const _ZoomableMessagePhoto({
+    required this.path,
+  });
+
+  @override
+  State<_ZoomableMessagePhoto> createState() =>
+      _ZoomableMessagePhotoState();
+}
+
+class _ZoomableMessagePhotoState extends State<_ZoomableMessagePhoto> {
+  final TransformationController _transformationController =
+      TransformationController();
+
+  bool _isZoomed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _transformationController.addListener(_handleTransformChanged);
+  }
+
+  @override
+  void dispose() {
+    _transformationController
+      ..removeListener(_handleTransformChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleTransformChanged() {
+    final scale = _transformationController.value.getMaxScaleOnAxis();
+    final nextZoomed = scale > 1.01;
+
+    if (nextZoomed != _isZoomed && mounted) {
+      setState(() => _isZoomed = nextZoomed);
+    }
+  }
+
+  void _toggleZoom(TapDownDetails details) {
+    if (_isZoomed) {
+      _transformationController.value = Matrix4.identity();
+      return;
+    }
+
+    const targetScale = 2.5;
+    final position = details.localPosition;
+    final matrix = Matrix4.identity()
+      ..translate(
+        -position.dx * (targetScale - 1),
+        -position.dy * (targetScale - 1),
+      )
+      ..scale(targetScale);
+
+    _transformationController.value = matrix;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onDoubleTapDown: _toggleZoom,
+      child: Center(
+        child: InteractiveViewer(
+          transformationController: _transformationController,
+          minScale: 1,
+          maxScale: 5,
+          panEnabled: _isZoomed,
+          scaleEnabled: true,
+          clipBehavior: Clip.none,
+          boundaryMargin: const EdgeInsets.all(80),
+          child: SizedBox(
+            width: MediaQuery.sizeOf(context).width,
+            height: MediaQuery.sizeOf(context).height,
+            child: _MessagePhoto(
+              path: widget.path,
+              fit: BoxFit.contain,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _MessengerPhotoViewer extends StatefulWidget {
+  final List<String> photos;
+  final int initialIndex;
+
+  const _MessengerPhotoViewer({
+    required this.photos,
+    required this.initialIndex,
+  });
+
+  @override
+  State<_MessengerPhotoViewer> createState() =>
+      _MessengerPhotoViewerState();
+}
+
+class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
+  late final PageController _pageController;
+  late int _currentIndex;
+  bool _isSaving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentIndex = widget.initialIndex
+        .clamp(0, widget.photos.length - 1)
+        .toInt();
+    _pageController = PageController(initialPage: _currentIndex);
+  }
+
+  @override
+  void dispose() {
+    _pageController.dispose();
+    super.dispose();
+  }
+
+  String _fileNameForPhoto(String path) {
+    final clean = path.split('?').first.split('#').first;
+    final segments = clean.replaceAll('\\', '/').split('/');
+    final candidate = segments.isEmpty ? '' : segments.last.trim();
+
+    if (candidate.isNotEmpty && candidate.contains('.')) {
+      return candidate;
+    }
+
+    return 'photo_${DateTime.now().millisecondsSinceEpoch}.jpg';
+  }
+
+  Future<Uint8List> _photoBytes(String path) async {
+    final resolvedPath = _resolveMessagePhotoPath(path);
+
+    if (_isRemoteMessagePhoto(resolvedPath)) {
+      final request = await HttpClient().getUrl(Uri.parse(resolvedPath));
+      final response = await request.close();
+
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException('Photo download failed');
+      }
+
+      return consolidateHttpClientResponseBytes(response);
+    }
+
+    final file = File(resolvedPath);
+    if (!await file.exists()) {
+      throw FileSystemException('Photo file not found');
+    }
+
+    return file.readAsBytes();
+  }
+
+  Future<void> _saveCurrentPhoto() async {
+    if (_isSaving || widget.photos.isEmpty) return;
+
+    setState(() => _isSaving = true);
+
+    try {
+      final currentPath = widget.photos[_currentIndex];
+      final bytes = await _photoBytes(currentPath);
+
+      await SaverGallery.saveImage(
+        bytes,
+        quality: 100,
+        fileName: _fileNameForPhoto(currentPath),
+        androidRelativePath: 'Pictures/MessagingApp',
+        skipIfExists: false,
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Photo saved'),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(milliseconds: 900),
+        ),
+      );
+    } catch (e) {
+      debugPrint('FULLSCREEN PHOTO SAVE ERROR: $e');
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Could not save photo'),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onVerticalDragEnd: (details) {
+          final velocity = details.primaryVelocity ?? 0;
+          if (velocity.abs() > 850) {
+            Navigator.of(context).maybePop();
+          }
+        },
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: PageView.builder(
+                controller: _pageController,
+                itemCount: widget.photos.length,
+                onPageChanged: (index) {
+                  setState(() => _currentIndex = index);
+                },
+                itemBuilder: (context, index) {
+                  return _ZoomableMessagePhoto(
+                    path: widget.photos[index],
+                  );
+                },
+              ),
+            ),
+            Positioned(
+              left: 0,
+              right: 0,
+              top: 0,
+              child: SafeArea(
+                bottom: false,
+                child: Container(
+                  height: 58,
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(0.72),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.of(context).maybePop(),
+                        icon: const Icon(
+                          Icons.arrow_back_rounded,
+                          color: Colors.white,
+                          size: 28,
+                        ),
+                      ),
+                      Expanded(
+                        child: Text(
+                          widget.photos.length > 1
+                              ? '${_currentIndex + 1} of ${widget.photos.length}'
+                              : 'Photo',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: _isSaving ? null : _saveCurrentPhoto,
+                        icon: _isSaving
+                            ? const SizedBox(
+                                width: 22,
+                                height: 22,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.download_rounded,
+                                color: Colors.white,
+                                size: 27,
+                              ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (widget.photos.length > 1)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: SafeArea(
+                  top: false,
+                  child: Container(
+                    height: 78,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.bottomCenter,
+                        end: Alignment.topCenter,
+                        colors: [
+                          Colors.black.withOpacity(0.78),
+                          Colors.transparent,
+                        ],
+                      ),
+                    ),
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      itemCount: widget.photos.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 7),
+                      itemBuilder: (context, index) {
+                        final selected = index == _currentIndex;
+
+                        return GestureDetector(
+                          onTap: () {
+                            _pageController.animateToPage(
+                              index,
+                              duration: const Duration(milliseconds: 220),
+                              curve: Curves.easeOut,
+                            );
+                          },
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            width: selected ? 58 : 52,
+                            height: selected ? 58 : 52,
+                            padding: EdgeInsets.all(selected ? 2 : 0),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(10),
+                              border: selected
+                                  ? Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    )
+                                  : null,
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(7),
+                              child: _MessagePhoto(
+                                path: widget.photos[index],
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _MessageBubble extends StatelessWidget {
   final ChatMessage message;
   final bool isDark;
@@ -5407,7 +6072,7 @@ class _MessageBubble extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 6),
                   child: replyBlock,
                 ),
-              DynamicMessageMedia(
+              _MessengerMessageMedia(
                 message: message,
                 isDark: isDark,
               ),
@@ -5460,7 +6125,7 @@ class _MessageBubble extends StatelessWidget {
                   child: replyBlock,
                 ),
 
-              DynamicMessageMedia(
+              _MessengerMessageMedia(
                 message: message,
                 isDark: isDark,
               ),
