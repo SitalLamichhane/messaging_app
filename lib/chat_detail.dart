@@ -16,6 +16,7 @@ import 'package:hiddenly/group/group_call_screen.dart'
     show GroupCallScreen;
 import 'package:hiddenly/group/group_call_token_service.dart'
     show GroupCallTokenService;
+import 'package:hiddenly/widgets/smooth_media_zoom.dart';
 import 'package:saver_gallery/saver_gallery.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
@@ -5565,92 +5566,27 @@ class _MessagePhoto extends StatelessWidget {
 }
 
 
-class _ZoomableMessagePhoto extends StatefulWidget {
+class _ZoomableMessagePhoto extends StatelessWidget {
   final String path;
+  final ValueChanged<bool>? onZoomChanged;
+  final ValueChanged<int>? onPointerCountChanged;
 
   const _ZoomableMessagePhoto({
     required this.path,
+    this.onZoomChanged,
+    this.onPointerCountChanged,
   });
 
   @override
-  State<_ZoomableMessagePhoto> createState() =>
-      _ZoomableMessagePhotoState();
-}
-
-class _ZoomableMessagePhotoState extends State<_ZoomableMessagePhoto> {
-  final TransformationController _transformationController =
-      TransformationController();
-
-  bool _isZoomed = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _transformationController.addListener(_handleTransformChanged);
-  }
-
-  @override
-  void dispose() {
-    _transformationController
-      ..removeListener(_handleTransformChanged)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _handleTransformChanged() {
-    final scale = _transformationController.value.getMaxScaleOnAxis();
-    final nextZoomed = scale > 1.01;
-
-    if (nextZoomed != _isZoomed && mounted) {
-      setState(() => _isZoomed = nextZoomed);
-    }
-  }
-
-  void _toggleZoom(TapDownDetails details) {
-    if (_isZoomed) {
-      _transformationController.value = Matrix4.identity();
-      return;
-    }
-
-    const targetScale = 2.5;
-    final position = details.localPosition;
-    final matrix = Matrix4.identity()
-      ..translate(
-        -position.dx * (targetScale - 1),
-        -position.dy * (targetScale - 1),
-      )
-      ..scale(targetScale);
-
-    _transformationController.value = matrix;
-  }
-
-  @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onDoubleTapDown: _toggleZoom,
-      child: Center(
-        child: InteractiveViewer(
-          transformationController: _transformationController,
-          minScale: 1,
-          maxScale: 5,
-          panEnabled: _isZoomed,
-          scaleEnabled: true,
-          clipBehavior: Clip.none,
-          boundaryMargin: const EdgeInsets.all(80),
-          child: SizedBox(
-            width: MediaQuery.sizeOf(context).width,
-            height: MediaQuery.sizeOf(context).height,
-            child: _MessagePhoto(
-              path: widget.path,
-              fit: BoxFit.contain,
-            ),
-          ),
-        ),
-      ),
+    return SmoothZoomImage(
+      path: path,
+      onZoomChanged: onZoomChanged,
+      onPointerCountChanged: onPointerCountChanged,
     );
   }
 }
+
 
 class _MessengerPhotoViewer extends StatefulWidget {
   final List<String> photos;
@@ -5670,6 +5606,15 @@ class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
   late final PageController _pageController;
   late int _currentIndex;
   bool _isSaving = false;
+
+  // WhatsApp-style gesture arbitration:
+  // 1x => PageView swipe + vertical dismiss
+  // >1x => media owns the drag for panning
+  bool _isMediaZoomed = false;
+  int _mediaPointerCount = 0;
+
+  bool get _isMultiTouching => _mediaPointerCount >= 2;
+  bool get _lockGalleryGestures => _isMediaZoomed || _isMultiTouching;
 
   @override
   void initState() {
@@ -5768,24 +5713,75 @@ class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
       backgroundColor: Colors.black,
       body: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onVerticalDragEnd: (details) {
-          final velocity = details.primaryVelocity ?? 0;
-          if (velocity.abs() > 850) {
-            Navigator.of(context).maybePop();
-          }
-        },
+
+        // WhatsApp-style rule:
+        // vertical swipe closes only while media is at normal scale.
+        // When zoomed, vertical drag must pan the image instead.
+        onVerticalDragEnd: _lockGalleryGestures
+            ? null
+            : (details) {
+                final velocity = details.primaryVelocity ?? 0;
+
+                if (velocity.abs() > 850) {
+                  Navigator.of(context).maybePop();
+                }
+              },
+
         child: Stack(
           children: [
             Positioned.fill(
               child: PageView.builder(
                 controller: _pageController,
+
+                // At 1x: swipe left/right = previous/next photo.
+                // Zoomed: horizontal movement belongs to the image for panning.
+                physics: _lockGalleryGestures
+                    ? const NeverScrollableScrollPhysics()
+                    : const PageScrollPhysics(),
+
                 itemCount: widget.photos.length,
+
                 onPageChanged: (index) {
-                  setState(() => _currentIndex = index);
+                  setState(() {
+                    _currentIndex = index;
+
+                    // Every newly selected page starts at normal gallery mode.
+                    _isMediaZoomed = false;
+                    _mediaPointerCount = 0;
+                  });
                 },
+
                 itemBuilder: (context, index) {
                   return _ZoomableMessagePhoto(
                     path: widget.photos[index],
+
+                    // Only let the currently visible page control the gallery.
+                    onZoomChanged: index == _currentIndex
+                        ? (zoomed) {
+                            if (!mounted || zoomed == _isMediaZoomed) {
+                              return;
+                            }
+
+                            setState(() {
+                              _isMediaZoomed = zoomed;
+                            });
+                          }
+                        : null,
+
+                    // Critical for conflict-free pinch:
+                    // the instant a second finger touches the image,
+                    // disable PageView and vertical-dismiss before scale changes.
+                    onPointerCountChanged: index == _currentIndex
+                        ? (count) {
+                            if (!mounted || count == _mediaPointerCount) {
+                              return;
+                            }
+
+                            setState(() {
+                              _mediaPointerCount = count;
+                            });
+                          }
+                        : null,
                   );
                 },
               ),
