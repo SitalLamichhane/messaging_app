@@ -7,9 +7,9 @@ import 'package:hiddenly/chat_data.dart';
 import 'package:hiddenly/chat_models.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/call/call_socket_service.dart';
+import 'package:hiddenly/core/call/call_api.dart';
 import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:hiddenly/core/call/global_call_handler.dart';
-import 'package:hiddenly/core/call/system_ringtone_service.dart';
 import 'package:hiddenly/core/config/app_config.dart';
 
 class IncomingCallScreen extends StatefulWidget {
@@ -58,18 +58,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   String _resolvedCurrentUserId = '';
   String _resolvedCurrentUserName = '';
   String _resolvedCurrentUserAvatar = '';
-
-  @override
-  void initState() {
-    super.initState();
-    SystemRingtoneService.start();
-  }
-
-  @override
-  void dispose() {
-    SystemRingtoneService.stop();
-    super.dispose();
-  }
 
   String get _effectiveConversationId {
     final value = widget.conversationId?.toString() ??
@@ -250,6 +238,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       );
 
       await SocketService.instance.connect(url: url);
+
       await Future.delayed(const Duration(milliseconds: 300));
 
       if (!SocketService.instance.isConnected) {
@@ -269,8 +258,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   Future<void> _reject(BuildContext context) async {
-    await SystemRingtoneService.stop();
-
     if (_rejecting) return;
     _rejecting = true;
 
@@ -278,20 +265,20 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     final convId = _effectiveConversationId;
 
     try {
+      // With the current backend the signaling consumer forwards call_reject
+      // to the caller's global-call socket. We therefore send the immediate
+      // signaling event AND persist the authoritative reject through the API.
       final connected = await _ensureCallSocketConnected();
-
-      if (!connected) {
-        debugPrint('INCOMING CALL REJECT WARNING: socket not connected');
-      }
-
       final currentUserId = _resolvedCurrentUserId.isNotEmpty
           ? _resolvedCurrentUserId
           : widget.currentUserId.trim();
 
-      if (currentUserId.isNotEmpty && widget.callerId.trim().isNotEmpty) {
+      if (connected &&
+          currentUserId.isNotEmpty &&
+          widget.callerId.trim().isNotEmpty) {
         SocketService.instance.emit(
           CallSocketEvents.callReject,
-          {
+          <String, dynamic>{
             'from': currentUserId,
             'from_user': currentUserId,
             'reason': 'rejected',
@@ -301,15 +288,21 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
             if (convId.isNotEmpty) 'conversationId': convId,
             'is_group_call': _isGroupCall,
             'isGroupCall': _isGroupCall,
-            if (_isGroupCall && _callId.isNotEmpty) 'group_call_id': _callId,
-            if (_isGroupCall && _callId.isNotEmpty) 'groupCallId': _callId,
           },
           targetUser: widget.callerId.trim(),
           conversationId: convId.isNotEmpty ? convId : null,
           queueIfDisconnected: false,
         );
 
-        await Future.delayed(const Duration(milliseconds: 180));
+        await Future.delayed(const Duration(milliseconds: 120));
+      }
+
+      if (_callId.isNotEmpty) {
+        try {
+          await CallApi.reject(_callId);
+        } catch (e) {
+          debugPrint('INCOMING CALL REJECT API ERROR: $e');
+        }
       }
 
       if (widget.chat != null) {
@@ -320,7 +313,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
         );
       }
 
-      if (callKitId.trim().isNotEmpty) {
+      if (callKitId.isNotEmpty) {
         await NotificationService.endCall(callKitId);
       }
 
@@ -329,29 +322,16 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
       try {
         if (SocketService.instance.isConnected) {
-          await SocketService.instance.disconnect();
+          await SocketService.instance.disconnect(
+            clearHandlers: false,
+            clearQueue: true,
+            clearCache: true,
+            forgetUrl: true,
+          );
         }
-      } catch (e, st) {
+      } catch (e) {
         debugPrint('INCOMING CALL REJECT SOCKET DISCONNECT ERROR: $e');
-        debugPrint(st.toString());
       }
-
-      if (context.mounted) {
-        Navigator.of(context).maybePop();
-      }
-    } catch (e, st) {
-      debugPrint('INCOMING CALL REJECT ERROR: $e');
-      debugPrint(st.toString());
-
-      if (callKitId.trim().isNotEmpty) {
-        await NotificationService.endCall(callKitId);
-      }
-
-      try {
-        if (SocketService.instance.isConnected) {
-          await SocketService.instance.disconnect();
-        }
-      } catch (_) {}
 
       if (context.mounted) {
         Navigator.of(context).maybePop();
@@ -362,8 +342,6 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   Future<void> _accept(BuildContext context) async {
-    await SystemRingtoneService.stop();
-
     if (_accepting) return;
     _accepting = true;
 
@@ -372,80 +350,58 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     final callKitId = _callKitId;
     final convId = _effectiveConversationId;
 
-    if (convId.isEmpty) {
-      debugPrint('INCOMING CALL ACCEPT ERROR: conversationId empty');
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Call error: conversation missing')),
-        );
+    try {
+      if (convId.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Call error: conversation missing')),
+          );
+        }
+        return;
       }
 
-      _accepting = false;
-      return;
-    }
-
-    final connected = await _ensureCallSocketConnected();
-
-    if (!connected) {
-      debugPrint('INCOMING CALL ACCEPT ERROR: socket connect failed');
-
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Could not connect call socket')),
-        );
+      if (_callId.isEmpty) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Call error: call id missing')),
+          );
+        }
+        return;
       }
 
-      _accepting = false;
-      return;
-    }
+      // No socket/API work here. CallNotifier owns the receiver transaction:
+      // API accept -> connect signaling -> create WebRTC -> answer/call_ready.
+      final finalOffer = _isValidWebRtcOffer(widget.offer) ? widget.offer : null;
 
-    final pendingOffer = GlobalCallHandler.instance.takePendingOffer(
-      callerId: widget.callerId,
-      conversationId: convId,
-      callId: _callId.isNotEmpty ? _callId : null,
-    );
+      if (callKitId.isNotEmpty) {
+        await NotificationService.endCall(callKitId);
+      }
 
-    final finalOffer =
-        _isValidWebRtcOffer(widget.offer) ? widget.offer : pendingOffer;
+      if (!context.mounted) return;
 
-    final hasValidFinalOffer = _isValidWebRtcOffer(finalOffer);
-
-    if (callKitId.trim().isNotEmpty) {
-      await NotificationService.endCall(callKitId);
-    }
-
-    if (!context.mounted) return;
-
-    debugPrint('INCOMING CALL ACCEPT: opening CallScreen directly.');
-    debugPrint('INCOMING CALL ACCEPT: hasValidOffer=$hasValidFinalOffer');
-
-    Navigator.pushReplacement(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CallScreen(
-          name: displayName,
-          avatarUrl: displayAvatar,
-          isVideoCall: widget.isVideoCall,
-          chat: widget.chat,
-          currentUserId: _resolvedCurrentUserId.isNotEmpty
-              ? _resolvedCurrentUserId
-              : widget.currentUserId,
-          currentUserName: _resolvedCurrentUserName.isNotEmpty
-              ? _resolvedCurrentUserName
-              : widget.currentUserName,
-          currentUserAvatar: _resolvedCurrentUserAvatar.isNotEmpty
-              ? _resolvedCurrentUserAvatar
-              : widget.currentUserAvatar,
-          receiverId: widget.callerId,
-          isCaller: false,
-          incomingOffer: hasValidFinalOffer ? finalOffer : null,
-          conversationId: convId,
-          callId: _callId.isNotEmpty ? _callId : null,
-          isGroupCall: _isGroupCall,
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CallScreen(
+            name: displayName,
+            avatarUrl: displayAvatar,
+            isVideoCall: widget.isVideoCall,
+            chat: widget.chat,
+            currentUserId: widget.currentUserId,
+            currentUserName: widget.currentUserName,
+            currentUserAvatar: widget.currentUserAvatar,
+            receiverId: widget.callerId,
+            isCaller: false,
+            incomingOffer: finalOffer,
+            conversationId: convId,
+            callId: _callId,
+            isGroupCall: _isGroupCall,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _accepting = false;
+    }
   }
 
   @override
@@ -590,4 +546,4 @@ class _IncomingButton extends StatelessWidget {
       ],
     );
   }
-}// end
+}

@@ -513,7 +513,12 @@ class ChatItem {
     this.unreadCount = 0,
     List<ChatMessage>? messages,
   })  : memberNicknames = memberNicknames ?? {},
-        messages = messages ?? [];
+        // Always keep a growable copy. API / const / unmodifiable lists
+        // must never be stored directly because AppChatData.addMessage()
+        // inserts local call/message entries into this list.
+        messages = List<ChatMessage>.from(
+          messages ?? const <ChatMessage>[],
+        );
 
   factory ChatItem.fromJson(
     Map<String, dynamic> json, {
@@ -645,7 +650,7 @@ class ChatItem {
       message: preview,
       time: time,
       unreadCount: _intValue(json['unread_count']),
-      messages: const [],
+      messages: <ChatMessage>[],
     );
   }
 
@@ -772,4 +777,4 @@ class CallEntry {
 
     return '${parts.first[0]}${parts.last[0]}'.toUpperCase();
   }
-}// end
+}

@@ -1,3 +1,5 @@
+// lib/core/call/call_state.dart
+
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 enum CallStatus {
@@ -32,7 +34,16 @@ class CallState {
   final String? currentUserId;
   final String? receiverId;
 
-  // Always OTHER user's info
+  /// Server-owned call id used by /chat/calls/<id>/status/.
+  final String? callId;
+
+  /// Conversation owning this call.
+  final String? conversationId;
+
+  /// User-visible/debuggable failure reason. Do not put secrets here.
+  final String? errorMessage;
+
+  // Always OTHER user's info.
   final String? name;
   final String? avatarUrl;
 
@@ -57,6 +68,9 @@ class CallState {
     this.isVideoUpgradeRejected = false,
     this.currentUserId,
     this.receiverId,
+    this.callId,
+    this.conversationId,
+    this.errorMessage,
     this.name,
     this.avatarUrl,
     this.incomingOffer,
@@ -79,6 +93,9 @@ class CallState {
     bool? isVideoUpgradeRejected,
     String? currentUserId,
     String? receiverId,
+    String? callId,
+    String? conversationId,
+    String? errorMessage,
     String? name,
     String? avatarUrl,
     Map<String, dynamic>? incomingOffer,
@@ -86,11 +103,12 @@ class CallState {
     Duration? duration,
     RTCVideoRenderer? localRenderer,
     RTCVideoRenderer? remoteRenderer,
-
     bool clearIncomingOffer = false,
     bool clearPendingVideoOffer = false,
     bool clearRenderers = false,
     bool clearUserInfo = false,
+    bool clearCallIdentity = false,
+    bool clearError = false,
   }) {
     return CallState(
       status: status ?? this.status,
@@ -108,6 +126,10 @@ class CallState {
           isVideoUpgradeRejected ?? this.isVideoUpgradeRejected,
       currentUserId: clearUserInfo ? null : currentUserId ?? this.currentUserId,
       receiverId: clearUserInfo ? null : receiverId ?? this.receiverId,
+      callId: clearCallIdentity ? null : callId ?? this.callId,
+      conversationId:
+          clearCallIdentity ? null : conversationId ?? this.conversationId,
+      errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
       name: clearUserInfo ? null : name ?? this.name,
       avatarUrl: clearUserInfo ? null : avatarUrl ?? this.avatarUrl,
       incomingOffer:

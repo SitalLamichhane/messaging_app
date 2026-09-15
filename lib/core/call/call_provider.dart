@@ -1,10 +1,11 @@
 // lib/core/call/call_provider.dart
 
 import 'dart:async';
-import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/core/config/app_config.dart';
 import 'package:hiddenly/core/call/call_api.dart';
 import 'package:hiddenly/core/call/call_socket_service.dart';
 import 'package:hiddenly/core/call/call_sound_service.dart';
@@ -12,6 +13,22 @@ import 'package:hiddenly/core/call/call_state.dart';
 import 'package:hiddenly/core/call/global_call_handler.dart';
 import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:hiddenly/core/call/webrct_servide.dart';
+
+
+class CallStartConflictException implements Exception {
+  final String message;
+  final String? existingCallId;
+  final String? existingStatus;
+
+  const CallStartConflictException(
+    this.message, {
+    this.existingCallId,
+    this.existingStatus,
+  });
+
+  @override
+  String toString() => message;
+}
 
 final callProvider = StateNotifierProvider<CallNotifier, CallState>((ref) {
   final notifier = CallNotifier();
@@ -88,23 +105,6 @@ class CallNotifier extends StateNotifier<CallState> {
     return value.trim();
   }
 
-  String _generateCallId() {
-    final random = Random.secure();
-    final bytes = List<int>.generate(16, (_) => random.nextInt(256));
-
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-
-    String hex(int value) => value.toRadixString(16).padLeft(2, '0');
-    final value = bytes.map(hex).join();
-
-    return '${value.substring(0, 8)}-'
-        '${value.substring(8, 12)}-'
-        '${value.substring(12, 16)}-'
-        '${value.substring(16, 20)}-'
-        '${value.substring(20)}';
-  }
-
   Map<String, dynamic> _payloadFrom(Map<String, dynamic> data) {
     final raw = data['payload'];
     return raw is Map
@@ -179,6 +179,164 @@ class CallNotifier extends StateNotifier<CallState> {
     return true;
   }
 
+  Future<void> _connectConversationCallSocket() async {
+    final conversationId = _conversationId?.trim() ?? '';
+
+    if (conversationId.isEmpty) {
+      throw StateError('Conversation id is missing');
+    }
+
+    final parsedConversationId = int.tryParse(conversationId);
+    if (parsedConversationId == null) {
+      throw StateError('Invalid conversation id: $conversationId');
+    }
+
+    String? accessToken = await ApiClient.storage.read(key: 'access');
+
+    if (accessToken == null || accessToken.trim().isEmpty) {
+      accessToken = await ApiClient.refreshAccessToken();
+    }
+
+    if (accessToken == null || accessToken.trim().isEmpty) {
+      throw StateError('Access token is missing');
+    }
+
+    final url = AppConfig.callSocketUrl(
+      conversationId: parsedConversationId,
+      token: accessToken.trim(),
+    );
+
+    // Never log the URL here: it contains the JWT query parameter.
+    debugPrint('CALL PROVIDER: connecting signaling socket for conversation $conversationId');
+
+    await SocketService.instance.connect(url: url, autoReconnect: true);
+
+    if (!SocketService.instance.isConnected) {
+      throw StateError('Call signaling socket is not connected');
+    }
+  }
+
+  Future<String> _createServerCall({
+    required String receiverId,
+    required String conversationId,
+    required bool isVideoCall,
+  }) async {
+    final result = await CallApi.createCall(
+      receiverId: receiverId,
+      conversationId: conversationId,
+      isVideoCall: isVideoCall,
+    );
+
+    // A 409 means Django did NOT create a new call for this attempt.
+    // It may still return the identity of an already-existing call. Do not
+    // automatically adopt that existing call here: it can be a legitimate
+    // active call on another device, or a stale call that Django must clean up.
+    if (result.conflict) {
+      final message = result.error?.trim().isNotEmpty == true
+          ? result.error!.trim()
+          : 'A call is already active in this conversation';
+
+      final existingCallId = result.callId?.trim() ?? '';
+      final existingCallUuid = result.callUuid?.trim() ?? '';
+      final existingStatus = result.status?.trim().toLowerCase() ?? '';
+
+      debugPrint('');
+      debugPrint('########################################');
+      debugPrint('SERVER CALL CONFLICT');
+      debugPrint('conversationId: $conversationId');
+      debugPrint('receiverId: $receiverId');
+      debugPrint('existingCallId: $existingCallId');
+      debugPrint('existingCallUuid: $existingCallUuid');
+      debugPrint('existingStatus: $existingStatus');
+      debugPrint('message: $message');
+      debugPrint('########################################');
+
+      _safeState(
+        state.copyWith(
+          status: CallStatus.busy,
+          errorMessage: message,
+        ),
+      );
+
+      throw CallStartConflictException(
+        message,
+        existingCallId: existingCallId.isEmpty ? null : existingCallId,
+        existingStatus: existingStatus.isEmpty ? null : existingStatus,
+      );
+    }
+
+    final serverCallUuid = result.callUuid?.trim() ?? '';
+    final serverCallId = result.callId?.trim() ?? '';
+
+    if (!result.created) {
+      throw StateError('Backend did not create a call session');
+    }
+
+    if (serverCallId.isEmpty && serverCallUuid.isEmpty) {
+      throw StateError(
+        'Backend created a call but returned neither call_id nor call_uuid',
+      );
+    }
+
+    // IMPORTANT: Django's lifecycle endpoint currently uses:
+    //   calls/<int:call_id>/status/
+    // so the active call key must be the numeric database call_id.
+    // The same key is also sent through signaling so both peers agree on it.
+    if (serverCallId.isEmpty) {
+      throw StateError(
+        'Backend created the call but did not return numeric call_id. '
+        'The current Django status endpoint requires <int:call_id>.',
+      );
+    }
+
+    final callKey = serverCallId;
+
+    debugPrint('');
+    debugPrint('========================================');
+    debugPrint('SERVER CALL CREATED');
+    debugPrint('callId: $serverCallId');
+    debugPrint('callUuid: $serverCallUuid');
+    debugPrint('activeKey: $callKey');
+    debugPrint('status: ${result.status}');
+    debugPrint('========================================');
+
+    return callKey;
+  }
+
+  Future<void> _sendCallReady() async {
+    if (!_canUpdate || state.isCaller) return;
+
+    final currentUserId = state.currentUserId?.trim() ?? '';
+    final receiverId = state.receiverId?.trim() ?? '';
+    final conversationId = _conversationId?.trim() ?? '';
+    final callId = _callId?.trim() ?? '';
+
+    if (currentUserId.isEmpty ||
+        receiverId.isEmpty ||
+        conversationId.isEmpty ||
+        callId.isEmpty) {
+      debugPrint('CALL READY NOT SENT: active call identity is incomplete');
+      return;
+    }
+
+    SocketService.instance.emit(
+      CallSocketEvents.callReady,
+      <String, dynamic>{
+        'from': currentUserId,
+        'from_user': currentUserId,
+        'call_id': callId,
+        'callId': callId,
+        'conversation_id': conversationId,
+        'conversationId': conversationId,
+      },
+      targetUser: receiverId,
+      conversationId: conversationId,
+      queueIfDisconnected: true,
+    );
+
+    debugPrint('CALL READY SENT');
+  }
+
   Future<void> startCall({
     required String currentUserId,
     required String receiverId,
@@ -195,92 +353,128 @@ class CallNotifier extends StateNotifier<CallState> {
     Map<String, dynamic>? incomingOffer,
     String? callId,
   }) async {
-    try {
-      _disposed = false;
-      _finishing = false;
-      _switchingVideo = false;
-      _waitingForOfferAfterCallKitAccept = false;
-      _iceRestarting = false;
+    final cleanCurrentUserId = currentUserId.trim();
+    final cleanReceiverId = receiverId.trim();
+    final cleanConversationId = conversationId?.trim() ?? '';
+    final suppliedCallId = callId?.trim() ?? '';
 
-      final normalizedConversationId = conversationId?.trim() ?? '';
-      if (normalizedConversationId.isEmpty) {
-        throw ArgumentError('conversationId is required for a call');
+    if (cleanCurrentUserId.isEmpty) {
+      throw ArgumentError('currentUserId is required for a call');
+    }
+    if (cleanReceiverId.isEmpty) {
+      throw ArgumentError('receiverId is required for a call');
+    }
+    if (cleanConversationId.isEmpty) {
+      throw ArgumentError('conversationId is required for a call');
+    }
+
+    // One active call at a time. Do not reset a live call just because another
+    // screen accidentally called startCall() twice.
+    if (state.status != CallStatus.idle && !_isFinalStatus(state.status)) {
+      final sameCall = state.conversationId == cleanConversationId &&
+          state.receiverId == cleanReceiverId;
+      if (sameCall) {
+        debugPrint('CALL START IGNORED: same call is already starting/active');
+        return;
+      }
+      throw StateError('Another call is already active on this device');
+    }
+
+    _disposed = false;
+    _finishing = false;
+    _switchingVideo = false;
+    _waitingForOfferAfterCallKitAccept = false;
+    _iceRestarting = false;
+    _answeringOffer = false;
+    _remoteAnswerApplied = false;
+    _lastAnsweredOfferFingerprint = null;
+
+    _durationTimer?.cancel();
+    _timeoutTimer?.cancel();
+    _removeSocketEvents();
+
+    _conversationId = cleanConversationId;
+    _callId = suppliedCallId.isEmpty ? null : suppliedCallId;
+    _currentUserNameForOffer = currentUserName.trim();
+    _currentUserAvatarForOffer = currentUserAvatar.trim();
+
+    final remoteName = _cleanName(name);
+    final remoteAvatar = _cleanAvatar(avatarUrl);
+
+    _safeState(
+      CallState(
+        status: isCaller ? CallStatus.calling : CallStatus.incoming,
+        currentUserId: cleanCurrentUserId,
+        receiverId: cleanReceiverId,
+        callId: _callId,
+        conversationId: cleanConversationId,
+        name: remoteName,
+        avatarUrl: remoteAvatar,
+        isVideoCall: isVideoCall,
+        isCaller: isCaller,
+        incomingOffer: incomingOffer,
+        isCameraOff: !isVideoCall,
+        isRemoteCameraOff: !isVideoCall,
+        isSpeakerOn: isVideoCall,
+        duration: Duration.zero,
+      ),
+    );
+
+    bool backendCallWasCreatedOrAccepted = false;
+
+    try {
+      // ------------------------------------------------------------
+      // 1. AUTHORITATIVE SERVER LIFECYCLE FIRST
+      // ------------------------------------------------------------
+      // Caller: Django creates the call id.
+      // Receiver: the server records Accept before media signaling starts.
+      if (isCaller) {
+        if ((_callId ?? '').isEmpty) {
+          _callId = await _createServerCall(
+            receiverId: cleanReceiverId,
+            conversationId: cleanConversationId,
+            isVideoCall: isVideoCall,
+          );
+        }
+        backendCallWasCreatedOrAccepted = true;
+      } else {
+        if ((_callId ?? '').isEmpty) {
+          throw StateError('Incoming call is missing server call_id');
+        }
+
+        await CallApi.accept(_callId!);
+        backendCallWasCreatedOrAccepted = true;
       }
 
-      _conversationId = normalizedConversationId;
+      if (!_canUpdate) return;
 
-      final normalizedCallId = callId?.trim() ?? '';
-      _callId = normalizedCallId.isNotEmpty
-          ? normalizedCallId
-          : (isCaller ? _generateCallId() : null);
+      _safeState(
+        state.copyWith(
+          status: CallStatus.ringing,
+          callId: _callId,
+          conversationId: _conversationId,
+          clearError: true,
+        ),
+      );
 
-      _currentUserNameForOffer = currentUserName.trim();
-      _currentUserAvatarForOffer = currentUserAvatar.trim();
-      _answeringOffer = false;
-      _remoteAnswerApplied = false;
-      _lastAnsweredOfferFingerprint = null;
+      // ------------------------------------------------------------
+      // 2. CONNECT THE PER-CALL SIGNALING CHANNEL
+      // ------------------------------------------------------------
+      await _connectConversationCallSocket();
 
       SocketService.instance.setActiveCallContext(
         callId: _callId,
         conversationId: _conversationId,
       );
 
-      await SocketService.instance.ensureConnected();
-      if (!SocketService.instance.isConnected) {
-        throw StateError('Call signaling socket is not connected');
-      }
-
-      debugPrint('CALL PROVIDER CALL ID: $_callId');
-
-      _durationTimer?.cancel();
-      _timeoutTimer?.cancel();
-
-      _removeSocketEvents();
-
-      _safeState(const CallState());
-
-      await webrtc.dispose();
-      await Future.delayed(const Duration(milliseconds: 250));
-      await webrtc.disposeRenderers();
-
-      if (!_canUpdate) return;
-
-      final remoteName = _cleanName(name);
-      final remoteAvatar = _cleanAvatar(avatarUrl);
-
-      assert(
-        remoteName != currentUserName.trim(),
-        'CallState.name must be the OTHER user name, not current user name.',
-      );
-
-      _safeState(
-        CallState(
-          status: isCaller ? CallStatus.calling : CallStatus.ringing,
-          currentUserId: currentUserId,
-          receiverId: receiverId,
-          name: remoteName,
-          avatarUrl: remoteAvatar,
-          isVideoCall: isVideoCall,
-          isCaller: isCaller,
-          incomingOffer: incomingOffer,
-          isCameraOff: !isVideoCall,
-          isRemoteCameraOff: !isVideoCall,
-          isSpeakerOn: isVideoCall,
-          duration: Duration.zero,
-        ),
-      );
-
-      try {
-        if (isCaller) {
-          await CallSoundService.instance.playOutgoingTone();
-        } else {
-          await CallSoundService.instance.stop();
-        }
-      } catch (e) {
-        debugPrint('Call sound start error: $e');
-      }
-
       _listenSocketEvents();
+
+      // ------------------------------------------------------------
+      // 3. PREPARE WEBRTC ONLY AFTER SERVER CALL CREATION/ACCEPT
+      // ------------------------------------------------------------
+      await webrtc.dispose();
+      await webrtc.disposeRenderers();
+      if (!_canUpdate) return;
 
       await webrtc.initRenderers();
 
@@ -291,22 +485,22 @@ class CallNotifier extends StateNotifier<CallState> {
 
           SocketService.instance.emit(
             CallSocketEvents.iceCandidate,
-            {
-              'from': currentUserId,
+            <String, dynamic>{
+              'from': cleanCurrentUserId,
+              'from_user': cleanCurrentUserId,
               'candidate': candidate.toMap(),
               if (_callId != null) 'call_id': _callId,
               if (_callId != null) 'callId': _callId,
-              if (_conversationId != null) 'conversation_id': _conversationId,
-              if (_conversationId != null) 'conversationId': _conversationId,
+              'conversation_id': cleanConversationId,
+              'conversationId': cleanConversationId,
             },
-            targetUser: receiverId,
-            conversationId: _conversationId,
+            targetUser: cleanReceiverId,
+            conversationId: cleanConversationId,
             queueIfDisconnected: true,
           );
         },
         onRemoteStream: () {
           if (!_canUpdate || _isFinalStatus(state.status)) return;
-
           _safeState(
             state.copyWith(
               localRenderer: webrtc.localRenderer,
@@ -333,15 +527,22 @@ class CallNotifier extends StateNotifier<CallState> {
       );
 
       if (isCaller) {
+        try {
+          await CallSoundService.instance.playOutgoingTone();
+        } catch (_) {}
+
         _startCallTimeout();
 
+        // The first offer is sent only after Django has created the call. The
+        // socket service caches it; a receiver that accepts from FCM/CallKit
+        // sends call_ready and the cached offer is automatically resent.
         final offer = await webrtc.createOffer();
 
         SocketService.instance.emit(
           CallSocketEvents.callOffer,
-          {
-            'from': currentUserId,
-            'from_user': currentUserId,
+          <String, dynamic>{
+            'from': cleanCurrentUserId,
+            'from_user': cleanCurrentUserId,
             'callerName': currentUserName.trim(),
             'caller_name': currentUserName.trim(),
             'callerAvatar': currentUserAvatar.trim(),
@@ -349,50 +550,73 @@ class CallNotifier extends StateNotifier<CallState> {
             'isVideoCall': isVideoCall,
             'is_video_call': isVideoCall,
             'offer': offer.toMap(),
-            if (_callId != null) 'call_id': _callId,
-            if (_callId != null) 'callId': _callId,
-            if (_conversationId != null) 'conversation_id': _conversationId,
-            if (_conversationId != null) 'conversationId': _conversationId,
+            'call_id': _callId,
+            'callId': _callId,
+            'conversation_id': cleanConversationId,
+            'conversationId': cleanConversationId,
           },
-          targetUser: receiverId,
-          conversationId: _conversationId,
+          targetUser: cleanReceiverId,
+          conversationId: cleanConversationId,
           queueIfDisconnected: true,
         );
 
+        debugPrint('CALL OFFER SENT FOR SERVER CALL $_callId');
         return;
       }
 
-      /*
-        Receiver side:
+      try {
+        await CallSoundService.instance.stop();
+      } catch (_) {}
 
-        Normal foreground receiver:
-        - incomingOffer is available immediately.
-        - We set remote description and send answer.
-
-        Background/killed CallKit receiver:
-        - User accepts native call first.
-        - There may be no offer yet.
-        - CallWaitingScreen sends call_ready.
-        - SocketService resends cached call_offer once.
-        - Receiver receives call_offer and answers in _handleCallOffer().
-      */
+      // Foreground incoming_call normally contains the offer. CallKit/FCM can
+      // open the app before that offer arrives; call_ready asks the caller to
+      // resend its cached offer in that case.
       if (incomingOffer == null) {
         _waitingForOfferAfterCallKitAccept = true;
-        debugPrint('RECEIVER STARTED WITHOUT OFFER. WAITING FOR CALL_OFFER...');
+        await _sendCallReady();
+        debugPrint('RECEIVER ACCEPTED. WAITING FOR CALL_OFFER...');
         return;
       }
 
       await _answerIncomingOffer(
         offer: incomingOffer,
-        currentUserId: currentUserId,
-        receiverId: receiverId,
+        currentUserId: cleanCurrentUserId,
+        receiverId: cleanReceiverId,
       );
+    } on CallStartConflictException catch (e) {
+      debugPrint('');
+      debugPrint('########################################');
+      debugPrint('CALL START BLOCKED BY SERVER');
+      debugPrint('message: ${e.message}');
+      debugPrint('existingCallId: ${e.existingCallId ?? "unknown"}');
+      debugPrint('existingStatus: ${e.existingStatus ?? "unknown"}');
+      debugPrint('########################################');
+
+      _timeoutTimer?.cancel();
+
+      try {
+        await CallSoundService.instance.stop();
+      } catch (soundError) {
+        debugPrint('CALL CONFLICT SOUND STOP ERROR: $soundError');
+      }
+
+      // Do not initialize signaling/WebRTC and do not adopt the returned
+      // existing call id automatically. This call attempt did not create a
+      // new backend session. Django must decide whether the existing call is
+      // active or stale.
+      return;
     } catch (e, st) {
       debugPrint('Start call error: $e');
       debugPrint(st.toString());
 
       if (_canUpdate) {
-        await _finishCall(CallStatus.failed, emitSocket: false);
+        _safeState(state.copyWith(errorMessage: e.toString()));
+
+        await _finishCall(
+          CallStatus.failed,
+          emitSocket: backendCallWasCreatedOrAccepted,
+          updateBackend: backendCallWasCreatedOrAccepted,
+        );
       }
     }
   }
@@ -483,7 +707,7 @@ class CallNotifier extends StateNotifier<CallState> {
     }
 
     if (offer == null) {
-      debugPrint('CALL OFFER MISSING SDP: $payload');
+      debugPrint('CALL OFFER MISSING SDP');
       return;
     }
 
@@ -491,7 +715,7 @@ class CallNotifier extends StateNotifier<CallState> {
     final offerSdp = offer['sdp']?.toString() ?? '';
 
     if (offerType.trim().isEmpty || offerSdp.trim().isEmpty) {
-      debugPrint('CALL OFFER INVALID SDP: $offer');
+      debugPrint('CALL OFFER INVALID SDP');
       return;
     }
 
@@ -916,6 +1140,7 @@ class CallNotifier extends StateNotifier<CallState> {
       CallStatus.rejected,
       emitSocket: false,
       disconnectSocket: true,
+      updateBackend: false,
     );
   }
 
@@ -930,6 +1155,7 @@ class CallNotifier extends StateNotifier<CallState> {
       CallStatus.ended,
       emitSocket: false,
       disconnectSocket: true,
+      updateBackend: false,
     );
   }
 
@@ -937,14 +1163,14 @@ class CallNotifier extends StateNotifier<CallState> {
     final payload = _payloadFrom(data);
     if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate) return;
-    await _finishCall(CallStatus.ended, emitSocket: false);
+    await _finishCall(CallStatus.ended, emitSocket: false, updateBackend: false);
   }
 
   Future<void> _handleCallBusy(Map<String, dynamic> data) async {
     final payload = _payloadFrom(data);
     if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate) return;
-    await _finishCall(CallStatus.busy, emitSocket: false);
+    await _finishCall(CallStatus.busy, emitSocket: false, updateBackend: false);
   }
 
   Future<void> _handleCallTimeout(Map<String, dynamic> data) async {
@@ -958,6 +1184,7 @@ class CallNotifier extends StateNotifier<CallState> {
       CallStatus.timeout,
       emitSocket: false,
       disconnectSocket: true,
+      updateBackend: false,
     );
   }
 
@@ -1355,7 +1582,6 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _timeoutTimer?.cancel();
 
-    await _updateBackendCallStatus('accept');
 
     try {
       await CallSoundService.instance.stop();
@@ -1459,36 +1685,61 @@ class CallNotifier extends StateNotifier<CallState> {
     );
   }
 
-  String _backendStatusFor(CallStatus status) {
-    switch (status) {
+  String? _backendActionForFinish(
+    CallStatus finalStatus,
+    CallState beforeFinish,
+  ) {
+    final wasConnected = beforeFinish.status == CallStatus.connected;
+
+    switch (finalStatus) {
       case CallStatus.rejected:
-        return 'rejected';
-      case CallStatus.busy:
-        return 'busy';
+        return beforeFinish.isCaller ? 'cancel' : 'reject';
       case CallStatus.timeout:
+        return beforeFinish.isCaller ? 'cancel' : 'missed';
       case CallStatus.missed:
-        return 'missed';
+        return beforeFinish.isCaller ? 'cancel' : 'missed';
       case CallStatus.failed:
-        return 'failed';
+        return beforeFinish.isCaller ? 'cancel' : 'leave';
       case CallStatus.ended:
+        if (!wasConnected) {
+          return beforeFinish.isCaller ? 'cancel' : 'reject';
+        }
+        return beforeFinish.isCaller ? 'ended' : 'leave';
+      case CallStatus.busy:
+        // Busy is normally received from the remote side; no local API write.
+        return null;
       case CallStatus.connected:
-      default:
-        return 'ended';
+      case CallStatus.calling:
+      case CallStatus.ringing:
+      case CallStatus.incoming:
+      case CallStatus.idle:
+        return null;
     }
   }
 
-  Future<void> _updateBackendCallStatus(String status) async {
-    final callId = _callId;
+  Future<void> _updateBackendCallAction(String action) async {
+    final callId = _callId?.trim() ?? '';
+    if (callId.isEmpty) {
+      debugPrint('CALL BACKEND ACTION SKIPPED [$action]: callId is empty');
+      return;
+    }
 
-    if (callId == null || callId.trim().isEmpty) return;
+    // Django currently declares calls/<int:call_id>/status/.
+    // Fail locally instead of sending a UUID and getting a confusing 404.
+    if (int.tryParse(callId) == null) {
+      debugPrint(
+        'CALL BACKEND ACTION SKIPPED [$action]: expected numeric callId, got $callId',
+      );
+      return;
+    }
 
     try {
-      await CallApi.updateCallStatus(
+      await CallApi.updateCallAction(
         callId: callId,
-        status: status,
+        action: action,
       );
     } catch (e) {
-      debugPrint('CALL BACKEND STATUS UPDATE ERROR [$status]: $e');
+      debugPrint('CALL BACKEND ACTION ERROR [$action]: $e');
     }
   }
 
@@ -1504,6 +1755,7 @@ class CallNotifier extends StateNotifier<CallState> {
     CallStatus finalStatus, {
     required bool emitSocket,
     bool disconnectSocket = true,
+    bool updateBackend = true,
   }) async {
     if (!_canUpdate) return;
     if (_finishing) return;
@@ -1511,14 +1763,16 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _finishing = true;
 
-    final backendStatus = _backendStatusFor(finalStatus);
-    await _updateBackendCallStatus(backendStatus);
+    final oldState = state;
+    final backendAction = _backendActionForFinish(finalStatus, oldState);
+
+    if (updateBackend && backendAction != null) {
+      await _updateBackendCallAction(backendAction);
+    }
 
     try {
       await CallSoundService.instance.stop();
     } catch (_) {}
-
-    final oldState = state;
 
     _durationTimer?.cancel();
     _timeoutTimer?.cancel();
@@ -1528,11 +1782,24 @@ class CallNotifier extends StateNotifier<CallState> {
       final receiverId = oldState.receiverId;
 
       if (currentUserId != null && receiverId != null) {
+        String event = CallSocketEvents.callEnd;
+
+        if (finalStatus == CallStatus.rejected) {
+          event = CallSocketEvents.callReject;
+        } else if (finalStatus == CallStatus.timeout ||
+            finalStatus == CallStatus.missed) {
+          event = CallSocketEvents.callTimeout;
+        } else if (oldState.status == CallStatus.connected &&
+            !oldState.isCaller) {
+          event = CallSocketEvents.callLeave;
+        }
+
         SocketService.instance.emit(
-          CallSocketEvents.callEnd,
-          {
+          event,
+          <String, dynamic>{
             'from': currentUserId,
             'from_user': currentUserId,
+            'reason': backendAction ?? finalStatus.name,
             if (_callId != null) 'call_id': _callId,
             if (_callId != null) 'callId': _callId,
             if (_conversationId != null) 'conversation_id': _conversationId,
@@ -1542,6 +1809,9 @@ class CallNotifier extends StateNotifier<CallState> {
           conversationId: _conversationId,
           queueIfDisconnected: false,
         );
+
+        // Give the control frame a small chance to leave the socket before close.
+        await Future.delayed(const Duration(milliseconds: 120));
       }
     }
 
@@ -1553,7 +1823,7 @@ class CallNotifier extends StateNotifier<CallState> {
       ),
     );
 
-    await Future.delayed(const Duration(milliseconds: 250));
+    await Future.delayed(const Duration(milliseconds: 180));
 
     try {
       await webrtc.dispose();

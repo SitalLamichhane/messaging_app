@@ -6,7 +6,6 @@ import 'package:hiddenly/chat_models.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/chat/chat_api.dart';
 import 'package:hiddenly/core/chat/chat_socket_service.dart';
-import 'package:hiddenly/core/chat/global_chat_socket_service.dart';
 
 class ChatProvider extends ChangeNotifier {
   bool isLoading = false;
@@ -29,7 +28,6 @@ class ChatProvider extends ChangeNotifier {
   final Map<String, Set<String>> conversationPinnedMessageIds = {};
 
   final ChatSocketService socket = ChatSocketService();
-  final GlobalChatSocketService globalSocket = GlobalChatSocketService();
   final List<dynamic> searchedUsers = [];
 
   Future<String> _myUserId() async {
@@ -205,169 +203,6 @@ class ChatProvider extends ChangeNotifier {
     Future.microtask(() {
       notifyListeners();
     });
-  }
-
-
-  // ============================================================
-  // GLOBAL CHAT SOCKET
-  // Keeps ChatListScreen updated in real time for every chat.
-  // ============================================================
-
-  Future<void> connectGlobalSocket() async {
-    if (globalSocket.isConnected || globalSocket.isConnecting) {
-      return;
-    }
-
-    final myIdString = await _myUserId();
-    currentUserId = int.tryParse(myIdString) ?? currentUserId;
-
-    await globalSocket.connect(
-      onMessage: (data) async {
-        debugPrint('GLOBAL CHAT PROVIDER EVENT: $data');
-
-        final action = data['action']?.toString().trim().toLowerCase() ?? '';
-        final type = data['type']?.toString().trim().toLowerCase() ?? '';
-
-        // Connection acknowledgement / heartbeat events are not messages.
-        if (action == 'global_chat_connected' ||
-            type == 'global_chat_connected' ||
-            action == 'pong' ||
-            type == 'pong') {
-          return;
-        }
-
-        final isNewMessage = action == 'new_message' ||
-            action == 'message_created' ||
-            type == 'message' ||
-            type == 'new_message' ||
-            type == 'message_created';
-
-        // New messages are the events that must immediately update the list.
-        if (isNewMessage) {
-          final rawMessage = data['message'] ?? data['payload'] ?? data['data'];
-
-          if (rawMessage is! Map) {
-            debugPrint('GLOBAL CHAT: message payload missing/invalid');
-            return;
-          }
-
-          final rawConversation = data['conversation_id'] ??
-              data['conversation'] ??
-              rawMessage['conversation_id'] ??
-              rawMessage['conversation'];
-
-          String conversationIdString = '';
-
-          if (rawConversation is Map) {
-            conversationIdString = rawConversation['id']?.toString() ?? '';
-          } else {
-            conversationIdString = rawConversation?.toString() ?? '';
-          }
-
-          final conversationId = int.tryParse(conversationIdString.trim());
-
-          if (conversationId == null) {
-            debugPrint('GLOBAL CHAT: conversation id missing/invalid');
-            return;
-          }
-
-          final message = await _mapMessage(rawMessage);
-
-          if (message.type == MessageType.text && message.text.trim().isEmpty) {
-            return;
-          }
-
-          _syncMessageMetaFromJson(
-            conversationId: conversationId,
-            messageId: message.id,
-            json: rawMessage,
-          );
-
-          final key = '$conversationId';
-          conversationMessages.putIfAbsent(key, () => []);
-
-          // The same message can arrive through both the open-chat socket and
-          // the global socket. Message id de-duplication prevents double bubbles
-          // and double unread counts.
-          final alreadyExists = conversationMessages[key]!.any(
-            (existing) => existing.id == message.id,
-          );
-
-          if (alreadyExists) {
-            return;
-          }
-
-          final existingConversationIndex = conversations.indexWhere(
-            (chat) => chat.id == key,
-          );
-
-          if (existingConversationIndex == -1) {
-            // We do not have enough metadata here to safely manufacture a
-            // ChatItem (name/avatar/members). Reload the authoritative list.
-            await loadConversations();
-            return;
-          }
-
-          _addLocalMessage(conversationId, message);
-
-          // _addLocalMessage moves the conversation to the top. Find it again
-          // rather than assuming index 0, keeping this safe if that behavior
-          // changes later.
-          if (!message.isMe && connectedConversationId != conversationId) {
-            final updatedIndex = conversations.indexWhere(
-              (chat) => chat.id == key,
-            );
-
-            if (updatedIndex != -1) {
-              conversations[updatedIndex].unreadCount++;
-              notifyListeners();
-            }
-          }
-
-          return;
-        }
-
-        // Keep the chat-list preview correct after delete events. For the
-        // currently loaded conversation we can apply the same local helper.
-        if (action == 'delete_message' ||
-            action == 'message_deleted' ||
-            type == 'delete_message' ||
-            type == 'message_deleted') {
-          final rawConversation = data['conversation_id'] ?? data['conversation'];
-          final conversationId = int.tryParse(rawConversation?.toString() ?? '');
-          final rawMessage = data['message'] ?? data['payload'] ?? data['data'];
-
-          if (conversationId != null && rawMessage is Map) {
-            _applyDeletePayload(
-              conversationId: conversationId,
-              data: rawMessage,
-            );
-          }
-          return;
-        }
-
-        // Editing can change the last-message preview. The current provider has
-        // no dedicated local edit helper, so refresh the compact conversation
-        // list only for this relatively rare event.
-        if (action == 'edit_message' ||
-            action == 'message_edited' ||
-            type == 'edit_message' ||
-            type == 'message_edited') {
-          await loadConversations();
-          return;
-        }
-      },
-      onError: (err) {
-        debugPrint('GLOBAL CHAT PROVIDER ERROR: $err');
-      },
-      onDisconnected: () {
-        debugPrint('GLOBAL CHAT PROVIDER DISCONNECTED');
-      },
-    );
-  }
-
-  Future<void> disconnectGlobalSocket() async {
-    await globalSocket.disconnect();
   }
 
   void sendSocketTyping({required bool typing}) {

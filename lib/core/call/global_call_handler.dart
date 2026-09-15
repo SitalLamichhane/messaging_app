@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:hiddenly/core/call/call_notification.dart';
+import 'package:hiddenly/core/call/call_api.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:hiddenly/incoming_call_screen.dart';
@@ -54,24 +55,24 @@ class GlobalCallHandler {
   GlobalSocketHandler? _globalIncomingCallHandler;
   GlobalSocketHandler? _globalCallCancelledHandler;
 
+  /// Compatibility/control connector for /ws/call/<conversation>/.
+  ///
+  /// New outgoing/incoming CallScreen flows should let CallNotifier connect
+  /// this socket. This method remains for native reject/control paths.
   static Future<void> connectCallSocket({
     required String url,
     required String currentUserId,
     String currentUserName = '',
     String currentUserAvatar = '',
   }) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('call_ws_url', url);
-
-    debugPrint('GLOBAL SAVED CALL WS URL: $url');
-
+    // Do not persist or print `url`; it contains the access token.
     await SocketService.instance.connect(url: url);
 
     GlobalCallHandler.instance.init(
       currentUserId: currentUserId,
       currentUserName: currentUserName,
       currentUserAvatar: currentUserAvatar,
-      forceRegister: true,
+      forceRegister: false,
     );
   }
 
@@ -111,7 +112,6 @@ class GlobalCallHandler {
 
     _globalConnectedHandler = (data) async {
       debugPrint('### GLOBAL SOCKET CONNECTED EVENT ###');
-      debugPrint('data: $data');
     };
 
    _globalIncomingCallHandler = (data) async {
@@ -126,7 +126,6 @@ class GlobalCallHandler {
 
     _globalCallCancelledHandler = (data) async {
       debugPrint('### GLOBAL SOCKET call_cancelled RECEIVED ###');
-      debugPrint('raw data: $data');
 
       final payload = _payloadFrom(data);
       _handleRemoteCallClosed(payload, reason: 'call_cancelled');
@@ -151,7 +150,7 @@ class GlobalCallHandler {
     await GlobalCallSocketService.instance.connect(url: url);
 
     debugPrint('### GLOBAL INCOMING CALL SOCKET CONNECTED/READY ###');
-    debugPrint('url: $url');
+    debugPrint('GLOBAL INCOMING CALL SOCKET ACTIVE');
     debugPrint('currentUserId: $_currentUserId');
   }
 
@@ -230,6 +229,11 @@ class GlobalCallHandler {
     return '';
   }
 
+  /// Stores current user identity only.
+  ///
+  /// GlobalCallHandler owns the persistent *global* incoming-call socket.
+  /// CallNotifier exclusively owns handlers on the per-conversation signaling
+  /// socket. This prevents duplicate call_offer/call_end processing.
   void init({
     required String currentUserId,
     required String currentUserName,
@@ -246,107 +250,11 @@ class GlobalCallHandler {
       currentUserAvatar: _currentUserAvatar ?? '',
     );
 
-    if (_registered && !forceRegister) {
-      debugPrint('GLOBAL CALL HANDLER ALREADY REGISTERED');
-      return;
-    }
-
+    // Remove handlers left behind by older app versions/hot reload.
     _removeOldHandlers();
-
-    _incomingCallHandler = (data) async {
-  final payload = _payloadFrom(Map<String, dynamic>.from(data));
-
-  debugPrint(
-    'CONVERSATION SOCKET incoming_call IGNORED: global socket handles incoming UI',
-  );
-  debugPrint('payload: $payload');
-
-  return;
-};
-
-    _callOfferHandler = (data) async {
-      await _loadCurrentUserFromStorage();
-
-      final currentId = _currentUserId ?? '';
-      if (currentId.trim().isEmpty) return;
-
-      final rawData = Map<String, dynamic>.from(data);
-      final payload = _payloadFrom(rawData);
-
-      final callerId =
-          payload['from']?.toString() ??
-          payload['from_user']?.toString() ??
-          payload['caller_id']?.toString() ??
-          payload['callerId']?.toString() ??
-          '';
-
-      final conversationId =
-          payload['conversation_id']?.toString() ??
-          payload['conversationId']?.toString();
-
-      final callId =
-          payload['call_id']?.toString() ?? payload['callId']?.toString();
-
-      final offerRaw = payload['offer'];
-
-      if (callerId.trim().isEmpty) return;
-      if (callerId.trim() == currentId.trim()) return;
-
-      if (!_isValidWebRtcOffer(offerRaw)) {
-        debugPrint('CALL OFFER ERROR: valid offer missing');
-        return;
-      }
-
-      final offer = Map<String, dynamic>.from(offerRaw as Map);
-
-      /*
-        IMPORTANT DOUBLE-SCREEN FIX:
-        The global incoming_call socket is responsible for opening
-        IncomingCallScreen. The conversation call_offer socket must NOT
-        open another UI screen, otherwise receiver sees duplicate incoming
-        screens or IncomingCallScreen + CallScreen.
-
-        Here we only save the WebRTC offer. IncomingCallScreen/CallScreen
-        can take this pending offer when user accepts.
-      */
-      _savePendingOffer(
-        callerId: callerId,
-        conversationId: conversationId,
-        callId: callId,
-        offer: offer,
-      );
-
-      debugPrint('CALL OFFER SAVED ONLY - UI OPEN BLOCKED TO PREVENT DOUBLE SCREEN');
-      debugPrint('callerId: $callerId');
-      debugPrint('conversationId: ${conversationId ?? ''}');
-      debugPrint('callId: ${callId ?? ''}');
-
-      return;
-    };
-
-    _callEndHandler = (data) async {
-      final payload = _payloadFrom(Map<String, dynamic>.from(data));
-      _handleRemoteCallClosed(payload, reason: 'call_end');
-    };
-
-    _callRejectHandler = (data) async {
-      final payload = _payloadFrom(Map<String, dynamic>.from(data));
-      _handleRemoteCallClosed(payload, reason: 'call_reject');
-    };
-
-    _callTimeoutHandler = (data) async {
-      final payload = _payloadFrom(Map<String, dynamic>.from(data));
-      _handleRemoteCallClosed(payload, reason: 'call_timeout');
-    };
-
-    SocketService.instance.on(CallSocketEvents.incomingCall, _incomingCallHandler!);
-    SocketService.instance.on(CallSocketEvents.callOffer, _callOfferHandler!);
-    SocketService.instance.on(CallSocketEvents.callEnd, _callEndHandler!);
-    SocketService.instance.on(CallSocketEvents.callReject, _callRejectHandler!);
-    SocketService.instance.on(CallSocketEvents.callTimeout, _callTimeoutHandler!);
-
     _registered = true;
-    debugPrint('GLOBAL CALL HANDLER REGISTERED FOR CONVERSATION SOCKET');
+
+    debugPrint('GLOBAL CALL HANDLER READY (global socket only)');
   }
 
   Future<void> openIncomingCallFromCallKit({
@@ -445,6 +353,38 @@ class GlobalCallHandler {
     }
   }
 
+  Future<bool> _ensureControlSocket(String conversationId) async {
+    final cleanConversationId = conversationId.trim();
+    final parsedConversationId = int.tryParse(cleanConversationId);
+    if (parsedConversationId == null) return false;
+
+    if (SocketService.instance.isConnected &&
+        SocketService.instance.activeConversationId == cleanConversationId) {
+      return true;
+    }
+
+    // Never tear down another active call just to send a busy/reject event.
+    if (SocketService.instance.isConnected &&
+        SocketService.instance.activeConversationId != null &&
+        SocketService.instance.activeConversationId != cleanConversationId) {
+      return false;
+    }
+
+    String? token = await ApiClient.storage.read(key: 'access');
+    if (token == null || token.trim().isEmpty) {
+      token = await ApiClient.refreshAccessToken();
+    }
+    if (token == null || token.trim().isEmpty) return false;
+
+    final url = AppConfig.callSocketUrl(
+      conversationId: parsedConversationId,
+      token: token.trim(),
+    );
+
+    await SocketService.instance.connect(url: url);
+    return SocketService.instance.isConnected;
+  }
+
   Future<void> rejectIncomingCallFromCallKit({
     required String callId,
     required String conversationId,
@@ -453,24 +393,49 @@ class GlobalCallHandler {
   }) async {
     await _loadCurrentUserFromStorage();
 
-    final currentId = _currentUserId ?? '';
-    if (currentId.trim().isEmpty) return;
+    final currentId = _currentUserId?.trim() ?? '';
+    final cleanCallId = callId.trim();
+    final cleanConversationId = conversationId.trim();
+    final cleanCallerId = callerId.trim();
 
-    SocketService.instance.emit(
-      CallSocketEvents.callReject,
-      {
-        'from': currentId,
-        'from_user': currentId,
-        'reason': reason,
-        'call_id': callId,
-        'callId': callId,
-        'conversation_id': conversationId,
-        'conversationId': conversationId,
-      },
-      targetUser: callerId,
-      conversationId: conversationId,
-      queueIfDisconnected: true,
-    );
+    if (currentId.isEmpty ||
+        cleanCallId.isEmpty ||
+        cleanConversationId.isEmpty ||
+        cleanCallerId.isEmpty) {
+      return;
+    }
+
+    // Persist first so stale ringing records are not left behind even if
+    // signaling cannot be established from a background/native action.
+    try {
+      await CallApi.reject(cleanCallId);
+    } catch (e) {
+      debugPrint('CALLKIT REJECT API ERROR: $e');
+    }
+
+    try {
+      final connected = await _ensureControlSocket(cleanConversationId);
+      if (connected) {
+        SocketService.instance.emit(
+          CallSocketEvents.callReject,
+          <String, dynamic>{
+            'from': currentId,
+            'from_user': currentId,
+            'reason': reason,
+            'call_id': cleanCallId,
+            'callId': cleanCallId,
+            'conversation_id': cleanConversationId,
+            'conversationId': cleanConversationId,
+          },
+          targetUser: cleanCallerId,
+          conversationId: cleanConversationId,
+          queueIfDisconnected: false,
+        );
+        await Future.delayed(const Duration(milliseconds: 100));
+      }
+    } catch (e) {
+      debugPrint('CALLKIT REJECT SIGNAL ERROR: $e');
+    }
 
     clearPendingOffer();
     markCallScreenClosed();
@@ -538,7 +503,7 @@ class GlobalCallHandler {
         } else {
           debugPrint('GLOBAL INCOMING CALL WHILE REAL BUSY');
 
-          h._sendBusyToCaller(
+          await h._sendBusyToCaller(
             currentId: currentId,
             callerId: callerId,
             conversationId: conversationId,
@@ -610,28 +575,45 @@ class GlobalCallHandler {
     }
   }
 
-  void _sendBusyToCaller({
+  Future<void> _sendBusyToCaller({
     required String currentId,
     required String callerId,
     required String? conversationId,
     required String? callId,
     required String reason,
-  }) {
-    SocketService.instance.emit(
-      CallSocketEvents.callBusy,
-      {
-        'from': currentId,
-        'from_user': currentId,
-        'reason': reason,
-        if (callId != null) 'call_id': callId,
-        if (callId != null) 'callId': callId,
-        if (conversationId != null) 'conversation_id': conversationId,
-        if (conversationId != null) 'conversationId': conversationId,
-      },
-      targetUser: callerId,
-      conversationId: conversationId,
-      queueIfDisconnected: true,
-    );
+  }) async {
+    final cleanCallId = callId?.trim() ?? '';
+
+    // The backend has no "busy" status action. Rejecting this second call is
+    // the only authoritative terminal transition available today.
+    if (cleanCallId.isNotEmpty) {
+      try {
+        await CallApi.reject(cleanCallId);
+      } catch (e) {
+        debugPrint('BUSY REJECT API ERROR: $e');
+      }
+    }
+
+    // If this exact conversation socket is already connected, also send a
+    // low-latency busy event. Never switch away from another active call.
+    if (SocketService.instance.isConnected &&
+        SocketService.instance.activeConversationId == conversationId) {
+      SocketService.instance.emit(
+        CallSocketEvents.callBusy,
+        <String, dynamic>{
+          'from': currentId,
+          'from_user': currentId,
+          'reason': reason,
+          if (cleanCallId.isNotEmpty) 'call_id': cleanCallId,
+          if (cleanCallId.isNotEmpty) 'callId': cleanCallId,
+          if (conversationId != null) 'conversation_id': conversationId,
+          if (conversationId != null) 'conversationId': conversationId,
+        },
+        targetUser: callerId,
+        conversationId: conversationId,
+        queueIfDisconnected: false,
+      );
+    }
   }
 
   Future<void> _openIncomingCallScreen({

@@ -27,8 +27,6 @@ import 'package:hiddenly/chat_models.dart';
 import 'package:hiddenly/inside_chat/chat_settingScreen.dart';
 import 'package:hiddenly/core/chat/chat_provider.dart';
 import 'package:hiddenly/core/block/block_provider.dart';
-import 'package:hiddenly/core/call/global_call_handler.dart';
-import 'package:hiddenly/core/call/call_api.dart';
 import 'package:hiddenly/widgets/dynamic_message_media.dart';
 import 'package:provider/provider.dart';
 import 'package:path_provider/path_provider.dart';
@@ -606,7 +604,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         conversationId: conversationId,
       );
 
-      final accessToken = await ApiClient.storage.read(key: 'access');
       final currentUserId = await ApiClient.storage.read(key: 'user_id');
 
       if (mounted) {
@@ -615,18 +612,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         });
       }
 
-      if (accessToken != null &&
-          accessToken.trim().isNotEmpty &&
-          currentUserId != null &&
-          currentUserId.trim().isNotEmpty) {
-        GlobalCallHandler.connectCallSocket(
-  url:
-      '${AppConfig.wsBaseUrl}/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
-  currentUserId: currentUserId,
-);
-      } else {
-        debugPrint('CALL SOCKET ERROR: token/user missing in ChatDetailScreen');
-      }
+      // Do NOT connect /ws/call/<conversationId>/ here.
+      // Opening a normal chat should only connect the normal chat socket.
+      // CallScreen -> CallProvider owns the call signaling socket lifecycle.
 
       if (!mounted) return;
 
@@ -3317,8 +3305,8 @@ Future<void> _startCall(bool isVideo) async {
   });
 
   try {
-    final currentUserId = await ApiClient.storage.read(key: 'user_id');
-    final accessToken = await ApiClient.storage.read(key: 'access');
+    final currentUserId =
+        ((await ApiClient.storage.read(key: 'user_id')) ?? '').trim();
 
     final storedUserName =
         (await ApiClient.storage.read(key: 'user_name'))?.trim();
@@ -3340,19 +3328,10 @@ Future<void> _startCall(bool isVideo) async {
         ? storedUserAvatar!
         : storedProfilePicture ?? '';
 
-    if (currentUserId == null || currentUserId.trim().isEmpty) {
+    if (currentUserId.isEmpty) {
       debugPrint('CALL ERROR: currentUserId missing');
       _showMessengerPop(
         'User not ready',
-        icon: Icons.error_rounded,
-      );
-      return;
-    }
-
-    if (accessToken == null || accessToken.trim().isEmpty) {
-      debugPrint('CALL ERROR: accessToken missing');
-      _showMessengerPop(
-        'Login token missing',
         icon: Icons.error_rounded,
       );
       return;
@@ -3370,7 +3349,7 @@ Future<void> _startCall(bool isVideo) async {
     }
 
     final latestChat = await _latestChatForBlock(
-      currentUserId: currentUserId.trim(),
+      currentUserId: currentUserId,
     );
 
     String? receiverId;
@@ -3380,7 +3359,7 @@ Future<void> _startCall(bool isVideo) async {
 
       if (memberId.isEmpty) continue;
 
-      if (memberId != currentUserId.toString().trim()) {
+      if (memberId != currentUserId) {
         receiverId = memberId;
         break;
       }
@@ -3402,65 +3381,37 @@ Future<void> _startCall(bool isVideo) async {
       return;
     }
 
-    GlobalCallHandler.connectCallSocket(
-      url:
-          '${AppConfig.wsBaseUrl}/ws/call/$conversationId/?token=${Uri.encodeComponent(accessToken.trim())}',
-      currentUserId: currentUserId.trim(),
-      currentUserName: currentUserName,
-      currentUserAvatar: currentUserAvatar,
-    );
-
-    final response = await CallApi.startCall(
-      receiverId: receiverId,
-      conversationId: conversationId.toString(),
-      isVideoCall: isVideo,
-    );
-
-    final data = response.data is Map
-        ? Map<String, dynamic>.from(response.data)
-        : <String, dynamic>{};
-
-    final callId = data['call_id']?.toString();
-
-    if (callId == null || callId.trim().isEmpty) {
-      debugPrint('CALL ERROR: backend did not return call_id. DATA: $data');
-      _showMessengerPop(
-        'Could not start call',
-        icon: Icons.error_rounded,
-      );
-      return;
-    }
-
-    debugPrint('BACKEND CALL STARTED: $data');
-
-    AppChatData.addCallLog(
-      chat: widget.chat,
-      type: isVideo ? CallEntryType.video : CallEntryType.voice,
-      status: CallEntryStatus.outgoing,
-    );
-
     if (!mounted) return;
 
-    Navigator.push(
+    // IMPORTANT:
+    // ChatDetailScreen does NOT:
+    //   1. create the backend call directly
+    //   2. connect /ws/call/<conversationId>/
+    //   3. create a call id
+    //
+    // CallScreen -> CallProvider owns the complete outgoing call transaction:
+    // backend call creation -> server call id -> signaling socket -> WebRTC.
+    await Navigator.push<void>(
       context,
       MaterialPageRoute(
         builder: (_) => CallScreen(
           name: _chatDisplayName(),
           avatarUrl: _resolvedChatAvatarUrl(),
           isVideoCall: isVideo,
-          chat: widget.chat,
-          currentUserId: currentUserId.trim(),
+          chat: latestChat,
+          currentUserId: currentUserId,
           currentUserName: currentUserName,
           currentUserAvatar: currentUserAvatar,
           receiverId: receiverId!,
           isCaller: true,
-          conversationId: widget.chat.id,
-          callId: callId,
+          conversationId: conversationId.toString(),
+          callId: null,
         ),
       ),
     );
-  } catch (e) {
-    debugPrint('START CALL API ERROR: $e');
+  } catch (e, stack) {
+    debugPrint('OPEN CALL SCREEN ERROR: $e');
+    debugPrint(stack.toString());
 
     if (!mounted) return;
 

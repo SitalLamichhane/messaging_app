@@ -65,7 +65,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       await provider.loadConversations();
 
       // Keep global socket for real-time chat list.
-      await provider.connectGlobalSocket();
+      // await provider.connectGlobalSocket();
     });
   }
 

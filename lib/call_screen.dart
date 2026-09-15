@@ -8,10 +8,6 @@ import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
 
 import 'package:hiddenly/chat_data.dart';
 import 'package:hiddenly/chat_models.dart';
-import 'package:hiddenly/call_waiting.dart';
-import 'package:hiddenly/core/api_client.dart';
-import 'package:hiddenly/core/config/app_config.dart';
-import 'package:hiddenly/core/call/call_socket_service.dart';
 import 'package:hiddenly/core/call/call_overlay_controller.dart';
 import 'package:hiddenly/core/call/call_provider.dart';
 import 'package:hiddenly/core/call/call_state.dart';
@@ -69,9 +65,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   bool _upgradeDialogShowing = false;
   bool _isDisposed = false;
 
-  bool _connectingAcceptedCallSocket = false;
-  bool _sentAcceptedCallReady = false;
-
   bool _isLocalVideoMain = false;
   bool _isDraggingPreview = false;
   Offset? _previewOffset;
@@ -118,34 +111,18 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     return _getRemoteDisplayName(callState);
   }
 
-  String _fixAvatarUrl(String url) {
-    final clean = url.trim();
-
-    if (clean.isEmpty) return '';
-
-    if (clean.startsWith('http://') || clean.startsWith('https://')) {
-      return clean;
-    }
-
-    if (clean.startsWith('/')) {
-      return '${AppConfig.serverUrl}$clean';
-    }
-
-    return '${AppConfig.serverUrl}/$clean';
-  }
-
   String _getDisplayAvatarUrl(CallState callState) {
     final stateAvatar = callState.avatarUrl;
 
     if (stateAvatar != null && stateAvatar.trim().isNotEmpty) {
-      return _fixAvatarUrl(stateAvatar);
+      return stateAvatar.trim();
     }
 
-    return _fixAvatarUrl(widget.avatarUrl);
+    return widget.avatarUrl.trim();
   }
 
   String _getCurrentUserAvatarUrl() {
-    return _fixAvatarUrl(widget.currentUserAvatar);
+    return widget.currentUserAvatar.trim();
   }
 
   Map<String, dynamic>? _normalizedIncomingOffer() {
@@ -209,23 +186,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
     return null;
   }
 
-  bool _receiverHasValidOffer() {
-    if (widget.isCaller) {
-      return true;
-    }
-
-    final offer = _normalizedIncomingOffer();
-
-    if (offer == null) {
-      return false;
-    }
-
-    final type = offer['type']?.toString() ?? '';
-    final sdp = offer['sdp']?.toString() ?? '';
-
-    return type.trim().isNotEmpty && sdp.trim().isNotEmpty;
-  }
-
   void _safePopOrLog(String reason) {
     if (_isDisposed || !mounted) return;
 
@@ -239,200 +199,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
     debugPrint('$reason: navigator cannot pop, staying in app');
   }
-
-  void _closeInvalidReceiverCall() {
-    if (!mounted || _didPop) return;
-
-    debugPrint(
-      'CALL SCREEN BLOCKED: receiver opened without valid WebRTC SDP offer.',
-    );
-    debugPrint('CALL SCREEN incomingOffer: ${widget.incomingOffer}');
-    debugPrint('CALL SCREEN conversationId: ${widget.conversationId}');
-    debugPrint('CALL SCREEN callId: ${widget.callId}');
-    debugPrint('CALL SCREEN receiverId: ${widget.receiverId}');
-
-    final conversationId = widget.conversationId ?? widget.chat?.id;
-
-    if (conversationId == null || conversationId.toString().trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Call connection not ready. Conversation missing.'),
-        ),
-      );
-
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (!mounted || _didPop) return;
-
-        _didPop = true;
-        _safePopOrLog('CALL SCREEN INVALID RECEIVER');
-      });
-
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Waiting for caller offer...'),
-      ),
-    );
-
-    Future.delayed(const Duration(milliseconds: 400), () {
-      if (!mounted || _didPop) return;
-
-      _didPop = true;
-
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => CallWaitingScreen(
-            currentUserId: widget.currentUserId,
-            currentUserName: widget.currentUserName,
-            currentUserAvatar: widget.currentUserAvatar,
-            callerId: widget.receiverId,
-            callerName: widget.name,
-            callerAvatar: widget.avatarUrl,
-            isVideoCall: widget.isVideoCall,
-            conversationId: conversationId.toString(),
-            callId: widget.callId,
-            chat: widget.chat,
-            emitAcceptOnOpen: false,
-          ),
-        ),
-      );
-    });
-  }
-
-  Future<bool> _ensureSocketForAcceptedBackgroundCall() async {
-    if (widget.isCaller) return true;
-
-    final offer = _normalizedIncomingOffer();
-
-    if (offer != null) return true;
-
-    if (_connectingAcceptedCallSocket) {
-      return SocketService.instance.isConnected;
-    }
-
-    final convId = widget.conversationId?.toString().trim() ??
-        widget.chat?.id.toString().trim() ??
-        '';
-
-    if (convId.isEmpty) {
-      debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: conversationId empty');
-      return false;
-    }
-
-    final parsedConversationId = int.tryParse(convId);
-
-    if (parsedConversationId == null) {
-      debugPrint(
-        'CALL SCREEN ACCEPT SOCKET ERROR: invalid conversationId: $convId',
-      );
-      return false;
-    }
-
-    _connectingAcceptedCallSocket = true;
-
-    try {
-      String? accessToken = await ApiClient.storage.read(key: 'access');
-
-      if (accessToken == null || accessToken.trim().isEmpty) {
-        debugPrint('CALL SCREEN ACCEPT SOCKET: access empty, trying refresh');
-        accessToken = await ApiClient.refreshAccessToken();
-      }
-
-      if (accessToken == null || accessToken.trim().isEmpty) {
-        debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: access token empty');
-        return false;
-      }
-
-      final url = AppConfig.callSocketUrl(
-        conversationId: parsedConversationId,
-        token: accessToken.trim(),
-      );
-
-      debugPrint('========== CALL SCREEN ACCEPT SOCKET ==========');
-      debugPrint('conversationId: $convId');
-      debugPrint('currentUserId: ${widget.currentUserId}');
-      debugPrint('callerId/receiverId: ${widget.receiverId}');
-      debugPrint('callId: ${widget.callId ?? ''}');
-      debugPrint('url: $url');
-      debugPrint('==============================================');
-
-      await SocketService.instance.connect(url: url);
-      await Future.delayed(const Duration(milliseconds: 250));
-
-      if (!SocketService.instance.isConnected) {
-        debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: socket not connected');
-        return false;
-      }
-
-      debugPrint('CALL SCREEN ACCEPT SOCKET CONNECTED');
-      return true;
-    } catch (e, st) {
-      debugPrint('CALL SCREEN ACCEPT SOCKET ERROR: $e');
-      debugPrint(st.toString());
-      return false;
-    } finally {
-      _connectingAcceptedCallSocket = false;
-    }
-  }
-
-  void _sendCallReadyForAcceptedBackgroundCall() {
-    if (widget.isCaller) return;
-
-    final offer = _normalizedIncomingOffer();
-
-    if (offer != null) return;
-
-    if (_sentAcceptedCallReady) {
-      debugPrint('CALL SCREEN CALL_READY IGNORED: already sent');
-      return;
-    }
-
-    final convId = widget.conversationId?.toString().trim() ??
-        widget.chat?.id.toString().trim() ??
-        '';
-
-    if (convId.isEmpty) {
-      debugPrint('CALL SCREEN CALL_READY ERROR: conversationId empty');
-      return;
-    }
-
-    if (widget.currentUserId.trim().isEmpty) {
-      debugPrint('CALL SCREEN CALL_READY ERROR: currentUserId empty');
-      return;
-    }
-
-    if (widget.receiverId.trim().isEmpty) {
-      debugPrint('CALL SCREEN CALL_READY ERROR: receiverId/callerId empty');
-      return;
-    }
-
-    _sentAcceptedCallReady = true;
-
-    debugPrint('========== CALL SCREEN SENDING CALL_READY ==========');
-    debugPrint('from/currentUserId: ${widget.currentUserId}');
-    debugPrint('target/callerId: ${widget.receiverId}');
-    debugPrint('conversationId: $convId');
-    debugPrint('callId: ${widget.callId ?? ''}');
-    debugPrint('===================================================');
-
-    SocketService.instance.emit(
-      CallSocketEvents.callReady,
-      {
-        'from': widget.currentUserId,
-        'from_user': widget.currentUserId,
-        'call_id': widget.callId,
-        'callId': widget.callId,
-        'conversation_id': convId,
-        'conversationId': convId,
-      },
-      targetUser: widget.receiverId,
-      conversationId: convId,
-      queueIfDisconnected: true,
-    );
-  }
-
 
   void _setCallScreenVisibleAfterFirstFrame() {
     void applyVisible() {
@@ -549,7 +315,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
       debugPrint('CALL SCREEN BACKEND CALL ID: ${widget.callId}');
       debugPrint('CALL SCREEN IS CALLER: ${widget.isCaller}');
       debugPrint('CALL SCREEN RESUME EXISTING: ${widget.resumeExistingCall}');
-      debugPrint('CALL SCREEN RAW INCOMING OFFER: ${widget.incomingOffer}');
 
       if (widget.resumeExistingCall) {
         return;
@@ -557,29 +322,11 @@ class _CallScreenState extends ConsumerState<CallScreen> {
 
       final offer = widget.isCaller ? null : _normalizedIncomingOffer();
 
-      if (!widget.isCaller && offer == null) {
-        final connected = await _ensureSocketForAcceptedBackgroundCall();
-
-        if (!connected) {
-          if (!mounted) return;
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not connect call socket')),
-          );
-
-          Future.delayed(const Duration(milliseconds: 700), () {
-            if (!mounted || _didPop) return;
-
-            _didPop = true;
-            _safePopOrLog('CALL SCREEN SOCKET CONNECT FAILED');
-          });
-
-          return;
-        }
-      }
-
       if (!mounted) return;
 
+      // CallNotifier owns the complete call transaction:
+      // server call creation/accept -> signaling socket -> WebRTC.
+      // CallScreen only renders the state and forwards user controls.
       await ref.read(callProvider.notifier).startCall(
             currentUserId: widget.currentUserId,
             currentUserName: widget.currentUserName,
@@ -593,14 +340,6 @@ class _CallScreenState extends ConsumerState<CallScreen> {
             conversationId: widget.conversationId ?? widget.chat?.id,
             callId: widget.callId,
           );
-
-      if (!widget.isCaller && offer == null) {
-        await Future.delayed(const Duration(milliseconds: 1000));
-
-       if (SocketService.instance.isConnected) {
-       _sendCallReadyForAcceptedBackgroundCall();
-      }
-      }
     });
   }
 
@@ -826,6 +565,19 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   void _saveCallResultIfNeeded(CallState callState) {
     if (_didSaveCallResult) return;
     if (widget.chat == null) return;
+
+    // If /calls/start/ returned 409 (or failed before Django created/accepted
+    // a call), there is no new call session to save into the local chat.
+    // In that case CallProvider leaves callState.callId empty.
+    final serverCallId = (callState.callId ?? '').trim();
+    if (serverCallId.isEmpty) {
+      _didSaveCallResult = true;
+      debugPrint(
+        'CALL RESULT SKIPPED: no server call id; '
+        'status=${callState.status.name}',
+      );
+      return;
+    }
 
     _didSaveCallResult = true;
 
@@ -1585,47 +1337,32 @@ class _CallScreenState extends ConsumerState<CallScreen> {
   }
 
   Widget _buildVoiceCallBackground(bool hasAvatar, String displayAvatarUrl) {
-    // Keep audio calls clean. The previous implementation stretched the
-    // contact avatar over the whole screen, creating an unwanted image/shadow
-    // behind the profile photo and controls.
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [
-                Color(0xFF172033),
-                Color(0xFF0D1422),
-                Color(0xFF030712),
-              ],
-              stops: [0.0, 0.52, 1.0],
-            ),
-          ),
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            Color(0xFF111827),
+            Color(0xFF0F172A),
+            Color(0xFF030712),
+          ],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
         ),
-        Align(
-          alignment: const Alignment(0, -0.62),
-          child: IgnorePointer(
-            child: Container(
-              width: 310,
-              height: 310,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [
-                    const Color(0xFF1877F2).withOpacity(0.16),
-                    const Color(0xFF1877F2).withOpacity(0.05),
-                    Colors.transparent,
-                  ],
-                  stops: const [0.0, 0.48, 1.0],
+      ),
+      child: hasAvatar
+          ? Center(
+              child: Opacity(
+                opacity: 0.12,
+                child: Image.network(
+                  displayAvatarUrl,
+                  fit: BoxFit.cover,
+                  width: double.infinity,
+                  height: double.infinity,
+                  errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                 ),
               ),
-            ),
-          ),
-        ),
-      ],
+            )
+          : null,
     );
   }
 
@@ -1739,4 +1476,4 @@ class _TopCircleButton extends StatelessWidget {
       ),
     );
   }
-} 
+}

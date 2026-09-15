@@ -1,23 +1,16 @@
+// lib/call_detail_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:hiddenly/call_screen.dart';
 import 'package:hiddenly/chat_models.dart';
 
-/// Production-safe wrapper around the real WebRTC CallScreen.
-///
-/// The old CallDetailScreen contained demo-only logic:
-/// - fake 3-second call connection timer
-/// - local-only call chat messages
-/// - hardcoded add-member names
-/// - camera package preview not connected to WebRTC
-///
-/// Keep this file only if old routes still open CallDetailScreen.
-/// New code should open CallScreen directly.
+/// Compatibility wrapper for old routes.
+/// New code can open [CallScreen] directly.
 class CallDetailScreen extends StatelessWidget {
   final String name;
   final String avatarUrl;
   final bool isVideoCall;
   final ChatItem? chat;
-
   final String currentUserId;
   final String currentUserName;
   final String currentUserAvatar;
@@ -25,6 +18,7 @@ class CallDetailScreen extends StatelessWidget {
   final bool isCaller;
   final Map<String, dynamic>? incomingOffer;
   final String? conversationId;
+  final String? callId;
 
   const CallDetailScreen({
     super.key,
@@ -39,6 +33,7 @@ class CallDetailScreen extends StatelessWidget {
     required this.isCaller,
     this.incomingOffer,
     this.conversationId,
+    this.callId,
   });
 
   @override
@@ -55,7 +50,7 @@ class CallDetailScreen extends StatelessWidget {
       isCaller: isCaller,
       incomingOffer: incomingOffer,
       conversationId: conversationId ?? chat?.id,
+      callId: callId,
     );
   }
 }
- //push

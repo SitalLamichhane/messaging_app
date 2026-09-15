@@ -39,6 +39,16 @@ class GlobalCallSocketService {
   bool get isConnecting => _connecting;
   String? get currentUrl => _url;
 
+
+  String _safeEndpoint(String url) {
+    try {
+      final uri = Uri.parse(url);
+      return uri.replace(query: '', fragment: '').toString();
+    } catch (_) {
+      return '<websocket>';
+    }
+  }
+
   String _sanitizeWsUrl(String url) {
     var fixed = url.trim().replaceAll('#', '');
 
@@ -60,7 +70,7 @@ class GlobalCallSocketService {
     }
 
     if (_connected && _channel != null && _url == fixedUrl) {
-      debugPrint('GLOBAL CALL WS ALREADY CONNECTED: $fixedUrl');
+      debugPrint('GLOBAL CALL WS ALREADY CONNECTED');
       return;
     }
 
@@ -89,7 +99,7 @@ class GlobalCallSocketService {
       debugPrint('################################################');
       debugPrint('### GLOBAL CALL WS CONNECTING');
       debugPrint('################################################');
-      debugPrint('url: $fixedUrl');
+      debugPrint('endpoint: ${_safeEndpoint(fixedUrl)}');
       debugPrint('################################################');
 
       final channel = WebSocketChannel.connect(Uri.parse(fixedUrl));
@@ -156,14 +166,14 @@ class GlobalCallSocketService {
       _connected = true;
       _reconnectAttempt = 0;
 
-      debugPrint('GLOBAL CALL WS CONNECTED/ACTIVE: $fixedUrl');
+      debugPrint('GLOBAL CALL WS CONNECTED/ACTIVE: ${_safeEndpoint(fixedUrl)}');
 
       // Fire local connected event so the handler can log/confirm that
       // the receiver is really listening for incoming calls.
       unawaited(_dispatchLocalEvent(GlobalCallSocketEvents.connected, {
         'event': GlobalCallSocketEvents.connected,
         'type': GlobalCallSocketEvents.connected,
-        'url': fixedUrl,
+        'endpoint': _safeEndpoint(fixedUrl),
       }));
 
       if (!(_connectCompleter?.isCompleted ?? true)) {
@@ -257,7 +267,6 @@ class GlobalCallSocketService {
   Future<void> _handleMessage(dynamic message) async {
     debugPrint('');
     debugPrint('================ GLOBAL CALL WS MESSAGE ================');
-    debugPrint('RAW: $message');
 
     try {
       final decoded = jsonDecode(message.toString());
@@ -280,8 +289,6 @@ class GlobalCallSocketService {
       final data = _normalizeData(rawData, event);
 
       debugPrint('GLOBAL CALL WS EVENT: $event');
-      debugPrint('GLOBAL CALL WS DATA: $data');
-      debugPrint('GLOBAL CALL WS PAYLOAD: ${data['payload']}');
 
       final handlers = _handlers[event];
 
