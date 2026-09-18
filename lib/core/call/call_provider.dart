@@ -71,6 +71,14 @@ class CallNotifier extends StateNotifier<CallState> {
   bool _remoteAnswerApplied = false;
   String? _lastAnsweredOfferFingerprint;
 
+  // Video-upgrade requests are reusable during the same audio call.
+  // These ids prevent a late/queued decline or answer from an older request
+  // from affecting a newer request.
+  String? _activeVideoUpgradeRequestId;
+  String? _pendingVideoUpgradeRequestId;
+  String? _pendingVideoUpgradeRequesterId;
+  String? _lastResolvedVideoUpgradeRequestId;
+
   String? _conversationId;
   String? _callId;
   String _currentUserNameForOffer = '';
@@ -132,6 +140,19 @@ class CallNotifier extends StateNotifier<CallState> {
             ?.toString()
             .trim() ??
         '';
+  }
+
+  String _payloadVideoRequestId(Map<String, dynamic> payload) {
+    return (payload['video_request_id'] ?? payload['videoRequestId'])
+            ?.toString()
+            .trim() ??
+        '';
+  }
+
+  String _newVideoUpgradeRequestId(String currentUserId) {
+    final callPart = (_callId ?? 'call').trim();
+    final now = DateTime.now().microsecondsSinceEpoch;
+    return '${callPart}_${currentUserId}_$now';
   }
 
   bool _matchesActiveEvent(
@@ -337,6 +358,38 @@ class CallNotifier extends StateNotifier<CallState> {
     debugPrint('CALL READY SENT');
   }
 
+  Map<String, dynamic>? _normalizeOffer(Map<String, dynamic>? source) {
+    if (source == null) return null;
+
+    Map<String, dynamic> candidate = Map<String, dynamic>.from(source);
+
+    // Accept all shapes used by foreground WS, FCM/CallKit, and cached events:
+    // {payload: {offer: {...}}}, {offer: {...}}, or {type: offer, sdp: ...}.
+    final rawPayload = candidate['payload'];
+    if (rawPayload is Map) {
+      candidate = Map<String, dynamic>.from(rawPayload);
+    }
+
+    final rawOffer = candidate['offer'];
+    if (rawOffer is Map) {
+      candidate = Map<String, dynamic>.from(rawOffer);
+    }
+
+    final type =
+        candidate['type']?.toString().trim().toLowerCase() ?? '';
+    final rawSdp = candidate['sdp'];
+
+    if (type != 'offer' || rawSdp is! String || rawSdp.trim().isEmpty) {
+      return null;
+    }
+
+    // IMPORTANT: preserve SDP exactly. Do not trim/reformat it.
+    return <String, dynamic>{
+      'type': 'offer',
+      'sdp': rawSdp,
+    };
+  }
+
   Future<void> startCall({
     required String currentUserId,
     required String receiverId,
@@ -388,6 +441,10 @@ class CallNotifier extends StateNotifier<CallState> {
     _answeringOffer = false;
     _remoteAnswerApplied = false;
     _lastAnsweredOfferFingerprint = null;
+    _activeVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequesterId = null;
+    _lastResolvedVideoUpgradeRequestId = null;
 
     _durationTimer?.cancel();
     _timeoutTimer?.cancel();
@@ -571,15 +628,31 @@ class CallNotifier extends StateNotifier<CallState> {
       // Foreground incoming_call normally contains the offer. CallKit/FCM can
       // open the app before that offer arrives; call_ready asks the caller to
       // resend its cached offer in that case.
-      if (incomingOffer == null) {
+      final normalizedIncomingOffer = _normalizeOffer(incomingOffer);
+
+      if (normalizedIncomingOffer == null) {
         _waitingForOfferAfterCallKitAccept = true;
         await _sendCallReady();
-        debugPrint('RECEIVER ACCEPTED. WAITING FOR CALL_OFFER...');
+
+        if (incomingOffer == null) {
+          debugPrint('RECEIVER ACCEPTED. WAITING FOR CALL_OFFER...');
+        } else {
+          debugPrint(
+            'RECEIVER ACCEPTED. SUPPLIED OFFER WAS NOT A VALID SDP OFFER; '
+            'WAITING FOR FRESH CALL_OFFER...',
+          );
+        }
         return;
       }
 
+      debugPrint(
+        'DIRECT INCOMING OFFER NORMALIZED: '
+        'type=${normalizedIncomingOffer['type']} '
+        'sdpLength=${(normalizedIncomingOffer['sdp'] as String).length}',
+      );
+
       await _answerIncomingOffer(
-        offer: incomingOffer,
+        offer: normalizedIncomingOffer,
         currentUserId: cleanCurrentUserId,
         receiverId: cleanReceiverId,
       );
@@ -686,36 +759,12 @@ class CallNotifier extends StateNotifier<CallState> {
       return;
     }
 
-    final rawOffer = payload['offer'];
-
-    Map<String, dynamic>? offer;
-
-    if (rawOffer is Map<String, dynamic>) {
-      offer = Map<String, dynamic>.from(rawOffer);
-    } else if (rawOffer is Map) {
-      offer = Map<String, dynamic>.from(rawOffer);
-    } else {
-      final type = payload['type']?.toString() ?? '';
-      final sdp = payload['sdp']?.toString() ?? '';
-
-      if (type.trim().isNotEmpty && sdp.trim().isNotEmpty) {
-        offer = {
-          'type': type,
-          'sdp': sdp,
-        };
-      }
-    }
+    final offer = _normalizeOffer(payload);
 
     if (offer == null) {
-      debugPrint('CALL OFFER MISSING SDP');
-      return;
-    }
-
-    final offerType = offer['type']?.toString() ?? '';
-    final offerSdp = offer['sdp']?.toString() ?? '';
-
-    if (offerType.trim().isEmpty || offerSdp.trim().isEmpty) {
-      debugPrint('CALL OFFER INVALID SDP');
+      debugPrint(
+        'CALL OFFER INVALID: expected a WebRTC offer with type=offer and SDP',
+      );
       return;
     }
 
@@ -760,14 +809,19 @@ class CallNotifier extends StateNotifier<CallState> {
     required String currentUserId,
     required String receiverId,
   }) async {
-    final offerType = offer['type']?.toString().trim() ?? '';
-    final offerSdp = offer['sdp']?.toString().trim() ?? '';
+    final normalizedOffer = _normalizeOffer(offer);
 
-    if (offerType.isEmpty || offerSdp.isEmpty) {
-      debugPrint('ANSWER INCOMING OFFER ERROR: invalid offer');
+    if (normalizedOffer == null) {
+      debugPrint(
+        'ANSWER INCOMING OFFER ERROR: malformed offer; requesting resend',
+      );
+      _waitingForOfferAfterCallKitAccept = true;
+      await _sendCallReady();
       return;
     }
 
+    final offerType = normalizedOffer['type'] as String;
+    final offerSdp = normalizedOffer['sdp'] as String;
     final fingerprint = '$offerType:${offerSdp.hashCode}';
 
     if (_lastAnsweredOfferFingerprint == fingerprint) {
@@ -783,7 +837,11 @@ class CallNotifier extends StateNotifier<CallState> {
     _answeringOffer = true;
 
     try {
-      await webrtc.setRemoteDescription(offer);
+      debugPrint(
+        'ANSWERING OFFER: type=$offerType sdpLength=${offerSdp.length}',
+      );
+
+      await webrtc.setRemoteDescription(normalizedOffer);
       final answer = await webrtc.createAnswer();
 
       SocketService.instance.emit(
@@ -803,10 +861,11 @@ class CallNotifier extends StateNotifier<CallState> {
       );
 
       _lastAnsweredOfferFingerprint = fingerprint;
+      _waitingForOfferAfterCallKitAccept = false;
 
       _safeState(
         state.copyWith(
-          incomingOffer: offer,
+          incomingOffer: normalizedOffer,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
@@ -816,7 +875,14 @@ class CallNotifier extends StateNotifier<CallState> {
     } catch (e, st) {
       debugPrint('ANSWER INCOMING OFFER ERROR: $e');
       debugPrint(st.toString());
-      await _finishCall(CallStatus.failed, emitSocket: false);
+
+      // Do not immediately end an accepted backend call because one SDP copy
+      // was malformed/stale. Request the caller's current local offer again.
+      if (_canUpdate && !_isFinalStatus(state.status)) {
+        _waitingForOfferAfterCallKitAccept = true;
+        await _sendCallReady();
+        debugPrint('REMOTE OFFER APPLY FAILED; REQUESTED FRESH CALL_OFFER');
+      }
     } finally {
       _answeringOffer = false;
     }
@@ -902,8 +968,8 @@ class CallNotifier extends StateNotifier<CallState> {
 
     final payload = Map<String, dynamic>.from(rawPayload);
     if (!_matchesActiveEvent(payload)) return;
-    final rawOffer = payload['offer'];
 
+    final rawOffer = payload['offer'];
     if (rawOffer is! Map) return;
 
     final requestType = payload['requestType']?.toString() ??
@@ -959,13 +1025,52 @@ class CallNotifier extends StateNotifier<CallState> {
       return;
     }
 
+    // Only video-upgrade renegotiation should show the Accept/Decline popup.
+    // This avoids accidentally treating an unrelated renegotiation as video.
+    if (requestType.isNotEmpty && requestType != 'video_upgrade') {
+      debugPrint('RENEGOTIATION OFFER IGNORED: unsupported type $requestType');
+      return;
+    }
+
+    final requestId = _payloadVideoRequestId(payload);
+    final requestFromUser = _payloadFromUser(payload);
+
+    // Remember the ACTUAL user who sent this upgrade request.
+    // Accept/Decline must reply to this user, not blindly to state.receiverId.
+    _pendingVideoUpgradeRequesterId =
+        requestFromUser.isEmpty ? null : requestFromUser;
+
+    debugPrint(
+      'VIDEO UPGRADE REQUEST FROM USER: '
+      '${_pendingVideoUpgradeRequesterId ?? "unknown"}',
+    );
+
+    // A duplicated/late copy of an already answered or declined request must
+    // never reopen the popup. This is what makes repeated requests reliable.
+    if (requestId.isNotEmpty &&
+        requestId == _lastResolvedVideoUpgradeRequestId) {
+      debugPrint(
+        'DUPLICATE RESOLVED VIDEO UPGRADE REQUEST IGNORED: $requestId',
+      );
+      return;
+    }
+
+    _pendingVideoUpgradeRequestId =
+        requestId.isEmpty ? null : requestId;
+
     _safeState(
       state.copyWith(
         hasPendingVideoUpgrade: true,
         pendingVideoOffer: Map<String, dynamic>.from(rawOffer),
         isVideoUpgradeRequesting: false,
         isVideoUpgradeRejected: false,
+        clearError: true,
       ),
+    );
+
+    debugPrint(
+      'VIDEO UPGRADE REQUEST RECEIVED: '
+      '${_pendingVideoUpgradeRequestId ?? "legacy/no-id"}',
     );
   }
 
@@ -977,13 +1082,50 @@ class CallNotifier extends StateNotifier<CallState> {
 
     final payload = Map<String, dynamic>.from(rawPayload);
     if (!_matchesActiveEvent(payload)) return;
-    final rawAnswer = payload['answer'];
 
-    if (rawAnswer is! Map) return;
+    final rawAnswer = payload['answer'];
+    if (rawAnswer is! Map) {
+      debugPrint('VIDEO UPGRADE ANSWER IGNORED: answer payload missing');
+      return;
+    }
+
+    debugPrint(
+      'VIDEO UPGRADE ANSWER RECEIVED FROM: ${_payloadFromUser(payload)}',
+    );
 
     final requestType = payload['requestType']?.toString() ??
         payload['request_type']?.toString() ??
         '';
+
+    if (requestType != 'ice_restart') {
+      final incomingRequestId = _payloadVideoRequestId(payload);
+      final activeRequestId = _activeVideoUpgradeRequestId?.trim() ?? '';
+      final lastResolvedId = _lastResolvedVideoUpgradeRequestId?.trim() ?? '';
+
+      // If the fallback call_video_toggle event already carried and applied
+      // this exact SDP answer, do NOT apply the same answer a second time.
+      // Applying an answer twice while the PC is already stable can throw and
+      // previously caused the requester to roll back to audio.
+      if (incomingRequestId.isNotEmpty &&
+          incomingRequestId == lastResolvedId &&
+          state.isVideoCall) {
+        debugPrint(
+          'DUPLICATE VIDEO UPGRADE ANSWER IGNORED: $incomingRequestId',
+        );
+        return;
+      }
+
+      // If ids are present, only the answer for the CURRENT request is valid.
+      if (activeRequestId.isNotEmpty &&
+          incomingRequestId.isNotEmpty &&
+          incomingRequestId != activeRequestId) {
+        debugPrint(
+          'STALE VIDEO UPGRADE ANSWER IGNORED: '
+          'incoming=$incomingRequestId active=$activeRequestId',
+        );
+        return;
+      }
+    }
 
     try {
       await webrtc.handleRenegotiationAnswer(
@@ -1004,6 +1146,12 @@ class CallNotifier extends StateNotifier<CallState> {
         return;
       }
 
+      final resolvedRequestId = _activeVideoUpgradeRequestId;
+      _activeVideoUpgradeRequestId = null;
+      if (resolvedRequestId != null && resolvedRequestId.isNotEmpty) {
+        _lastResolvedVideoUpgradeRequestId = resolvedRequestId;
+      }
+
       _safeState(
         state.copyWith(
           isVideoCall: true,
@@ -1012,9 +1160,15 @@ class CallNotifier extends StateNotifier<CallState> {
           isSpeakerOn: true,
           isVideoUpgradeRequesting: false,
           isVideoUpgradeRejected: false,
+          clearError: true,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
+      );
+
+      debugPrint(
+        'VIDEO UPGRADE ANSWER APPLIED: '
+        '${resolvedRequestId ?? "legacy/no-id"}',
       );
     } catch (e, st) {
       debugPrint('Renegotiation answer error: $e');
@@ -1024,7 +1178,14 @@ class CallNotifier extends StateNotifier<CallState> {
         return;
       }
 
+      final failedRequestId = _activeVideoUpgradeRequestId;
+      _activeVideoUpgradeRequestId = null;
+      if (failedRequestId != null && failedRequestId.isNotEmpty) {
+        _lastResolvedVideoUpgradeRequestId = failedRequestId;
+      }
+
       await webrtc.disableVideoHard();
+      await webrtc.setSpeaker(false);
 
       _safeState(
         state.copyWith(
@@ -1033,6 +1194,8 @@ class CallNotifier extends StateNotifier<CallState> {
           isRemoteCameraOff: true,
           isSpeakerOn: false,
           isVideoUpgradeRequesting: false,
+          isVideoUpgradeRejected: false,
+          errorMessage: 'Unable to switch to video. Please try again.',
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
@@ -1053,11 +1216,12 @@ class CallNotifier extends StateNotifier<CallState> {
     final payload = Map<String, dynamic>.from(rawPayload);
     if (!_matchesActiveEvent(payload)) return;
 
-    final fromUserId = payload['from']?.toString();
+    final fromUserId = _payloadFromUser(payload);
+    final currentUserId = state.currentUserId?.trim() ?? '';
 
-    if (fromUserId != null &&
-        state.currentUserId != null &&
-        fromUserId == state.currentUserId.toString()) {
+    if (fromUserId.isNotEmpty &&
+        currentUserId.isNotEmpty &&
+        fromUserId == currentUserId) {
       return;
     }
 
@@ -1076,32 +1240,135 @@ class CallNotifier extends StateNotifier<CallState> {
       return;
     }
 
-    if (payload.containsKey('isVideoCall') ||
-        payload.containsKey('is_video_call')) {
-      final remoteIsVideoCall = payload['isVideoCall'] == true ||
-          payload['is_video_call'] == true ||
-          payload['isVideoCall']?.toString() == 'true' ||
-          payload['is_video_call']?.toString() == 'true';
+    if (!payload.containsKey('isVideoCall') &&
+        !payload.containsKey('is_video_call')) {
+      return;
+    }
 
-      if (!remoteIsVideoCall) {
-        await webrtc.disableVideoHard();
-        await webrtc.setSpeaker(false);
-      }
+    final remoteIsVideoCall = payload['isVideoCall'] == true ||
+        payload['is_video_call'] == true ||
+        payload['isVideoCall']?.toString() == 'true' ||
+        payload['is_video_call']?.toString() == 'true';
+
+    if (!remoteIsVideoCall) {
+      await webrtc.disableVideoHard();
+      await webrtc.setSpeaker(false);
+
+      _activeVideoUpgradeRequestId = null;
+      _pendingVideoUpgradeRequestId = null;
+      _pendingVideoUpgradeRequesterId = null;
+      _switchingVideo = false;
 
       _safeState(
         state.copyWith(
-          isVideoCall: remoteIsVideoCall,
-          isCameraOff: !remoteIsVideoCall,
-          isRemoteCameraOff: !remoteIsVideoCall,
-          isSpeakerOn: remoteIsVideoCall ? state.isSpeakerOn : false,
+          isVideoCall: false,
+          isCameraOff: true,
+          isRemoteCameraOff: true,
+          isSpeakerOn: false,
           isVideoUpgradeRequesting: false,
           hasPendingVideoUpgrade: false,
+          isVideoUpgradeRejected: false,
           clearPendingVideoOffer: true,
+          clearError: true,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
       );
+
+      debugPrint('VIDEO MODE SYNC: switched to audio');
+      return;
     }
+
+    /*
+      ACCEPT FALLBACK PATH
+
+      Normal path:
+        call_renegotiate_answer -> _handleRenegotiateAnswer()
+
+      Fallback path:
+        call_video_toggle(isVideoCall=true, answer=<same SDP answer>)
+
+      If the requester somehow misses/filters the normal renegotiation-answer
+      event, this second event still contains the SDP answer and can finish
+      the offer/answer transaction before changing the UI to video.
+    */
+    final requestId = _payloadVideoRequestId(payload);
+    final rawFallbackAnswer = payload['answer'];
+
+    if (state.isVideoUpgradeRequesting) {
+      if (rawFallbackAnswer is! Map) {
+        debugPrint(
+          'VIDEO MODE SYNC WAITING: requester still needs SDP answer',
+        );
+        return;
+      }
+
+      try {
+        debugPrint(
+          'VIDEO MODE SYNC FALLBACK: applying accepted SDP answer '
+          '${requestId.isEmpty ? "legacy/no-id" : requestId}',
+        );
+
+        await webrtc.handleRenegotiationAnswer(
+          Map<String, dynamic>.from(rawFallbackAnswer),
+        );
+        await webrtc.setSpeaker(true);
+      } catch (e, st) {
+        debugPrint('VIDEO MODE SYNC FALLBACK ANSWER ERROR: $e');
+        debugPrint(st.toString());
+
+        _switchingVideo = false;
+
+        _safeState(
+          state.copyWith(
+            isVideoCall: false,
+            isCameraOff: false,
+            isRemoteCameraOff: true,
+            isSpeakerOn: false,
+            isVideoUpgradeRequesting: false,
+            isVideoUpgradeRejected: false,
+            errorMessage: 'Video was accepted but SDP answer could not be applied.',
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+        return;
+      }
+    }
+
+    final resolvedId = requestId.isNotEmpty
+        ? requestId
+        : (_activeVideoUpgradeRequestId?.trim() ?? '');
+
+    if (resolvedId.isNotEmpty) {
+      _lastResolvedVideoUpgradeRequestId = resolvedId;
+    }
+
+    _activeVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequesterId = null;
+    _switchingVideo = false;
+
+    _safeState(
+      state.copyWith(
+        isVideoCall: true,
+        isCameraOff: false,
+        isRemoteCameraOff: false,
+        isSpeakerOn: true,
+        isVideoUpgradeRequesting: false,
+        isVideoUpgradeRejected: false,
+        hasPendingVideoUpgrade: false,
+        clearPendingVideoOffer: true,
+        clearError: true,
+        localRenderer: webrtc.localRenderer,
+        remoteRenderer: webrtc.remoteRenderer,
+      ),
+    );
+
+    debugPrint(
+      'VIDEO MODE SYNC: both sides video '
+      '${resolvedId.isEmpty ? "legacy/no-id" : resolvedId}',
+    );
   }
 
   Future<void> _handleVideoUpgradeRejected(Map<String, dynamic> data) async {
@@ -1110,8 +1377,71 @@ class CallNotifier extends StateNotifier<CallState> {
     final payload = _payloadFrom(data);
     if (!_matchesActiveEvent(payload)) return;
 
-    await webrtc.disableVideoHard();
-    await webrtc.setSpeaker(false);
+    // Ignore an echo of the rejection emitted by this same device/user.
+    final fromUserId = _payloadFromUser(payload);
+    final currentUserId = state.currentUserId?.trim() ?? '';
+    if (fromUserId.isNotEmpty &&
+        currentUserId.isNotEmpty &&
+        fromUserId == currentUserId) {
+      debugPrint('OWN VIDEO UPGRADE REJECTION ECHO IGNORED');
+      return;
+    }
+
+    final incomingRequestId = _payloadVideoRequestId(payload);
+    final activeRequestId = _activeVideoUpgradeRequestId?.trim() ?? '';
+
+    // A delayed rejection from request #1 must not reject request #2.
+    if (activeRequestId.isNotEmpty &&
+        incomingRequestId.isNotEmpty &&
+        incomingRequestId != activeRequestId) {
+      debugPrint(
+        'STALE VIDEO UPGRADE REJECTION IGNORED: '
+        'incoming=$incomingRequestId active=$activeRequestId',
+      );
+      return;
+    }
+
+    // If there is no active request anymore, this is a late duplicate.
+    if (activeRequestId.isEmpty && !state.isVideoUpgradeRequesting) {
+      debugPrint('LATE VIDEO UPGRADE REJECTION IGNORED: no active request');
+      return;
+    }
+
+    // A declined upgrade carries a normal SDP answer so the requester can
+    // leave have-local-offer and return to stable signaling before trying
+    // another video request.
+    final rawDeclineAnswer = payload['answer'];
+    if (rawDeclineAnswer is Map) {
+      try {
+        await webrtc.handleRenegotiationAnswer(
+          Map<String, dynamic>.from(rawDeclineAnswer),
+        );
+        debugPrint('VIDEO UPGRADE DECLINE ANSWER APPLIED');
+      } catch (e, st) {
+        debugPrint('VIDEO UPGRADE DECLINE ANSWER ERROR: $e');
+        debugPrint(st.toString());
+      }
+    } else {
+      debugPrint(
+        'VIDEO UPGRADE DECLINE WARNING: no stabilizing SDP answer received',
+      );
+    }
+
+    try {
+      await webrtc.disableVideoHard();
+      await webrtc.setSpeaker(false);
+    } catch (e, st) {
+      debugPrint('VIDEO UPGRADE REJECT ROLLBACK ERROR: $e');
+      debugPrint(st.toString());
+    }
+
+    final resolvedRequestId =
+        incomingRequestId.isNotEmpty ? incomingRequestId : activeRequestId;
+
+    _activeVideoUpgradeRequestId = null;
+    if (resolvedRequestId.isNotEmpty) {
+      _lastResolvedVideoUpgradeRequestId = resolvedRequestId;
+    }
 
     _safeState(
       state.copyWith(
@@ -1121,20 +1451,32 @@ class CallNotifier extends StateNotifier<CallState> {
         isSpeakerOn: false,
         isVideoUpgradeRequesting: false,
         isVideoUpgradeRejected: true,
+        clearError: true,
         localRenderer: webrtc.localRenderer,
         remoteRenderer: webrtc.remoteRenderer,
       ),
     );
 
+    // Critical for allowing another video request after Decline.
     _switchingVideo = false;
+
+    debugPrint(
+      'VIDEO UPGRADE DECLINED: '
+      '${resolvedRequestId.isEmpty ? "legacy/no-id" : resolvedRequestId}',
+    );
   }
 
   Future<void> _handleCallReject(Map<String, dynamic> data) async {
     final payload = _payloadFrom(data);
-    if (!_matchesActiveEvent(payload)) return;
+
+    if (!_matchesActiveEvent(payload, allowAdoptCallId: true)) {
+      debugPrint('CALL REJECT IGNORED: it does not belong to the active call');
+      return;
+    }
+
     if (!_canUpdate || _isFinalStatus(state.status)) return;
 
-    debugPrint('CALL REJECT RECEIVED: $data');
+    debugPrint('REMOTE CALL REJECT RECEIVED: $data');
 
     await _finishCall(
       CallStatus.rejected,
@@ -1146,10 +1488,15 @@ class CallNotifier extends StateNotifier<CallState> {
 
   Future<void> _handleCallEnd(Map<String, dynamic> data) async {
     final payload = _payloadFrom(data);
-    if (!_matchesActiveEvent(payload)) return;
+
+    if (!_matchesActiveEvent(payload, allowAdoptCallId: true)) {
+      debugPrint('CALL END IGNORED: it does not belong to the active call');
+      return;
+    }
+
     if (!_canUpdate || _isFinalStatus(state.status)) return;
 
-    debugPrint('CALL END RECEIVED: $data');
+    debugPrint('REMOTE CALL END RECEIVED: $data');
 
     await _finishCall(
       CallStatus.ended,
@@ -1193,42 +1540,61 @@ class CallNotifier extends StateNotifier<CallState> {
     if (_iceRestarting) return;
     if (_isFinalStatus(state.status)) return;
 
-    final currentUserId = state.currentUserId;
-    final receiverId = state.receiverId;
+    final currentUserId = state.currentUserId?.trim() ?? '';
+    final receiverId = state.receiverId?.trim() ?? '';
+    final conversationId = _conversationId?.trim() ?? '';
+    final callId = _callId?.trim() ?? '';
 
-    if (currentUserId == null || receiverId == null) return;
+    if (currentUserId.isEmpty ||
+        receiverId.isEmpty ||
+        conversationId.isEmpty ||
+        callId.isEmpty) {
+      debugPrint('ICE RESTART SKIPPED: active call identity is incomplete');
+      return;
+    }
 
     _iceRestarting = true;
 
     try {
-      await SocketService.instance.ensureConnected();
-      if (!SocketService.instance.isConnected) return;
-
+      // IMPORTANT:
+      // Create the ICE-restart offer even if the signaling WebSocket is down.
+      // SocketService.emit(queueIfDisconnected: true) will queue the offer,
+      // trigger a reconnect, and flush it once signaling is available again.
       final offer = await webrtc.restartIce();
 
       SocketService.instance.emit(
         CallSocketEvents.callRenegotiateOffer,
-        {
+        <String, dynamic>{
           'from': currentUserId,
           'from_user': currentUserId,
           'offer': offer.toMap(),
           'requestType': 'ice_restart',
           'request_type': 'ice_restart',
-          if (_callId != null) 'call_id': _callId,
-          if (_callId != null) 'callId': _callId,
-          if (_conversationId != null) 'conversation_id': _conversationId,
-          if (_conversationId != null) 'conversationId': _conversationId,
+          'call_id': callId,
+          'callId': callId,
+          'conversation_id': conversationId,
+          'conversationId': conversationId,
         },
         targetUser: receiverId,
-        conversationId: _conversationId,
+        conversationId: conversationId,
         queueIfDisconnected: true,
       );
 
-      debugPrint('ICE RESTART OFFER SENT');
+      if (SocketService.instance.isConnected) {
+        debugPrint('ICE RESTART OFFER SENT');
+      } else {
+        debugPrint(
+          'ICE RESTART OFFER QUEUED; waiting for signaling reconnect',
+        );
+      }
     } catch (e, st) {
       debugPrint('ICE RESTART SEND ERROR: $e');
-      debugPrint(st.toString());
+      if (kDebugMode) {
+        debugPrint(st.toString());
+      }
     } finally {
+      // Keep a small guard against restart storms. The WebRTC service also has
+      // its own restart cooldown, so both layers remain protected.
       Future.delayed(const Duration(seconds: 4), () {
         _iceRestarting = false;
       });
@@ -1290,11 +1656,15 @@ class CallNotifier extends StateNotifier<CallState> {
     if (_switchingVideo) return;
     if (_isFinalStatus(state.status)) return;
 
-    final currentUserId = state.currentUserId;
-    final receiverId = state.receiverId;
+    final currentUserId = state.currentUserId?.trim() ?? '';
+    final receiverId = state.receiverId?.trim() ?? '';
 
-    if (currentUserId == null || receiverId == null) return;
+    if (currentUserId.isEmpty || receiverId.isEmpty) return;
 
+    // Every click creates a fresh transaction id. Accept/Decline for an older
+    // request can therefore never resolve this newer request.
+    final videoRequestId = _newVideoUpgradeRequestId(currentUserId);
+    _activeVideoUpgradeRequestId = videoRequestId;
     _switchingVideo = true;
 
     try {
@@ -1305,11 +1675,14 @@ class CallNotifier extends StateNotifier<CallState> {
 
       SocketService.instance.emit(
         CallSocketEvents.callRenegotiateOffer,
-        {
+        <String, dynamic>{
           'from': currentUserId,
           'from_user': currentUserId,
           'offer': offer.toMap(),
           'requestType': 'video_upgrade',
+          'request_type': 'video_upgrade',
+          'video_request_id': videoRequestId,
+          'videoRequestId': videoRequestId,
           if (_callId != null) 'call_id': _callId,
           if (_callId != null) 'callId': _callId,
           if (_conversationId != null) 'conversation_id': _conversationId,
@@ -1326,18 +1699,26 @@ class CallNotifier extends StateNotifier<CallState> {
           isSpeakerOn: true,
           isVideoUpgradeRequesting: true,
           isVideoUpgradeRejected: false,
+          clearError: true,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
       );
+
+      debugPrint('VIDEO UPGRADE REQUEST SENT: $videoRequestId');
     } catch (e, st) {
       debugPrint('Request video upgrade error: $e');
       debugPrint(st.toString());
 
+      if (_activeVideoUpgradeRequestId == videoRequestId) {
+        _activeVideoUpgradeRequestId = null;
+      }
       _switchingVideo = false;
 
-      await webrtc.disableVideoHard();
-      await webrtc.setSpeaker(false);
+      try {
+        await webrtc.disableVideoHard();
+        await webrtc.setSpeaker(false);
+      } catch (_) {}
 
       _safeState(
         state.copyWith(
@@ -1346,6 +1727,8 @@ class CallNotifier extends StateNotifier<CallState> {
           isRemoteCameraOff: true,
           isSpeakerOn: false,
           isVideoUpgradeRequesting: false,
+          isVideoUpgradeRejected: false,
+          errorMessage: 'Unable to send video request. Please try again.',
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
@@ -1356,39 +1739,103 @@ class CallNotifier extends StateNotifier<CallState> {
   Future<void> acceptVideoUpgrade() async {
     if (!_canUpdate) return;
     if (!state.hasPendingVideoUpgrade) return;
-    if (state.pendingVideoOffer == null) return;
     if (_isFinalStatus(state.status)) return;
 
-    final currentUserId = state.currentUserId;
-    final receiverId = state.receiverId;
+    final currentUserId = state.currentUserId?.trim() ?? '';
+    final stateReceiverId = state.receiverId?.trim() ?? '';
+    final requestSenderId = _pendingVideoUpgradeRequesterId?.trim() ?? '';
+    final replyTargetUserId =
+        requestSenderId.isNotEmpty ? requestSenderId : stateReceiverId;
+    final pendingOffer = state.pendingVideoOffer;
+    final videoRequestId = _pendingVideoUpgradeRequestId;
 
-    if (currentUserId == null || receiverId == null) return;
+    if (pendingOffer == null) {
+      debugPrint('ACCEPT VIDEO UPGRADE SKIPPED: pending offer is missing');
+      return;
+    }
 
+    if (currentUserId.isEmpty || replyTargetUserId.isEmpty) {
+      debugPrint('ACCEPT VIDEO UPGRADE SKIPPED: reply target is missing');
+      return;
+    }
+
+    debugPrint(
+      'VIDEO UPGRADE ACCEPT REPLY TARGET: '
+      '$replyTargetUserId '
+      '(requestSender=$requestSenderId, stateReceiver=$stateReceiverId)',
+    );
+
+    final offer = Map<String, dynamic>.from(pendingOffer);
     _switchingVideo = true;
 
     try {
-      await webrtc.enableVideo();
-      await webrtc.setSpeaker(true);
-
-      final answer = await webrtc.handleRenegotiationOffer(
-        state.pendingVideoOffer!,
+      debugPrint(
+        'VIDEO UPGRADE ACCEPT START: ${videoRequestId ?? "legacy/no-id"}',
       );
+
+      // Receiver side must apply the incoming video offer BEFORE attaching
+      // its camera to the peer connection. The WebRTC service does that in
+      // acceptVideoUpgradeOffer().
+      final answer = await webrtc.acceptVideoUpgradeOffer(offer);
+      await webrtc.setSpeaker(true);
 
       SocketService.instance.emit(
         CallSocketEvents.callRenegotiateAnswer,
-        {
+        <String, dynamic>{
           'from': currentUserId,
           'from_user': currentUserId,
           'answer': answer.toMap(),
+          'requestType': 'video_upgrade',
+          'request_type': 'video_upgrade',
+          if (videoRequestId != null && videoRequestId.isNotEmpty)
+            'video_request_id': videoRequestId,
+          if (videoRequestId != null && videoRequestId.isNotEmpty)
+            'videoRequestId': videoRequestId,
           if (_callId != null) 'call_id': _callId,
           if (_callId != null) 'callId': _callId,
           if (_conversationId != null) 'conversation_id': _conversationId,
           if (_conversationId != null) 'conversationId': _conversationId,
         },
-        targetUser: receiverId,
+        targetUser: replyTargetUserId,
         conversationId: _conversationId,
         queueIfDisconnected: true,
       );
+
+      // Explicitly synchronize the call mode on the other phone too.
+      // The same SDP answer is included as a fallback. Normally the requester
+      // processes callRenegotiateAnswer first. If that event is missed, this
+      // callVideoToggle event can still apply the answer and then switch UI.
+      SocketService.instance.emit(
+        CallSocketEvents.callVideoToggle,
+        <String, dynamic>{
+          'from': currentUserId,
+          'from_user': currentUserId,
+          'isVideoCall': true,
+          'is_video_call': true,
+          'answer': answer.toMap(),
+          'requestType': 'video_upgrade_accepted',
+          'request_type': 'video_upgrade_accepted',
+          if (videoRequestId != null && videoRequestId.isNotEmpty)
+            'video_request_id': videoRequestId,
+          if (videoRequestId != null && videoRequestId.isNotEmpty)
+            'videoRequestId': videoRequestId,
+          if (_callId != null) 'call_id': _callId,
+          if (_callId != null) 'callId': _callId,
+          if (_conversationId != null) 'conversation_id': _conversationId,
+          if (_conversationId != null) 'conversationId': _conversationId,
+        },
+        targetUser: replyTargetUserId,
+        conversationId: _conversationId,
+        queueIfDisconnected: true,
+      );
+
+      if (!_canUpdate || _isFinalStatus(state.status)) return;
+
+      if (videoRequestId != null && videoRequestId.isNotEmpty) {
+        _lastResolvedVideoUpgradeRequestId = videoRequestId;
+      }
+      _pendingVideoUpgradeRequestId = null;
+      _pendingVideoUpgradeRequesterId = null;
 
       _safeState(
         state.copyWith(
@@ -1400,14 +1847,44 @@ class CallNotifier extends StateNotifier<CallState> {
           isVideoUpgradeRequesting: false,
           isVideoUpgradeRejected: false,
           clearPendingVideoOffer: true,
+          clearError: true,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
       );
+
+      debugPrint(
+        'VIDEO UPGRADE ACCEPTED: ${videoRequestId ?? "legacy/no-id"}',
+      );
     } catch (e, st) {
-      debugPrint('Accept video upgrade error: $e');
+      debugPrint('ACCEPT VIDEO UPGRADE ERROR: $e');
       debugPrint(st.toString());
-      await rejectVideoUpgrade();
+
+      // A technical failure is NOT a decline. Keep the pending request so the
+      // user can tap Accept again or explicitly tap Decline.
+      try {
+        await webrtc.disableVideoHard();
+      } catch (_) {}
+
+      try {
+        await webrtc.setSpeaker(false);
+      } catch (_) {}
+
+      if (_canUpdate && !_isFinalStatus(state.status)) {
+        _safeState(
+          state.copyWith(
+            isVideoCall: false,
+            isCameraOff: true,
+            isRemoteCameraOff: true,
+            isSpeakerOn: false,
+            isVideoUpgradeRequesting: false,
+            isVideoUpgradeRejected: false,
+            errorMessage: 'Unable to enable video. Please try again.',
+            localRenderer: webrtc.localRenderer,
+            remoteRenderer: webrtc.remoteRenderer,
+          ),
+        );
+      }
     } finally {
       _switchingVideo = false;
     }
@@ -1415,33 +1892,105 @@ class CallNotifier extends StateNotifier<CallState> {
 
   Future<void> rejectVideoUpgrade() async {
     if (!_canUpdate) return;
+    if (_isFinalStatus(state.status)) return;
 
-    final currentUserId = state.currentUserId;
-    final receiverId = state.receiverId;
+    if (!state.hasPendingVideoUpgrade || state.pendingVideoOffer == null) {
+      debugPrint('VIDEO UPGRADE DECLINE IGNORED: no pending request');
+      return;
+    }
 
-    if (currentUserId != null && receiverId != null) {
+    final currentUserId = state.currentUserId?.trim() ?? '';
+    final stateReceiverId = state.receiverId?.trim() ?? '';
+    final requestSenderId = _pendingVideoUpgradeRequesterId?.trim() ?? '';
+    final replyTargetUserId =
+        requestSenderId.isNotEmpty ? requestSenderId : stateReceiverId;
+    final videoRequestId = _pendingVideoUpgradeRequestId;
+    final pendingOffer = Map<String, dynamic>.from(state.pendingVideoOffer!);
+
+    Map<String, dynamic>? declineAnswer;
+
+    try {
+      // Complete WebRTC negotiation even though the UI choice is Decline.
+      // This returns both peers to a stable signaling state and allows the
+      // next video request to work in the same audio call.
+      final answer = await webrtc.rejectVideoUpgradeOffer(pendingOffer);
+      declineAnswer = Map<String, dynamic>.from(answer.toMap());
+      await webrtc.setSpeaker(false);
+    } catch (e, st) {
+      debugPrint('VIDEO UPGRADE DECLINE SDP ERROR: $e');
+      debugPrint(st.toString());
+
+      // Do not silently clear the request if we could not stabilize the SDP.
+      // Keeping it pending lets the user retry Decline/Accept rather than
+      // corrupting the peer connection state.
+      if (_canUpdate) {
+        _safeState(
+          state.copyWith(
+            errorMessage: 'Unable to decline video request. Please try again.',
+          ),
+        );
+      }
+      _switchingVideo = false;
+      return;
+    }
+
+    if (currentUserId.isNotEmpty && replyTargetUserId.isNotEmpty) {
+      debugPrint(
+        'VIDEO UPGRADE DECLINE REPLY TARGET: '
+        '$replyTargetUserId '
+        '(requestSender=$requestSenderId, stateReceiver=$stateReceiverId)',
+      );
       SocketService.instance.emit(
         CallSocketEvents.callVideoUpgradeRejected,
-        {
+        <String, dynamic>{
           'from': currentUserId,
           'from_user': currentUserId,
           'reason': 'declined',
+          'requestType': 'video_upgrade',
+          'request_type': 'video_upgrade',
+          if (declineAnswer != null) 'answer': declineAnswer,
+          if (videoRequestId != null && videoRequestId.isNotEmpty)
+            'video_request_id': videoRequestId,
+          if (videoRequestId != null && videoRequestId.isNotEmpty)
+            'videoRequestId': videoRequestId,
           if (_callId != null) 'call_id': _callId,
           if (_callId != null) 'callId': _callId,
           if (_conversationId != null) 'conversation_id': _conversationId,
           if (_conversationId != null) 'conversationId': _conversationId,
         },
-        targetUser: receiverId,
+        targetUser: replyTargetUserId,
         conversationId: _conversationId,
         queueIfDisconnected: true,
       );
     }
 
+    if (videoRequestId != null && videoRequestId.isNotEmpty) {
+      _lastResolvedVideoUpgradeRequestId = videoRequestId;
+    }
+    _pendingVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequesterId = null;
+
     _safeState(
       state.copyWith(
+        isVideoCall: false,
+        isCameraOff: true,
+        isRemoteCameraOff: true,
+        isSpeakerOn: false,
         hasPendingVideoUpgrade: false,
+        isVideoUpgradeRequesting: false,
+        isVideoUpgradeRejected: false,
         clearPendingVideoOffer: true,
+        clearError: true,
+        localRenderer: webrtc.localRenderer,
+        remoteRenderer: webrtc.remoteRenderer,
       ),
+    );
+
+    _switchingVideo = false;
+
+    debugPrint(
+      'VIDEO UPGRADE DECLINE SENT WITH SDP ANSWER: '
+      '${videoRequestId ?? "legacy/no-id"}',
     );
   }
 
@@ -1476,6 +2025,9 @@ class CallNotifier extends StateNotifier<CallState> {
         queueIfDisconnected: true,
       );
 
+      _activeVideoUpgradeRequestId = null;
+      _pendingVideoUpgradeRequestId = null;
+
       _safeState(
         state.copyWith(
           isVideoCall: false,
@@ -1483,8 +2035,10 @@ class CallNotifier extends StateNotifier<CallState> {
           isRemoteCameraOff: true,
           isSpeakerOn: false,
           isVideoUpgradeRequesting: false,
+          isVideoUpgradeRejected: false,
           hasPendingVideoUpgrade: false,
           clearPendingVideoOffer: true,
+          clearError: true,
           localRenderer: webrtc.localRenderer,
           remoteRenderer: webrtc.remoteRenderer,
         ),
@@ -1789,10 +2343,11 @@ class CallNotifier extends StateNotifier<CallState> {
         } else if (finalStatus == CallStatus.timeout ||
             finalStatus == CallStatus.missed) {
           event = CallSocketEvents.callTimeout;
-        } else if (oldState.status == CallStatus.connected &&
-            !oldState.isCaller) {
-          event = CallSocketEvents.callLeave;
         }
+
+        // For a 1-to-1 call, a normal red-button hangup always notifies
+        // the other device with call_end. Backend lifecycle semantics stay
+        // unchanged: caller -> ended, receiver -> leave.
 
         SocketService.instance.emit(
           event,
@@ -1859,6 +2414,10 @@ class CallNotifier extends StateNotifier<CallState> {
     _answeringOffer = false;
     _remoteAnswerApplied = false;
     _lastAnsweredOfferFingerprint = null;
+    _activeVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequesterId = null;
+    _lastResolvedVideoUpgradeRequestId = null;
     _switchingVideo = false;
     _finishing = false;
   }
@@ -1896,6 +2455,10 @@ class CallNotifier extends StateNotifier<CallState> {
     _answeringOffer = false;
     _remoteAnswerApplied = false;
     _lastAnsweredOfferFingerprint = null;
+    _activeVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequesterId = null;
+    _lastResolvedVideoUpgradeRequestId = null;
     _conversationId = null;
     _callId = null;
 
@@ -1967,6 +2530,10 @@ class CallNotifier extends StateNotifier<CallState> {
     _answeringOffer = false;
     _remoteAnswerApplied = false;
     _lastAnsweredOfferFingerprint = null;
+    _activeVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequestId = null;
+    _pendingVideoUpgradeRequesterId = null;
+    _lastResolvedVideoUpgradeRequestId = null;
     _finishing = false;
     _switchingVideo = false;
 

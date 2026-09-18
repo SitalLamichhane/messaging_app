@@ -20,6 +20,7 @@ import 'package:hiddenly/core/profile/profile_provider.dart';
 import 'package:hiddenly/core/block/block_provider.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/call/global_call_handler.dart';
+import 'package:hiddenly/core/call/global_call_socket_service.dart';
 import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:hiddenly/core/call/mini_call_overlay.dart';
 import 'package:hiddenly/core/call/call_lifecycle_watcher.dart';
@@ -61,7 +62,7 @@ Future<void> main() async {
       child: provider.MultiProvider(
         providers: [
           provider.ChangeNotifierProvider<AuthProvider>(
-            create: (_) => AuthProvider()..checkLogin(),
+            create: (_) => AuthProvider(),
           ),
           provider.ChangeNotifierProvider<ChatProvider>(
             create: (_) => ChatProvider(),
@@ -541,13 +542,7 @@ extension _StringFallback on String {
   }
 }
 
-/*
-  This class is not used in MaterialApp builder because AuthGate starts
-  the global incoming-call socket.
 
-  Keep it only for old references.
-  Do not wrap the app with it, otherwise duplicate incoming screens may appear.
-*/
 class GlobalCallBootstrapper extends StatefulWidget {
   final Widget child;
 
@@ -564,67 +559,69 @@ class GlobalCallBootstrapper extends StatefulWidget {
 class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
     with WidgetsBindingObserver {
   bool _starting = false;
-  bool _started = false;
-  String? _startedUserId;
+  String? _activeUserId;
+  Timer? _healthTimer;
+  DateTime? _lastFcmSyncAt;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _tryStartGlobalSocket();
-    });
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
+    _healthTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _ensureRealtimeReady(reason: 'periodic_health'),
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _tryStartGlobalSocket();
-    });
-  }
-
-  @override
-  void didUpdateWidget(covariant GlobalCallBootstrapper oldWidget) {
-    super.didUpdateWidget(oldWidget);
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      _tryStartGlobalSocket();
+      _ensureRealtimeReady(reason: 'first_frame');
     });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      debugPrint('[GLOBAL BOOTSTRAP] App resumed. Checking global call socket.');
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _tryStartGlobalSocket(force: true);
-      });
+      unawaited(
+        _ensureRealtimeReady(
+          reason: 'app_resumed',
+          force: true,
+        ),
+      );
     }
   }
 
   String _firstNotEmpty(List<String?> values) {
     for (final value in values) {
       final clean = value?.trim() ?? '';
-
-      if (clean.isNotEmpty && clean != 'null') {
-        return clean;
-      }
+      if (clean.isNotEmpty && clean != 'null') return clean;
     }
-
     return '';
   }
 
-  Future<void> _tryStartGlobalSocket({bool force = false}) async {
-    if (!mounted) return;
+  Future<void> _syncFcmTokenForLoggedInUser(String userId) async {
+    final now = DateTime.now();
 
-    if (_starting) {
-      debugPrint('[GLOBAL BOOTSTRAP] Already starting.');
+    if (_activeUserId == userId &&
+        _lastFcmSyncAt != null &&
+        now.difference(_lastFcmSyncAt!).inMinutes < 2) {
       return;
     }
+
+    try {
+      debugPrint('[GLOBAL BOOTSTRAP] Syncing FCM token after login');
+      await NotificationService.saveCurrentToken();
+      _lastFcmSyncAt = DateTime.now();
+    } catch (e, st) {
+      debugPrint('[GLOBAL BOOTSTRAP] FCM sync error: $e');
+      debugPrint(st.toString());
+    }
+  }
+
+  Future<void> _ensureRealtimeReady({
+    required String reason,
+    bool force = false,
+  }) async {
+    if (!mounted || _starting) return;
 
     final auth = provider.Provider.of<AuthProvider>(
       context,
@@ -632,9 +629,20 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
     );
 
     if (!auth.isLoggedIn) {
-      debugPrint('[GLOBAL BOOTSTRAP] User not logged in.');
-      _started = false;
-      _startedUserId = null;
+      if (_activeUserId != null) {
+        _activeUserId = null;
+        _lastFcmSyncAt = null;
+
+        await GlobalCallSocketService.instance.disconnect(
+          clearHandlers: false,
+          forgetUrl: true,
+          manual: true,
+        );
+
+        GlobalCallHandler.instance.forceResetCallUiLocks(
+          reason: 'root_bootstrap_logout',
+        );
+      }
       return;
     }
 
@@ -642,12 +650,6 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
 
     try {
       final user = Map<String, dynamic>.from(auth.user ?? {});
-
-      final accessToken = _firstNotEmpty([
-        await ApiClient.storage.read(key: 'access'),
-        await ApiClient.storage.read(key: 'access_token'),
-        await ApiClient.storage.read(key: 'token'),
-      ]);
 
       final currentUserId = _firstNotEmpty([
         user['id']?.toString(),
@@ -675,44 +677,57 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
         await ApiClient.storage.read(key: 'profile_picture'),
       ]);
 
-      debugPrint('');
-      debugPrint('################################################');
-      debugPrint('### GLOBAL BOOTSTRAP START CALL SOCKET');
-      debugPrint('################################################');
-      debugPrint('currentUserId: $currentUserId');
-      debugPrint('currentUserName: $currentUserName');
-      debugPrint('token exists: ${accessToken.isNotEmpty}');
-      debugPrint('started: $_started');
-      debugPrint('startedUserId: $_startedUserId');
-      debugPrint('force: $force');
-      debugPrint('################################################');
-
       if (currentUserId.isEmpty) {
-        debugPrint('[GLOBAL BOOTSTRAP] ERROR: currentUserId empty.');
+        debugPrint('[GLOBAL BOOTSTRAP] user id unavailable. reason=$reason');
         return;
       }
+
+      // NotificationService.init() runs before login on a fresh launch.
+      // At that time saveCurrentToken() cannot upload without an access token.
+      // Sync again immediately after AuthProvider reports logged in.
+      await _syncFcmTokenForLoggedInUser(currentUserId);
+
+      final socket = GlobalCallSocketService.instance;
+
+      if (!force &&
+          _activeUserId == currentUserId &&
+          socket.isConnected &&
+          socket.isHealthy) {
+        return;
+      }
+
+      final accessToken = _firstNotEmpty([
+        await ApiClient.storage.read(key: 'access'),
+        await ApiClient.storage.read(key: 'access_token'),
+        await ApiClient.storage.read(key: 'token'),
+      ]);
 
       if (accessToken.isEmpty) {
-        debugPrint('[GLOBAL BOOTSTRAP] ERROR: access token empty.');
+        debugPrint(
+          '[GLOBAL BOOTSTRAP] access token unavailable. reason=$reason',
+        );
         return;
       }
 
-      if (!force && _started && _startedUserId == currentUserId) {
-        debugPrint('[GLOBAL BOOTSTRAP] Already connected for $currentUserId.');
-        return;
-      }
+      debugPrint(
+        '[GLOBAL BOOTSTRAP] ensure socket '
+        'reason=$reason connected=${socket.isConnected} '
+        'healthy=${socket.isHealthy}',
+      );
 
       await GlobalCallHandler.instance.connectGlobalIncomingCallSocket(
         accessToken: accessToken,
         currentUserId: currentUserId,
         currentUserName: currentUserName,
         currentUserAvatar: currentUserAvatar,
+        allowConnect: true,
       );
 
-      _started = true;
-      _startedUserId = currentUserId;
+      _activeUserId = currentUserId;
 
-      debugPrint('[GLOBAL BOOTSTRAP] Global call socket ready everywhere.');
+      if (!socket.isHealthy) {
+        await socket.ensureConnected();
+      }
     } catch (e, st) {
       debugPrint('[GLOBAL BOOTSTRAP] ERROR: $e');
       debugPrint(st.toString());
@@ -723,13 +738,24 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
 
   @override
   void dispose() {
+    _healthTimer?.cancel();
+    _healthTimer = null;
     WidgetsBinding.instance.removeObserver(this);
-
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final auth = provider.Provider.of<AuthProvider>(context);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      _ensureRealtimeReady(
+        reason: auth.isLoggedIn ? 'auth_logged_in' : 'auth_logged_out',
+      );
+    });
+
     return widget.child;
   }
 }
@@ -952,8 +978,9 @@ class MyApp extends StatelessWidget {
             - do NOT emit call_end from Flutter
           */
           builder: (context, child) {
-            return CallLifecycleWatcher(
-              child: riverpod.Consumer(
+            return GlobalCallBootstrapper(
+              child: CallLifecycleWatcher(
+                child: riverpod.Consumer(
                 builder: (context, ref, _) {
                   final callState = ref.watch(callProvider);
                   final forceCallPipSurface =
@@ -1059,6 +1086,7 @@ class MyApp extends StatelessWidget {
                   );
                 },
               ),
+            ),
             );
           },
         );

@@ -6,7 +6,11 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-typedef GlobalSocketHandler = FutureOr<void> Function(Map<String, dynamic> data);
+typedef GlobalSocketHandler = FutureOr<void> Function(
+  Map<String, dynamic> data,
+);
+
+typedef GlobalSocketUrlProvider = Future<String?> Function();
 
 class GlobalCallSocketEvents {
   static const String connected = 'global_call_connected';
@@ -21,24 +25,49 @@ class GlobalCallSocketService {
       GlobalCallSocketService._internal();
 
   WebSocketChannel? _channel;
-  StreamSubscription? _subscription;
+  StreamSubscription<dynamic>? _subscription;
 
-  final Map<String, List<GlobalSocketHandler>> _handlers = {};
+  final Map<String, List<GlobalSocketHandler>> _handlers =
+      <String, List<GlobalSocketHandler>>{};
 
   bool _connected = false;
   bool _connecting = false;
   bool _manualDisconnect = false;
 
   String? _url;
+  GlobalSocketUrlProvider? _reconnectUrlProvider;
+
   Completer<void>? _connectCompleter;
   Timer? _reconnectTimer;
 
-  int _reconnectAttempt = 0;
+  Timer? _heartbeatTimer;
+  Timer? _heartbeatTimeoutTimer;
+  DateTime? _lastPongAt;
+  bool _heartbeatWaitingForPong = false;
 
-  bool get isConnected => _connected;
+  static const Duration _heartbeatInterval = Duration(seconds: 25);
+  static const Duration _heartbeatTimeout = Duration(seconds: 20);
+  static const Duration _healthyWindow = Duration(seconds: 70);
+
+  int _reconnectAttempt = 0;
+  int _generation = 0;
+
+  bool get isConnected =>
+      _connected && _channel != null && _subscription != null;
+
   bool get isConnecting => _connecting;
   String? get currentUrl => _url;
 
+  bool get isHealthy {
+    if (!isConnected) return false;
+    final last = _lastPongAt;
+    if (last == null) return true;
+    return DateTime.now().difference(last) <= _healthyWindow;
+  }
+
+  void setReconnectUrlProvider(GlobalSocketUrlProvider? provider) {
+    _reconnectUrlProvider = provider;
+  }
 
   String _safeEndpoint(String url) {
     try {
@@ -61,6 +90,28 @@ class GlobalCallSocketService {
     return fixed;
   }
 
+  Future<String?> _resolveReconnectUrl() async {
+    final provider = _reconnectUrlProvider;
+
+    if (provider != null) {
+      try {
+        final fresh = await provider();
+        final clean = fresh?.trim() ?? '';
+        if (clean.isNotEmpty) {
+          return _sanitizeWsUrl(clean);
+        }
+      } catch (e, st) {
+        debugPrint('GLOBAL CALL WS URL PROVIDER ERROR: $e');
+        debugPrint(st.toString());
+      }
+    }
+
+    final existing = _url?.trim() ?? '';
+    if (existing.isEmpty) return null;
+
+    return _sanitizeWsUrl(existing);
+  }
+
   Future<void> connect({required String url}) async {
     final fixedUrl = _sanitizeWsUrl(url);
 
@@ -69,7 +120,7 @@ class GlobalCallSocketService {
       return;
     }
 
-    if (_connected && _channel != null && _url == fixedUrl) {
+    if (isConnected && _url == fixedUrl) {
       debugPrint('GLOBAL CALL WS ALREADY CONNECTED');
       return;
     }
@@ -81,16 +132,35 @@ class GlobalCallSocketService {
 
     _manualDisconnect = false;
     _connecting = true;
-    _connectCompleter = Completer<void>();
+
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+
+    final completer = Completer<void>();
+    _connectCompleter = completer;
+
+    final myGeneration = ++_generation;
 
     try {
-      if (_channel != null || _subscription != null) {
-        await disconnect(
-          clearHandlers: false,
-          forgetUrl: false,
-          manual: false,
-        );
+      final oldSubscription = _subscription;
+      final oldChannel = _channel;
+
+      _stopHeartbeat();
+      _subscription = null;
+      _channel = null;
+      _connected = false;
+
+      try {
+        await oldSubscription?.cancel();
+      } catch (_) {}
+
+      try {
+        await oldChannel?.sink.close();
+      } catch (_) {}
+
+      if (myGeneration != _generation) {
+        debugPrint('GLOBAL CALL WS CONNECT ABORTED: generation changed');
+        return;
       }
 
       _url = fixedUrl;
@@ -105,106 +175,153 @@ class GlobalCallSocketService {
       final channel = WebSocketChannel.connect(Uri.parse(fixedUrl));
       _channel = channel;
 
-      _subscription = channel.stream.listen(
+      late final StreamSubscription<dynamic> subscription;
+
+      subscription = channel.stream.listen(
         _handleMessage,
-        onError: (error, stack) {
+        onError: (Object error, StackTrace stack) {
+          if (myGeneration != _generation || _channel != channel) {
+            debugPrint('GLOBAL CALL WS STALE ERROR IGNORED');
+            return;
+          }
+
           debugPrint('GLOBAL CALL WS ERROR: $error');
           debugPrint(stack.toString());
 
+          _stopHeartbeat();
           _connected = false;
           _channel = null;
-          _subscription = null;
+
+          if (identical(_subscription, subscription)) {
+            _subscription = null;
+          }
 
           _scheduleReconnect();
         },
         onDone: () {
+          if (myGeneration != _generation || _channel != channel) {
+            debugPrint('GLOBAL CALL WS STALE CLOSE IGNORED');
+            return;
+          }
+
           debugPrint('GLOBAL CALL WS CLOSED');
 
+          _stopHeartbeat();
           _connected = false;
           _channel = null;
-          _subscription = null;
+
+          if (identical(_subscription, subscription)) {
+            _subscription = null;
+          }
 
           _scheduleReconnect();
         },
         cancelOnError: false,
       );
 
+      _subscription = subscription;
+
       try {
-        await channel.ready.timeout(const Duration(seconds: 8));
-        debugPrint('GLOBAL CALL WS READY OK');
+        await channel.ready.timeout(const Duration(seconds: 10));
       } catch (e) {
+        if (myGeneration != _generation || _channel != channel) {
+          debugPrint('GLOBAL CALL WS READY FAILURE IGNORED: stale transport');
+          return;
+        }
+
         debugPrint('GLOBAL CALL WS READY FAILED: $e');
 
+        _stopHeartbeat();
         _connected = false;
-        _connecting = false; // IMPORTANT: allow reconnect scheduling after ready failure.
 
-        try {
-          await _subscription?.cancel();
-        } catch (_) {}
-
-        _subscription = null;
-
-        try {
-          await _channel?.sink.close();
-        } catch (_) {}
-
-        _channel = null;
-
-        if (!(_connectCompleter?.isCompleted ?? true)) {
-          _connectCompleter?.complete();
+        if (identical(_subscription, subscription)) {
+          _subscription = null;
         }
+
+        if (_channel == channel) {
+          _channel = null;
+        }
+
+        try {
+          await subscription.cancel();
+        } catch (_) {}
+
+        try {
+          await channel.sink.close();
+        } catch (_) {}
 
         _scheduleReconnect();
         return;
       }
 
-      if (_channel != channel) {
-        debugPrint('GLOBAL CALL WS CONNECT ABORTED: channel changed');
+      if (myGeneration != _generation || _channel != channel) {
+        debugPrint('GLOBAL CALL WS READY IGNORED: stale transport');
+        try {
+          await subscription.cancel();
+        } catch (_) {}
+        try {
+          await channel.sink.close();
+        } catch (_) {}
         return;
       }
 
       _connected = true;
       _reconnectAttempt = 0;
+      _lastPongAt = DateTime.now();
+      _startHeartbeat(myGeneration, channel);
 
-      debugPrint('GLOBAL CALL WS CONNECTED/ACTIVE: ${_safeEndpoint(fixedUrl)}');
+      debugPrint(
+        'GLOBAL CALL WS CONNECTED/ACTIVE: ${_safeEndpoint(fixedUrl)}',
+      );
 
-      // Fire local connected event so the handler can log/confirm that
-      // the receiver is really listening for incoming calls.
-      unawaited(_dispatchLocalEvent(GlobalCallSocketEvents.connected, {
-        'event': GlobalCallSocketEvents.connected,
-        'type': GlobalCallSocketEvents.connected,
-        'endpoint': _safeEndpoint(fixedUrl),
-      }));
-
-      if (!(_connectCompleter?.isCompleted ?? true)) {
-        _connectCompleter?.complete();
-      }
+      // unawaited(
+      //   _dispatchLocalEvent(
+      //     GlobalCallSocketEvents.connected,
+      //     <String, dynamic>{
+      //       'event': GlobalCallSocketEvents.connected,
+      //       'type': GlobalCallSocketEvents.connected,
+      //       'endpoint': _safeEndpoint(fixedUrl),
+      //     },
+      //   ),
+      // );
     } catch (e, st) {
+      if (myGeneration != _generation) {
+        debugPrint('GLOBAL CALL WS CONNECT ERROR IGNORED: stale generation');
+        return;
+      }
+
       debugPrint('GLOBAL CALL WS CONNECT ERROR: $e');
       debugPrint(st.toString());
 
+      _stopHeartbeat();
       _connected = false;
 
-      try {
-        await _subscription?.cancel();
-      } catch (_) {}
+      final sub = _subscription;
+      final channel = _channel;
 
       _subscription = null;
-
-      try {
-        await _channel?.sink.close();
-      } catch (_) {}
-
       _channel = null;
 
-      if (!(_connectCompleter?.isCompleted ?? true)) {
-        _connectCompleter?.complete();
-      }
+      try {
+        await sub?.cancel();
+      } catch (_) {}
+
+      try {
+        await channel?.sink.close();
+      } catch (_) {}
 
       _scheduleReconnect();
     } finally {
-      _connecting = false;
-      _connectCompleter = null;
+      if (myGeneration == _generation) {
+        _connecting = false;
+      }
+
+      if (identical(_connectCompleter, completer)) {
+        if (!completer.isCompleted) {
+          completer.complete();
+        }
+        _connectCompleter = null;
+      }
     }
   }
 
@@ -214,27 +331,21 @@ class GlobalCallSocketService {
       return;
     }
 
-    if (_url == null || _url!.trim().isEmpty) {
-      debugPrint('GLOBAL CALL WS RECONNECT SKIPPED: url empty');
-      return;
-    }
-
-    if (_connecting) {
-      debugPrint('GLOBAL CALL WS RECONNECT WAIT: currently connecting');
-    }
-
     _reconnectTimer?.cancel();
 
     _reconnectAttempt++;
 
     final delaySeconds = _reconnectAttempt <= 1
-        ? 2
+        ? 1
         : _reconnectAttempt <= 3
-            ? 5
-            : 10;
+            ? 3
+            : _reconnectAttempt <= 6
+                ? 5
+                : 10;
 
     debugPrint(
-      'GLOBAL CALL WS RECONNECT SCHEDULED in ${delaySeconds}s attempt=$_reconnectAttempt',
+      'GLOBAL CALL WS RECONNECT SCHEDULED in ${delaySeconds}s '
+      'attempt=$_reconnectAttempt',
     );
 
     _reconnectTimer = Timer(Duration(seconds: delaySeconds), () async {
@@ -243,19 +354,28 @@ class GlobalCallSocketService {
         return;
       }
 
-      if (_url == null || _url!.trim().isEmpty) {
-        debugPrint('GLOBAL CALL WS RECONNECT CANCELLED: url empty');
-        return;
-      }
-
-      if (_connected && _channel != null) {
+      if (isConnected) {
         debugPrint('GLOBAL CALL WS RECONNECT CANCELLED: already connected');
         return;
       }
 
+      if (_connecting) {
+        debugPrint('GLOBAL CALL WS RECONNECT DEFERRED: connect in progress');
+        _scheduleReconnect();
+        return;
+      }
+
       try {
+        final nextUrl = await _resolveReconnectUrl();
+
+        if (nextUrl == null || nextUrl.trim().isEmpty) {
+          debugPrint('GLOBAL CALL WS RECONNECT: no URL available');
+          _scheduleReconnect();
+          return;
+        }
+
         debugPrint('GLOBAL CALL WS AUTO RECONNECT START');
-        await connect(url: _url!);
+        await connect(url: nextUrl);
       } catch (e, st) {
         debugPrint('GLOBAL CALL WS AUTO RECONNECT ERROR: $e');
         debugPrint(st.toString());
@@ -264,54 +384,267 @@ class GlobalCallSocketService {
     });
   }
 
-  Future<void> _handleMessage(dynamic message) async {
-    debugPrint('');
-    debugPrint('================ GLOBAL CALL WS MESSAGE ================');
+  Future<void> ensureConnected() async {
+    if (_manualDisconnect) {
+      _manualDisconnect = false;
+    }
+
+    if (_connecting) return;
+
+    if (isConnected && isHealthy) {
+      return;
+    }
+
+    if (isConnected && !isHealthy) {
+      debugPrint('GLOBAL CALL WS ENSURE: stale connection detected');
+      await forceReconnect(reason: 'ensure_unhealthy');
+      return;
+    }
+
+    final nextUrl = await _resolveReconnectUrl();
+
+    if (nextUrl == null || nextUrl.trim().isEmpty) {
+      debugPrint('GLOBAL CALL WS ENSURE CONNECTED FAILED: URL unavailable');
+      return;
+    }
+
+    await connect(url: nextUrl);
+  }
+
+  Future<void> forceReconnect({String reason = 'manual_health_reconnect'}) async {
+    if (_manualDisconnect) {
+      _manualDisconnect = false;
+    }
+
+    debugPrint('GLOBAL CALL WS FORCE RECONNECT: $reason');
+
+    _stopHeartbeat();
+
+    ++_generation;
+
+    _connected = false;
+    _connecting = false;
+
+    final oldSubscription = _subscription;
+    final oldChannel = _channel;
+
+    _subscription = null;
+    _channel = null;
 
     try {
-      final decoded = jsonDecode(message.toString());
+      await oldSubscription?.cancel();
+    } catch (_) {}
 
-      if (decoded is! Map) {
-        debugPrint('GLOBAL CALL WS INVALID DATA');
-        return;
-      }
+    try {
+      await oldChannel?.sink.close();
+    } catch (_) {}
 
-      final rawData = Map<String, dynamic>.from(decoded);
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
 
-      final event =
-          rawData['event']?.toString() ?? rawData['type']?.toString() ?? '';
+    final nextUrl = await _resolveReconnectUrl();
 
-      if (event.trim().isEmpty) {
-        debugPrint('GLOBAL CALL WS EVENT EMPTY');
-        return;
-      }
-
-      final data = _normalizeData(rawData, event);
-
-      debugPrint('GLOBAL CALL WS EVENT: $event');
-
-      final handlers = _handlers[event];
-
-      if (handlers == null || handlers.isEmpty) {
-        debugPrint('GLOBAL CALL WS NO HANDLER FOR: $event');
-        return;
-      }
-
-      for (final handler in List<GlobalSocketHandler>.from(handlers)) {
-        try {
-          await handler(data);
-        } catch (e, st) {
-          debugPrint('GLOBAL CALL WS HANDLER ERROR FOR $event: $e');
-          debugPrint(st.toString());
-        }
-      }
-    } catch (e, st) {
-      debugPrint('GLOBAL CALL WS PARSE ERROR: $e');
-      debugPrint(st.toString());
-    } finally {
-      debugPrint('========================================================');
+    if (nextUrl == null || nextUrl.trim().isEmpty) {
+      _scheduleReconnect();
+      return;
     }
+
+    await connect(url: nextUrl);
   }
+
+  void _startHeartbeat(
+  int generation,
+  WebSocketChannel channel,
+) {
+  _stopHeartbeat();
+
+  _lastPongAt = DateTime.now();
+  _heartbeatWaitingForPong = false;
+
+  _heartbeatTimer = Timer.periodic(
+    _heartbeatInterval,
+    (_) {
+      if (_manualDisconnect ||
+          generation != _generation ||
+          _channel != channel ||
+          !isConnected) {
+        return;
+      }
+
+      // Don't send multiple pings simultaneously.
+      if (_heartbeatWaitingForPong) {
+        debugPrint(
+          'GLOBAL CALL WS PING SKIPPED: waiting for previous pong',
+        );
+        return;
+      }
+
+      final payload = <String, dynamic>{
+        'event': 'ping',
+        'type': 'ping',
+        'action': 'ping',
+        'timestamp': DateTime.now().millisecondsSinceEpoch,
+      };
+
+      try {
+        _heartbeatWaitingForPong = true;
+
+        channel.sink.add(
+          jsonEncode(payload),
+        );
+
+        debugPrint('GLOBAL CALL WS PING');
+      } catch (e, st) {
+        _heartbeatWaitingForPong = false;
+
+        debugPrint(
+          'GLOBAL CALL WS PING SEND ERROR: $e',
+        );
+        debugPrint(st.toString());
+
+        unawaited(
+          forceReconnect(
+            reason: 'ping_send_error',
+          ),
+        );
+
+        return;
+      }
+
+      _heartbeatTimeoutTimer?.cancel();
+
+      _heartbeatTimeoutTimer = Timer(
+        _heartbeatTimeout,
+        () {
+          if (_manualDisconnect ||
+              generation != _generation ||
+              _channel != channel ||
+              !isConnected) {
+            return;
+          }
+
+          if (!_heartbeatWaitingForPong) {
+            return;
+          }
+
+          debugPrint(
+            'GLOBAL CALL WS HEARTBEAT TIMEOUT -> reconnect',
+          );
+
+          _heartbeatWaitingForPong = false;
+
+          unawaited(
+            forceReconnect(
+              reason: 'heartbeat_timeout',
+            ),
+          );
+        },
+      );
+    },
+  );
+}
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+
+    _heartbeatTimeoutTimer?.cancel();
+    _heartbeatTimeoutTimer = null;
+
+    _heartbeatWaitingForPong = false;
+  }
+
+ Future<void> _handleMessage(dynamic message) async {
+  debugPrint('');
+  debugPrint(
+    '================ GLOBAL CALL WS MESSAGE ================',
+  );
+
+  try {
+    final decoded = jsonDecode(message.toString());
+
+    if (decoded is! Map) {
+      debugPrint('GLOBAL CALL WS INVALID DATA');
+      return;
+    }
+
+    final rawData = Map<String, dynamic>.from(decoded);
+
+    // Any valid message means the socket/server is alive.
+    _lastPongAt = DateTime.now();
+
+    final event = (
+      rawData['event'] ??
+      rawData['type'] ??
+      rawData['action'] ??
+      ''
+    ).toString();
+
+    if (event.trim().isEmpty) {
+      debugPrint('GLOBAL CALL WS EVENT EMPTY');
+      return;
+    }
+
+    // Accept all common heartbeat acknowledgements.
+    if (event == 'pong' ||
+        event == 'global_pong' ||
+        event == 'ping_ack' ||
+        event == 'heartbeat_ack' ||
+        event == 'heartbeat') {
+      _heartbeatWaitingForPong = false;
+
+      _heartbeatTimeoutTimer?.cancel();
+      _heartbeatTimeoutTimer = null;
+
+      debugPrint('GLOBAL CALL WS PONG');
+      return;
+    }
+
+    // A real server message also proves this connection is alive.
+    //
+    // For example incoming_call/call_cancelled may arrive while we're
+    // waiting for a pong. Don't destroy a perfectly working socket.
+    if (_heartbeatWaitingForPong) {
+      debugPrint(
+        'GLOBAL CALL WS ACTIVITY RECEIVED WHILE WAITING FOR PONG: $event',
+      );
+
+      _heartbeatWaitingForPong = false;
+
+      _heartbeatTimeoutTimer?.cancel();
+      _heartbeatTimeoutTimer = null;
+    }
+
+    final data = _normalizeData(rawData, event);
+
+    debugPrint('GLOBAL CALL WS EVENT: $event');
+
+    final handlers = _handlers[event];
+
+    if (handlers == null || handlers.isEmpty) {
+      debugPrint('GLOBAL CALL WS NO HANDLER FOR: $event');
+      return;
+    }
+
+    for (final handler in List<GlobalSocketHandler>.from(handlers)) {
+      try {
+        await handler(data);
+      } catch (e, st) {
+        debugPrint(
+          'GLOBAL CALL WS HANDLER ERROR FOR $event: $e',
+        );
+        debugPrint(st.toString());
+      }
+    }
+  } catch (e, st) {
+    debugPrint('GLOBAL CALL WS PARSE ERROR: $e');
+    debugPrint(st.toString());
+  } finally {
+    debugPrint(
+      '========================================================',
+    );
+  }
+}
 
   Map<String, dynamic> _normalizeData(
     Map<String, dynamic> rawData,
@@ -379,12 +712,12 @@ class GlobalCallSocketService {
     }
   }
 
-
   Future<void> _dispatchLocalEvent(
     String event,
     Map<String, dynamic> data,
   ) async {
     final handlers = _handlers[event];
+
     if (handlers == null || handlers.isEmpty) {
       debugPrint('GLOBAL CALL WS NO HANDLER FOR LOCAL EVENT: $event');
       return;
@@ -401,7 +734,10 @@ class GlobalCallSocketService {
   }
 
   void on(String event, GlobalSocketHandler handler) {
-    final list = _handlers.putIfAbsent(event, () => []);
+    final list = _handlers.putIfAbsent(
+      event,
+      () => <GlobalSocketHandler>[],
+    );
 
     if (!list.contains(handler)) {
       list.add(handler);
@@ -416,6 +752,7 @@ class GlobalCallSocketService {
     if (handler == null) return;
 
     final list = _handlers[event];
+
     if (list == null) return;
 
     list.remove(handler);
@@ -439,6 +776,11 @@ class GlobalCallSocketService {
     }
 
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _stopHeartbeat();
+
+    ++_generation;
+
     _connected = false;
     _connecting = false;
 
@@ -463,36 +805,62 @@ class GlobalCallSocketService {
     if (clearHandlers) {
       _handlers.clear();
     }
+
+    final completer = _connectCompleter;
+    _connectCompleter = null;
+
+    if (completer != null && !completer.isCompleted) {
+      completer.complete();
+    }
   }
 
   Future<void> reconnect() async {
-    if (_url == null || _url!.trim().isEmpty) {
-      debugPrint('GLOBAL CALL WS MANUAL RECONNECT FAILED: url empty');
+    if (_connecting) return;
+
+    _manualDisconnect = false;
+
+    final nextUrl = await _resolveReconnectUrl();
+
+    if (nextUrl == null || nextUrl.trim().isEmpty) {
+      debugPrint('GLOBAL CALL WS MANUAL RECONNECT FAILED: URL unavailable');
       return;
     }
 
     debugPrint('GLOBAL CALL WS MANUAL RECONNECT START');
-
-    await disconnect(
-      clearHandlers: false,
-      forgetUrl: false,
-      manual: false,
-    );
-
-    await connect(url: _url!);
+    await connect(url: nextUrl);
   }
 
   void reset() {
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
+    _stopHeartbeat();
+
+    ++_generation;
+
+    final oldSubscription = _subscription;
+    final oldChannel = _channel;
+
+    _subscription = null;
+    _channel = null;
+
+    if (oldSubscription != null) {
+      unawaited(oldSubscription.cancel());
+    }
+
+    if (oldChannel != null) {
+      unawaited(oldChannel.sink.close());
+    }
+
     _handlers.clear();
     _connected = false;
     _connecting = false;
     _manualDisconnect = true;
     _url = null;
-    _channel = null;
-    _subscription = null;
+    _reconnectUrlProvider = null;
     _connectCompleter = null;
     _reconnectAttempt = 0;
+    _lastPongAt = null;
+    _heartbeatWaitingForPong = false;
 
     debugPrint('GLOBAL CALL WS RESET');
   }

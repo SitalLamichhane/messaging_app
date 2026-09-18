@@ -1,5 +1,7 @@
 // lib/auth_gate.dart
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:hiddenly/dashboard.dart';
 import 'package:provider/provider.dart';
@@ -8,6 +10,8 @@ import 'package:hiddenly/features/auth/auth_provider.dart';
 import 'package:hiddenly/login_page.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/call/global_call_handler.dart';
+import 'package:hiddenly/core/call/global_call_socket_service.dart';
+import 'package:hiddenly/core/call/call_notification.dart';
 
 class AuthGate extends StatefulWidget {
   const AuthGate({super.key});
@@ -31,16 +35,29 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   bool _globalCallSocketStarting = false;
   bool _globalCallSocketStarted = false;
   String? _globalCallSocketUserId;
+  Timer? _globalSocketHealthTimer;
+  bool _loggedOutCleanupDone = false;
+
+  String? _lastFcmSyncedUserId;
+  DateTime? _lastFcmSyncAt;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+
+    _globalSocketHealthTimer = Timer.periodic(
+      const Duration(seconds: 8),
+      (_) => _recoverGlobalSocketIfNeeded(),
+    );
+
     _checkSavedLogin();
   }
 
   @override
   void dispose() {
+    _globalSocketHealthTimer?.cancel();
+    _globalSocketHealthTimer = null;
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -48,11 +65,75 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      debugPrint('AUTH GATE APP RESUMED: rechecking global call socket');
-      _globalCallSocketStarted = false;
-      _globalCallSocketUserId = null;
-      if (mounted) setState(() {});
+      debugPrint('AUTH GATE APP RESUMED: checking global call socket');
+      unawaited(_recoverGlobalSocketIfNeeded(force: true));
     }
+  }
+
+  Future<void> _recoverGlobalSocketIfNeeded({bool force = false}) async {
+    if (!mounted) return;
+
+    final auth = context.read<AuthProvider>();
+    if (!auth.isLoggedIn) return;
+
+    final socket = GlobalCallSocketService.instance;
+
+    if (!force &&
+        ((socket.isConnected && socket.isHealthy) || socket.isConnecting)) {
+      return;
+    }
+
+    if (_globalCallSocketStarting) {
+      return;
+    }
+
+    _loggedOutCleanupDone = false;
+
+    final user = Map<String, dynamic>.from(auth.user ?? {});
+
+    final currentUserId = _firstNotEmpty([
+      _resolvedUserId,
+      user['id']?.toString(),
+      user['user_id']?.toString(),
+      await ApiClient.storage.read(key: 'user_id'),
+      await ApiClient.storage.read(key: 'id'),
+    ]);
+
+    final currentUserName = _firstNotEmpty([
+      _resolvedUserName,
+      user['full_name']?.toString(),
+      user['name']?.toString(),
+      user['username']?.toString(),
+      user['display_name']?.toString(),
+      await ApiClient.storage.read(key: 'full_name'),
+      await ApiClient.storage.read(key: 'name'),
+    ]);
+
+    final currentUserAvatar = _firstNotEmpty([
+      _resolvedUserAvatar,
+      user['profile_picture']?.toString(),
+      user['avatar_url']?.toString(),
+      user['image_url']?.toString(),
+      await ApiClient.storage.read(key: 'avatar_url'),
+      await ApiClient.storage.read(key: 'image_url'),
+    ]);
+
+    if (currentUserId.isEmpty) {
+      debugPrint('AUTH GATE GLOBAL HEALTH: user id unavailable');
+      return;
+    }
+
+    debugPrint(
+      'AUTH GATE GLOBAL HEALTH: connected=${socket.isConnected} '
+      'connecting=${socket.isConnecting} force=$force',
+    );
+
+    await _startGlobalCallSocketIfNeeded(
+      currentUserId: currentUserId,
+      currentUserName: currentUserName,
+      currentUserAvatar: currentUserAvatar,
+      force: true,
+    );
   }
 
   Future<void> _checkSavedLogin() async {
@@ -192,23 +273,59 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _syncFcmTokenAfterLogin(String currentUserId) async {
+    final cleanUserId = currentUserId.trim();
+    if (cleanUserId.isEmpty) return;
+
+    final now = DateTime.now();
+    final recentlySynced = _lastFcmSyncedUserId == cleanUserId &&
+        _lastFcmSyncAt != null &&
+        now.difference(_lastFcmSyncAt!).inMinutes < 2;
+
+    if (recentlySynced) return;
+
+    try {
+      debugPrint('AUTH GATE: syncing FCM token after login user=$cleanUserId');
+      await NotificationService.saveCurrentToken();
+      _lastFcmSyncedUserId = cleanUserId;
+      _lastFcmSyncAt = DateTime.now();
+    } catch (e, st) {
+      debugPrint('AUTH GATE FCM TOKEN SYNC ERROR: $e');
+      debugPrint(st.toString());
+    }
+  }
+
   Future<void> _startGlobalCallSocketIfNeeded({
     required String currentUserId,
     required String currentUserName,
     required String currentUserAvatar,
+    bool force = false,
   }) async {
     if (currentUserId.trim().isEmpty) {
       debugPrint('AUTH GATE GLOBAL CALL ERROR: currentUserId empty');
       return;
     }
 
+    await _syncFcmTokenAfterLogin(currentUserId);
+
     if (_globalCallSocketStarting) {
       debugPrint('AUTH GATE GLOBAL CALL: already starting');
       return;
     }
 
-    if (_globalCallSocketStarted && _globalCallSocketUserId == currentUserId) {
-      debugPrint('AUTH GATE GLOBAL CALL: already started for $currentUserId');
+    final socket = GlobalCallSocketService.instance;
+
+    if (!force &&
+        _globalCallSocketStarted &&
+        _globalCallSocketUserId == currentUserId &&
+        socket.isConnected) {
+      debugPrint('AUTH GATE GLOBAL CALL: already connected for $currentUserId');
+      return;
+    }
+
+    if (socket.isConnected && _globalCallSocketUserId == currentUserId) {
+      _globalCallSocketStarted = true;
+      debugPrint('AUTH GATE GLOBAL CALL: socket already healthy');
       return;
     }
 
@@ -221,7 +338,13 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
         await ApiClient.storage.read(key: 'token'),
       ]);
 
-      if (accessToken.isEmpty) {
+      var usableToken = accessToken;
+
+      if (usableToken.isEmpty) {
+        usableToken = (await ApiClient.refreshAccessToken())?.trim() ?? '';
+      }
+
+      if (usableToken.isEmpty) {
         debugPrint('AUTH GATE GLOBAL CALL ERROR: access token empty');
         return;
       }
@@ -236,17 +359,21 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       debugPrint('################################################');
 
       await GlobalCallHandler.instance.connectGlobalIncomingCallSocket(
-        accessToken: accessToken,
+        accessToken: usableToken,
         currentUserId: currentUserId,
         currentUserName: currentUserName,
         currentUserAvatar: currentUserAvatar,
         allowConnect: true,
       );
 
-      _globalCallSocketStarted = true;
-      _globalCallSocketUserId = currentUserId;
+      final connected = GlobalCallSocketService.instance.isConnected;
 
-      debugPrint('AUTH GATE GLOBAL CALL SOCKET READY EVERYWHERE');
+      _globalCallSocketStarted = connected;
+      _globalCallSocketUserId = connected ? currentUserId : null;
+
+      debugPrint(
+        'AUTH GATE GLOBAL CALL SOCKET READY: connected=$connected',
+      );
     } catch (e, st) {
       debugPrint('AUTH GATE GLOBAL CALL SOCKET ERROR: $e');
       debugPrint(st.toString());
@@ -256,6 +383,15 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
   }
 
   void _clearResolvedUser() {
+    if (_loggedOutCleanupDone &&
+        _resolvedUserId.isEmpty &&
+        !_globalCallSocketStarted &&
+        _globalCallSocketUserId == null) {
+      return;
+    }
+
+    _loggedOutCleanupDone = true;
+
     _resolvedUserId = '';
     _resolvedUserName = '';
     _resolvedUserAvatar = '';
@@ -267,6 +403,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     _globalCallSocketStarting = false;
     _globalCallSocketStarted = false;
     _globalCallSocketUserId = null;
+    _lastFcmSyncedUserId = null;
+    _lastFcmSyncAt = null;
 
     GlobalCallHandler.instance.dispose();
   }
@@ -287,6 +425,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       _clearResolvedUser();
       return const WelcomeScreen();
     }
+
+    _loggedOutCleanupDone = false;
 
     final user = Map<String, dynamic>.from(auth.user ?? {});
 
@@ -360,9 +500,13 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       );
     }
 
+    final globalSocketHealthy =
+        GlobalCallSocketService.instance.isConnected;
+
     if (currentUserId.isNotEmpty &&
         !_globalCallSocketStarting &&
-        (!_globalCallSocketStarted ||
+        (!globalSocketHealthy ||
+            !_globalCallSocketStarted ||
             _globalCallSocketUserId != currentUserId)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
@@ -381,4 +525,4 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       currentUserAvatar: currentUserAvatar,
     );
   }
-} //push
+} 

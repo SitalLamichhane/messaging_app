@@ -63,7 +63,12 @@ class NotificationService {
   static DateTime? _lastShownCallKitKeyTime;
 
   static Future<void> init() async {
-    if (_initialized) return;
+    if (_initialized) {
+      // init() may first run before login. Re-sync the same device token after
+      // authentication so the backend associates it with the logged-in user.
+      await saveCurrentToken();
+      return;
+    }
     _initialized = true;
 
     await _requestFirebasePermission();

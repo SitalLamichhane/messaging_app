@@ -220,8 +220,20 @@ class WebRTCService {
       pc.onTrack = (event) async {
         if (_disposed) return;
 
+        debugPrint(
+          'WEBRTC ONTRACK: kind=${event.track.kind} '
+          'id=${event.track.id} '
+          'streams=${event.streams.length} '
+          'enabled=${event.track.enabled}',
+        );
+
         if (event.streams.isNotEmpty) {
           await attachRemoteStream(event.streams.first);
+          debugPrint(
+            'WEBRTC REMOTE STREAM: '
+            'audio=${event.streams.first.getAudioTracks().length} '
+            'video=${event.streams.first.getVideoTracks().length}',
+          );
           return;
         }
 
@@ -464,12 +476,33 @@ class WebRTCService {
       throw StateError('Peer connection is null or disposed');
     }
 
-    final sdp = data['sdp']?.toString().trim() ?? '';
-    final type = data['type']?.toString().trim() ?? '';
+    final rawSdp = data['sdp'];
+    final type = data['type']?.toString().trim().toLowerCase() ?? '';
 
-    if (sdp.isEmpty || type.isEmpty) {
-      throw ArgumentError('Remote description requires sdp and type');
+    if (rawSdp is! String || rawSdp.trim().isEmpty) {
+      throw ArgumentError('Remote description requires a non-empty String SDP');
     }
+
+    if (type != 'offer' &&
+        type != 'answer' &&
+        type != 'pranswer' &&
+        type != 'rollback') {
+      throw ArgumentError('Unsupported remote SDP type: $type');
+    }
+
+    // Preserve SDP exactly. Trimming/reformatting SDP can make native
+    // libwebrtc reject the SessionDescription.
+    final sdp = rawSdp;
+
+    if (type != 'rollback' && !sdp.trimLeft().startsWith('v=0')) {
+      throw ArgumentError(
+        'Remote SDP is malformed: expected it to start with v=0',
+      );
+    }
+
+    debugPrint(
+      'WEBRTC SET REMOTE DESCRIPTION: type=$type sdpLength=${sdp.length}',
+    );
 
     await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
 
@@ -514,40 +547,18 @@ class WebRTCService {
     }
   }
 
-  Future<void> enableVideo() async {
-    final pc = _peerConnection;
+  Future<MediaStreamTrack> _prepareLocalVideoTrack() async {
     final localStream = _localStream;
 
-    if (pc == null || localStream == null || _disposed) {
-      throw StateError('Peer connection or local stream is unavailable');
+    if (localStream == null || _disposed) {
+      throw StateError('Local stream is unavailable');
     }
 
-    _isVideoSession = true;
-
     final existingVideoTracks = localStream.getVideoTracks();
-
     if (existingVideoTracks.isNotEmpty) {
-      final videoTrack = existingVideoTracks.first;
-      videoTrack.enabled = true;
-
-      final senders = await pc.getSenders();
-      for (final sender in senders) {
-        if (sender.track?.kind == 'video' || identical(sender, _videoSender)) {
-          _videoSender = sender;
-          break;
-        }
-      }
-
-      if (_videoSender != null && _videoSender!.track == null) {
-        await _videoSender!.replaceTrack(videoTrack);
-      }
-
-      if (_renderersInitialized) {
-        localRenderer.srcObject = localStream;
-      }
-
-      await _applyAudioRoute();
-      return;
+      final existingTrack = existingVideoTracks.first;
+      existingTrack.enabled = true;
+      return existingTrack;
     }
 
     final videoOnlyStream = await navigator.mediaDevices.getUserMedia(
@@ -572,25 +583,137 @@ class WebRTCService {
     videoTrack.enabled = true;
     await localStream.addTrack(videoTrack);
 
-    final senders = await pc.getSenders();
-    for (final sender in senders) {
-      if (sender.track?.kind == 'video' || identical(sender, _videoSender)) {
-        _videoSender = sender;
-        break;
+    if (_renderersInitialized) {
+      localRenderer.srcObject = localStream;
+    }
+
+    return videoTrack;
+  }
+
+  Future<RTCRtpTransceiver?> _findVideoTransceiver() async {
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) return null;
+
+    final transceivers = await pc.getTransceivers();
+
+    debugPrint('WEBRTC TRANSCEIVERS COUNT: ${transceivers.length}');
+
+    for (var i = 0; i < transceivers.length; i++) {
+      final transceiver = transceivers[i];
+      final senderTrack = transceiver.sender.track;
+      final receiverTrack = transceiver.receiver.track;
+
+      TransceiverDirection? direction;
+      try {
+        direction = await transceiver.getDirection();
+      } catch (_) {}
+
+      debugPrint(
+        'WEBRTC TRANSCEIVER[$i]: '
+        'mid=${transceiver.mid} '
+        'sender=${senderTrack?.kind ?? "null"} '
+        'receiver=${receiverTrack?.kind ?? "null"} '
+        'direction=$direction',
+      );
+
+      final hasVideo =
+          senderTrack?.kind == 'video' ||
+          receiverTrack?.kind == 'video' ||
+          (_videoSender != null &&
+              transceiver.sender.senderId == _videoSender!.senderId);
+
+      if (hasVideo) {
+        return transceiver;
       }
     }
 
-    if (_videoSender != null) {
-      await _videoSender!.replaceTrack(videoTrack);
-    } else {
-      _videoSender = await pc.addTrack(videoTrack, localStream);
+    return null;
+  }
+
+  Future<void> _bindLocalVideoToTransceiver(
+    MediaStreamTrack videoTrack,
+  ) async {
+    final pc = _peerConnection;
+    final localStream = _localStream;
+
+    if (pc == null || localStream == null || _disposed) {
+      throw StateError('Peer connection or local stream is unavailable');
     }
+
+    var videoTransceiver = await _findVideoTransceiver();
+
+    if (videoTransceiver == null) {
+      // OFFERER: first Audio -> Video upgrade.
+      // Create one explicit bidirectional video m-line.
+      videoTransceiver = await pc.addTransceiver(
+        track: videoTrack,
+        init: RTCRtpTransceiverInit(
+          direction: TransceiverDirection.SendRecv,
+          streams: <MediaStream>[localStream],
+        ),
+      );
+
+      _videoSender = videoTransceiver.sender;
+
+      debugPrint(
+        'WEBRTC VIDEO TRANSCEIVER CREATED: '
+        'mid=${videoTransceiver.mid}',
+      );
+      return;
+    }
+
+    // ANSWERER or repeated upgrade: reuse the same negotiated m=video.
+    final oldDirection = await videoTransceiver.getDirection();
+
+    if (oldDirection != TransceiverDirection.SendRecv) {
+      await videoTransceiver.setDirection(
+        TransceiverDirection.SendRecv,
+      );
+    }
+
+    _videoSender = videoTransceiver.sender;
+
+    // Associate this sender with the local stream and attach the camera.
+    try {
+      await _videoSender!.setStreams(<MediaStream>[localStream]);
+    } catch (error) {
+      debugPrint('WEBRTC VIDEO SET STREAMS WARNING: $error');
+    }
+
+    await _videoSender!.replaceTrack(videoTrack);
+
+    debugPrint(
+      'WEBRTC VIDEO TRACK BOUND: '
+      'track=${videoTrack.id} '
+      'mid=${videoTransceiver.mid} '
+      'oldDirection=$oldDirection '
+      'newDirection=SendRecv',
+    );
+  }
+
+  Future<void> enableVideo() async {
+    final pc = _peerConnection;
+    final localStream = _localStream;
+
+    if (pc == null || localStream == null || _disposed) {
+      throw StateError('Peer connection or local stream is unavailable');
+    }
+
+    _isVideoSession = true;
+
+    final videoTrack = await _prepareLocalVideoTrack();
+
+    // Explicitly create/reuse ONE SendRecv video transceiver.
+    // Do not let addTrack() create an ambiguous second video m-line.
+    await _bindLocalVideoToTransceiver(videoTrack);
 
     if (_renderersInitialized) {
       localRenderer.srcObject = localStream;
     }
 
     await _applyAudioRoute();
+    debugPrint('WEBRTC VIDEO ENABLED FOR OUTGOING UPGRADE');
   }
 
   Future<void> disableVideoHard() async {
@@ -649,7 +772,111 @@ class WebRTCService {
     });
 
     await pc.setLocalDescription(offer);
+
+    final offerSdp = offer.sdp ?? '';
+    debugPrint(
+      'WEBRTC VIDEO UPGRADE OFFER: '
+      'hasVideo=${offerSdp.contains("m=video")} '
+      'hasSendRecv=${offerSdp.contains("a=sendrecv")}',
+    );
+
     return offer;
+  }
+
+  Future<RTCSessionDescription> acceptVideoUpgradeOffer(
+    Map<dynamic, dynamic> data,
+  ) async {
+    final pc = _peerConnection;
+    final localStream = _localStream;
+
+    if (pc == null || localStream == null || _disposed) {
+      throw StateError('Peer connection or local stream is unavailable');
+    }
+
+    final sdp = data['sdp']?.toString() ?? '';
+    final type = data['type']?.toString().trim() ?? '';
+
+    if (sdp.trim().isEmpty || type.isEmpty) {
+      throw ArgumentError('Invalid video-upgrade offer');
+    }
+
+    // Acquire camera permission/media BEFORE touching signaling state.
+    // But do NOT add the track to RTCPeerConnection yet.
+    final videoTrack = await _prepareLocalVideoTrack();
+
+    debugPrint('WEBRTC VIDEO ACCEPT: applying remote offer first');
+
+    // IMPORTANT ORDER:
+    // 1) Apply requester's offer so its m=video transceiver exists locally.
+    // 2) Attach our camera track to that negotiation.
+    // 3) Create the answer.
+    await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
+    _remoteDescriptionSet = true;
+    await _flushPendingCandidates();
+
+    _isVideoSession = true;
+
+    // setRemoteDescription() above has established the remote m=video.
+    // Bind our camera to that exact transceiver instead of calling addTrack().
+    await _bindLocalVideoToTransceiver(videoTrack);
+
+    if (_renderersInitialized) {
+      localRenderer.srcObject = localStream;
+    }
+
+    await _applyAudioRoute();
+
+    final answer = await pc.createAnswer(<String, dynamic>{
+      'offerToReceiveAudio': true,
+      'offerToReceiveVideo': true,
+    });
+
+    await pc.setLocalDescription(answer);
+
+    final answerSdp = answer.sdp ?? '';
+    debugPrint(
+      'WEBRTC VIDEO ACCEPT ANSWER: '
+      'hasVideo=${answerSdp.contains("m=video")} '
+      'hasSendRecv=${answerSdp.contains("a=sendrecv")}',
+    );
+
+    return answer;
+  }
+
+  Future<RTCSessionDescription> rejectVideoUpgradeOffer(
+    Map<dynamic, dynamic> data,
+  ) async {
+    final pc = _peerConnection;
+
+    if (pc == null || _disposed) {
+      throw StateError('Peer connection is null or disposed');
+    }
+
+    final sdp = data['sdp']?.toString() ?? '';
+    final type = data['type']?.toString().trim() ?? '';
+
+    if (sdp.trim().isEmpty || type.isEmpty) {
+      throw ArgumentError('Invalid video-upgrade offer');
+    }
+
+    // A decline must STILL complete the offer/answer transaction. If we only
+    // send a custom "declined" event, the requester remains in have-local-offer
+    // and a later video request can fail.
+    _isVideoSession = false;
+
+    await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
+    _remoteDescriptionSet = true;
+    await _flushPendingCandidates();
+
+    final answer = await pc.createAnswer(<String, dynamic>{
+      'offerToReceiveAudio': true,
+      'offerToReceiveVideo': false,
+    });
+
+    await pc.setLocalDescription(answer);
+
+    debugPrint('WEBRTC VIDEO DECLINE: stabilizing answer created');
+    return answer;
   }
 
   Future<RTCSessionDescription> handleRenegotiationOffer(
@@ -661,10 +888,10 @@ class WebRTCService {
       throw StateError('Peer connection is null or disposed');
     }
 
-    final sdp = data['sdp']?.toString().trim() ?? '';
+    final sdp = data['sdp']?.toString() ?? '';
     final type = data['type']?.toString().trim() ?? '';
 
-    if (sdp.isEmpty || type.isEmpty) {
+    if (sdp.trim().isEmpty || type.isEmpty) {
       throw ArgumentError('Invalid renegotiation offer');
     }
 
@@ -688,16 +915,34 @@ class WebRTCService {
 
     if (pc == null || _disposed) return;
 
-    final sdp = data['sdp']?.toString().trim() ?? '';
+    final sdp = data['sdp']?.toString() ?? '';
     final type = data['type']?.toString().trim() ?? '';
 
-    if (sdp.isEmpty || type.isEmpty) {
+    if (sdp.trim().isEmpty || type.isEmpty) {
       throw ArgumentError('Invalid renegotiation answer');
     }
+
+    debugPrint(
+      'WEBRTC APPLY VIDEO UPGRADE ANSWER: '
+      'hasVideo=${sdp.contains("m=video")} '
+      'hasSendRecv=${sdp.contains("a=sendrecv")}',
+    );
 
     await pc.setRemoteDescription(RTCSessionDescription(sdp, type));
     _remoteDescriptionSet = true;
     await _flushPendingCandidates();
+
+    final videoTransceiver = await _findVideoTransceiver();
+    if (videoTransceiver != null) {
+      final direction = await videoTransceiver.getDirection();
+      debugPrint(
+        'WEBRTC VIDEO AFTER ANSWER: '
+        'mid=${videoTransceiver.mid} '
+        'direction=$direction '
+        'sender=${videoTransceiver.sender.track?.kind ?? "null"} '
+        'receiver=${videoTransceiver.receiver.track?.kind ?? "null"}',
+      );
+    }
   }
 
   Future<void> _flushPendingCandidates() async {

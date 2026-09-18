@@ -1,5 +1,8 @@
 // lib/core/call/global_call_handler.dart
 
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:hiddenly/core/call/call_api.dart';
@@ -146,12 +149,115 @@ class GlobalCallHandler {
       _globalCallCancelledHandler!,
     );
 
+    final socket = GlobalCallSocketService.instance;
+
+    // IMPORTANT:
+    // Automatic reconnect must not reuse an old JWT forever. Before each
+    // reconnect, rebuild the global-call websocket URL with a valid token.
+    socket.setReconnectUrlProvider(() async {
+      final freshUrl = await _buildFreshGlobalSocketUrl();
+      return freshUrl;
+    });
+
     final url = AppConfig.globalCallSocketUrl(token: accessToken.trim());
-    await GlobalCallSocketService.instance.connect(url: url);
+    await socket.connect(url: url);
 
     debugPrint('### GLOBAL INCOMING CALL SOCKET CONNECTED/READY ###');
     debugPrint('GLOBAL INCOMING CALL SOCKET ACTIVE');
     debugPrint('currentUserId: $_currentUserId');
+  }
+
+  bool _jwtNeedsRefresh(String token) {
+    try {
+      final parts = token.split('.');
+      if (parts.length != 3) return false;
+
+      final normalized = base64Url.normalize(parts[1]);
+      final decoded = utf8.decode(base64Url.decode(normalized));
+      final payload = jsonDecode(decoded);
+
+      if (payload is! Map) return false;
+
+      final expRaw = payload['exp'];
+      final exp = expRaw is num
+          ? expRaw.toInt()
+          : int.tryParse(expRaw?.toString() ?? '');
+
+      if (exp == null) return false;
+
+      final expiry = DateTime.fromMillisecondsSinceEpoch(
+        exp * 1000,
+        isUtc: true,
+      );
+
+      return DateTime.now().toUtc().add(const Duration(minutes: 1)).isAfter(
+            expiry,
+          );
+    } catch (_) {
+      // If this is not a JWT, keep the current token and let the server decide.
+      return false;
+    }
+  }
+
+  Future<String?> _freshAccessToken() async {
+    String token =
+        (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
+
+    if (token.isEmpty || _jwtNeedsRefresh(token)) {
+      final refreshed = await ApiClient.refreshAccessToken();
+      token = refreshed?.trim() ?? '';
+    }
+
+    if (token.isEmpty) {
+      token =
+          (await ApiClient.storage.read(key: 'access_token'))?.trim() ?? '';
+    }
+
+    if (token.isEmpty) {
+      token = (await ApiClient.storage.read(key: 'token'))?.trim() ?? '';
+    }
+
+    return token.isEmpty ? null : token;
+  }
+
+  Future<String?> _buildFreshGlobalSocketUrl() async {
+    try {
+      final token = await _freshAccessToken();
+
+      if (token == null || token.isEmpty) {
+        debugPrint('GLOBAL SOCKET FRESH URL ERROR: no access token');
+        return null;
+      }
+
+      return AppConfig.globalCallSocketUrl(token: token);
+    } catch (e, st) {
+      debugPrint('GLOBAL SOCKET FRESH URL ERROR: $e');
+      debugPrint(st.toString());
+      return null;
+    }
+  }
+
+  Future<void> ensureGlobalIncomingCallSocketConnected() async {
+    final socket = GlobalCallSocketService.instance;
+
+    if (socket.isConnected || socket.isConnecting) {
+      return;
+    }
+
+    if ((_currentUserId ?? '').trim().isEmpty) {
+      await _loadCurrentUserFromStorage();
+    }
+
+    final currentUserId = (_currentUserId ?? '').trim();
+
+    if (currentUserId.isEmpty) {
+      debugPrint('GLOBAL SOCKET ENSURE ERROR: user id unavailable');
+      return;
+    }
+
+    socket.setReconnectUrlProvider(() => _buildFreshGlobalSocketUrl());
+
+    await socket.ensureConnected();
   }
 
   Future<void> _saveCurrentUserToStorage({
@@ -483,8 +589,33 @@ class GlobalCallHandler {
         callId: callId,
       );
 
+      // If the real per-conversation signaling socket is already active for
+      // this same call, this is only a duplicate global notification caused by
+      // offer resend / call_ready. Ignore it without using a long-lived UI lock.
+      final activeCallId = SocketService.instance.activeCallId?.trim() ?? '';
+      final activeConversationId =
+          SocketService.instance.activeConversationId?.trim() ?? '';
+      final cleanIncomingCallId = callId?.trim() ?? '';
+      final cleanIncomingConversationId = conversationId?.trim() ?? '';
+
+      final sameActiveCall =
+          cleanIncomingCallId.isNotEmpty && activeCallId == cleanIncomingCallId;
+      final sameActiveConversation =
+          SocketService.instance.isConnected &&
+          cleanIncomingConversationId.isNotEmpty &&
+          activeConversationId == cleanIncomingConversationId;
+
+      if (sameActiveCall || sameActiveConversation) {
+        debugPrint(
+          'GLOBAL INCOMING CALL IGNORED: active call socket already owns this call',
+        );
+        return;
+      }
+
       if (h._isAcceptedOrOpenedCall(incomingKey)) {
-        debugPrint('GLOBAL INCOMING CALL IGNORED: already accepted/opened $incomingKey');
+        debugPrint(
+          'GLOBAL INCOMING CALL IGNORED: short duplicate guard $incomingKey',
+        );
         return;
       }
 
@@ -661,8 +792,10 @@ class GlobalCallHandler {
     _activeIncomingCallId = callId;
     _lastIncomingKey = incomingKey;
     _lastIncomingKeyTime = DateTime.now();
-    _acceptedOrOpenedCallKey = incomingKey;
-    _acceptedOrOpenedCallKeyTime = DateTime.now();
+
+    // Do NOT mark the call as accepted/opened here. This is only the ringing
+    // screen. Marking it accepted here used to block later incoming calls for
+    // up to 120 seconds and made killing/restarting the app appear necessary.
 
     final navigator = await _waitForNavigator();
 
@@ -876,12 +1009,13 @@ class GlobalCallHandler {
 
     if (_acceptedOrOpenedCallKey != key) return false;
 
-    // Keep a longer guard window because backend/global socket can resend
-    // incoming_call after receiver already accepted and CallScreen is open.
+    // This is only a very short debounce for the native CallKit accept path.
+    // The authoritative duplicate guard for an active call is the real
+    // per-conversation SocketService activeCallId/activeConversationId above.
     return DateTime.now()
             .difference(_acceptedOrOpenedCallKeyTime!)
             .inSeconds <=
-        120;
+        8;
   }
 
   bool _isRecentDuplicateCallKitOpen(String key) {
@@ -909,9 +1043,12 @@ class GlobalCallHandler {
     _activeIncomingConversationId = null;
     _activeIncomingCallId = null;
 
-    // Do NOT clear _lastIncomingKey or _acceptedOrOpenedCallKey here.
-    // Backend/global socket can resend the same incoming_call after accept.
-    // Keeping these keys briefly prevents the second incoming screen.
+    // A closed call screen must not leave a long-lived in-memory block.
+    // Keep only the 5-second _lastIncomingKey debounce; clear accepted/opened
+    // state so a legitimate next call can arrive without killing the app.
+    _acceptedOrOpenedCallKey = null;
+    _acceptedOrOpenedCallKeyTime = null;
+
     clearPendingOffer();
   }
 
@@ -981,10 +1118,24 @@ class GlobalCallHandler {
   void dispose() {
     _registered = false;
     forceResetCallUiLocks(reason: 'dispose');
+
+    _removeGlobalHandlers();
+    _removeOldHandlers();
+
+    final socket = GlobalCallSocketService.instance;
+    socket.setReconnectUrlProvider(null);
+
+    // Logout/user switch must stop the old user's persistent global socket.
+    unawaited(
+      socket.disconnect(
+        clearHandlers: false,
+        forgetUrl: true,
+        manual: true,
+      ),
+    );
+
     _currentUserId = null;
     _currentUserName = null;
     _currentUserAvatar = null;
-    _removeGlobalHandlers();
-    _removeOldHandlers();
   }
 }

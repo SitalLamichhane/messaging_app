@@ -844,18 +844,26 @@ class SocketService {
 
   Duration _messageLifetime(String event) {
     if (event == CallSocketEvents.iceCandidate) {
-      return const Duration(seconds: 20);
+      // ICE candidates are highly time-sensitive. Old candidates from a
+      // previous network path are usually not useful after a long outage.
+      return const Duration(seconds: 25);
     }
 
     if (event == CallSocketEvents.callReady) {
-      return const Duration(seconds: 15);
+      return const Duration(seconds: 20);
+    }
+
+    if (event == CallSocketEvents.callRenegotiateOffer ||
+        event == CallSocketEvents.callRenegotiateAnswer) {
+      // Weak-network recovery can take longer than the normal signaling path.
+      // Keep ICE-restart renegotiation long enough to survive reconnect
+      // backoff, but not indefinitely.
+      return const Duration(seconds: 90);
     }
 
     if (event == CallSocketEvents.callOffer ||
-        event == CallSocketEvents.callAnswer ||
-        event == CallSocketEvents.callRenegotiateOffer ||
-        event == CallSocketEvents.callRenegotiateAnswer) {
-      return const Duration(seconds: 35);
+        event == CallSocketEvents.callAnswer) {
+      return const Duration(seconds: 45);
     }
 
     if (_isTerminalEvent(event)) {
