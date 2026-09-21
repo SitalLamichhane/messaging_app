@@ -1,4 +1,7 @@
 import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/groupCall/domain/application/group_call_controller.dart';
+import 'package:hiddenly/groupCall/domain/call_models.dart';
+import 'package:hiddenly/groupCall/domain/presentation/screens/group_call_screen.dart';
 import 'package:hiddenly/groupChat/domain/create_group_chat_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:dio/dio.dart';
@@ -16,6 +19,7 @@ import 'package:hiddenly/profile_data/conversation_search_page.dart';
 import 'package:hiddenly/profile_data/photos_media_page.dart';
 // import 'package:hiddenly/profile_data/profile_data_page.dart';
 import 'package:hiddenly/theme_controller.dart';
+
 
 class ChatSettingsScreen extends StatefulWidget {
   final ChatItem chat;
@@ -489,6 +493,17 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     _loadSettings();
     Future.microtask(_loadBlockStatus);
 
+    // WhatsApp-like behavior:
+    // if this group already has an ongoing call, discover it so this
+    // settings page can show "Ongoing group call - Join".
+    if (isGroupChat) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          _refreshActiveGroupCall();
+        }
+      });
+    }
+
     _headerScaleController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 260),
@@ -738,48 +753,19 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     }
   }
 
-  Future<void> _createGroupWithThisUser() async {
-    final targetUserId = _targetUserIdForBlock().trim();
-
-    if (targetUserId.isEmpty) {
-      _showSnackBar('User not found');
-      return;
-    }
-
-    final createdGroup = await Navigator.push<ChatItem>(
+  void _createGroupWithThisUser() {
+    Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CreateGroupChatScreen(
-          currentUserId: widget.currentUserId,
           preSelectedUser: ChatUser(
-            id: targetUserId,
+            id: _targetUserIdForBlock(),
             name: widget.chat.name,
             avatarUrl: _resolvedChatAvatarUrl(),
             isOnline: widget.chat.isOnline,
           ),
         ),
       ),
-    );
-
-    if (createdGroup == null || !mounted) {
-      return;
-    }
-
-    // CreateGroupChatScreen already inserts/updates the returned group
-    // in AppChatData. Notify again so chat-list listeners refresh instantly.
-    AppChatData.notify();
-
-    _showSnackBar(
-      '${createdGroup.name} created',
-    );
-
-    // Return the newly-created group to the chat page that opened settings.
-    //
-    // Parent page should handle:
-    //   if (result is ChatItem && result.isGroup == true) { open group chat }
-    Navigator.pop<ChatItem>(
-      context,
-      createdGroup,
     );
   }
 
@@ -1143,7 +1129,138 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
   }
 
 
-  void _startCall(bool isVideo) {
+  Future<void> _refreshActiveGroupCall() async {
+    if (!isGroupChat || !mounted) return;
+
+    final conversationId = int.tryParse(widget.chat.id.toString());
+
+    if (conversationId == null) {
+      debugPrint('GROUP CALL: invalid conversation id: ${widget.chat.id}');
+      return;
+    }
+
+    try {
+      final controller = context.read<GroupCallController>();
+
+      await controller.checkActiveCall(conversationId);
+    } catch (e) {
+      debugPrint('GROUP ACTIVE CALL CHECK ERROR: $e');
+    }
+  }
+
+  Future<void> _joinOngoingGroupCall(CallSessionDto call) async {
+    if (!mounted) return;
+
+    final controller = context.read<GroupCallController>();
+
+    try {
+      await controller.joinExistingCall(call);
+
+      if (!mounted) return;
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => GroupCallScreen(
+            controller: controller,
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+
+      await _refreshActiveGroupCall();
+      _notifyDataChanged();
+    } catch (e) {
+      debugPrint('GROUP CALL JOIN ERROR: $e');
+
+      if (mounted) {
+        _showSnackBar(
+          controller.error ?? 'Could not join the group call.',
+        );
+      }
+    }
+  }
+
+  Future<void> _startGroupCall(bool isVideo) async {
+    final conversationId = int.tryParse(widget.chat.id.toString());
+
+    if (conversationId == null) {
+      _showSnackBar('Invalid group conversation.');
+      return;
+    }
+
+    final controller = context.read<GroupCallController>();
+
+    try {
+      // First check whether the group already has a live call.
+      //
+      // This is important because pressing Audio/Video while an existing
+      // group call is running should JOIN that room rather than create
+      // another CallSession.
+      final existing = await controller.checkActiveCall(
+        conversationId,
+      );
+
+      if (existing != null && existing.isActive) {
+        await _joinOngoingGroupCall(existing);
+        return;
+      }
+
+      AppChatData.addCallLog(
+        chat: widget.chat,
+        type: isVideo
+            ? CallEntryType.video
+            : CallEntryType.voice,
+        status: CallEntryStatus.outgoing,
+        duration: const Duration(seconds: 0),
+        answered: true,
+      );
+
+      await controller.startGroupCall(
+        conversationId: conversationId,
+        video: isVideo,
+      );
+
+      if (!mounted) return;
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => GroupCallScreen(
+            controller: controller,
+          ),
+        ),
+      );
+
+      if (!mounted) return;
+
+      await _refreshActiveGroupCall();
+      _notifyDataChanged();
+    } catch (e) {
+      debugPrint('START GROUP CALL ERROR: $e');
+
+      if (mounted) {
+        _showSnackBar(
+          controller.error ?? 'Could not start the group call.',
+        );
+      }
+    }
+  }
+
+  Future<void> _startCall(bool isVideo) async {
+    // GROUP CALL
+    //
+    // Do not open the old one-to-one CallScreen for groups.
+    // Group calls use one LiveKit room with many participants.
+    if (isGroupChat) {
+      await _startGroupCall(isVideo);
+      return;
+    }
+
+    // PRIVATE ONE-TO-ONE CALL
+    //
+    // Keep your already-working private-call flow unchanged.
     final targetUserId = _targetUserIdForBlock();
 
     if (isBlocked || _blockedMe) {
@@ -1163,7 +1280,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       answered: true,
     );
 
-    Navigator.push(
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => CallScreen(
@@ -1179,9 +1296,115 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
           conversationId: widget.chat.id,
         ),
       ),
-    ).then((_) {
-      if (mounted) _notifyDataChanged();
-    });
+    );
+
+    if (mounted) {
+      _notifyDataChanged();
+    }
+  }
+
+  Widget _buildOngoingGroupCallCard() {
+    if (!isGroupChat) {
+      return const SizedBox.shrink();
+    }
+
+    return Consumer<GroupCallController>(
+      builder: (context, controller, _) {
+        final call = controller.activeDiscoveredCall;
+
+        if (call == null || !call.isActive) {
+          return const SizedBox.shrink();
+        }
+
+        final joinedCount = call.participants
+            .where(
+              (participant) =>
+                  participant.status == CallParticipantStatus.joined,
+            )
+            .length;
+
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
+          child: Material(
+            color: isDark
+                ? const Color(0xFF123C35)
+                : const Color(0xFFE7F8F2),
+            borderRadius: BorderRadius.circular(20),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: controller.isBusy
+                  ? null
+                  : () => _joinOngoingGroupCall(call),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 14,
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF25D366),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        call.isVideo
+                            ? Icons.videocam_rounded
+                            : Icons.call_rounded,
+                        color: Colors.white,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Ongoing group call',
+                            style: TextStyle(
+                              color: mainTextColor,
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            joinedCount > 0
+                                ? '$joinedCount in call • Tap to join'
+                                : 'Tap to join',
+                            style: TextStyle(
+                              color: secondaryTextColor,
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (controller.isBusy)
+                      const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                        ),
+                      )
+                    else
+                      const Icon(
+                        Icons.arrow_forward_ios_rounded,
+                        size: 18,
+                        color: Color(0xFF25D366),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   // void _viewProfile() {
@@ -1208,7 +1431,9 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
               _buildProfileHeader(),
               const SizedBox(height: 26),
               _buildQuickCallActions(),
-              const SizedBox(height: 24),
+              const SizedBox(height: 18),
+
+              if (isGroupChat) _buildOngoingGroupCallCard(),
 
               _buildSectionTitle('Customization'),
               _buildSettingsCard(

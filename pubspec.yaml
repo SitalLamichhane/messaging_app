@@ -12,61 +12,73 @@ dependencies:
     sdk: flutter
 
   dio: ^5.9.2
-  http: ^1.2.2
+  http: ^1.6.0
   http_parser: ^4.0.2
-  web_socket_channel: ^3.0.1
+  web_socket_channel: ^3.0.3
 
+  # -------------------------
+  # Storage
+  # -------------------------
   flutter_secure_storage: ^10.2.0
   path_provider: ^2.1.5
   shared_preferences: ^2.3.3
 
+  # -------------------------
+  # State management
+  # -------------------------
   flutter_riverpod: ^2.6.1
   provider: ^6.1.5+1
 
+  # -------------------------
+  # UI / utilities
+  # -------------------------
   intl_phone_field: ^3.2.0
-
   photo_view: ^0.15.0
+  emoji_picker_flutter: ^4.4.0
+  intl: ^0.19.0
+  cupertino_icons: ^1.0.8
+
+  # -------------------------
+  # Media / files
+  # -------------------------
   wechat_assets_picker: ^10.1.2
   image_picker: ^1.1.2
   camera: ^0.11.0+2
   video_player: ^2.8.2
   file_picker: ^8.0.7
-  simple_pip_mode: ^1.1.0
+  saver_gallery: ^4.1.1
 
+  # -------------------------
+  # Audio
+  # -------------------------
   audioplayers: ^6.1.0
   just_audio: ^0.10.5
   record: ^6.1.1
 
-  emoji_picker_flutter: ^4.4.0
-
+  # -------------------------
+  # Calls / WebRTC / LiveKit
+  # -------------------------
   flutter_webrtc: ^1.4.1
   flutter_callkit_incoming: ^2.5.0
-  uuid: ^4.5.1
-
-  permission_handler: ^12.0.1
-  saver_gallery: ^4.1.1
-
-  intl: ^0.19.0
-
-  firebase_core: ^3.15.2
-  firebase_messaging: ^15.2.10
-  flutter_local_notifications: ^22.0.0
-  device_info_plus: ^11.3.0
-
-  cupertino_icons: ^1.0.8
-  livekit_client: ^2.5.0+hotfix.3
-  #gorups
   livekit_client: ^2.13.0
-  http: ^1.6.0
-  web_socket_channel: ^3.0.3
+  simple_pip_mode: ^1.1.0
+
+  # -------------------------
+  # Firebase
+  # -------------------------
   firebase_core: ^4.15.0
   firebase_messaging: ^16.7.0
-  permission_handler: ^13.0.2
+  flutter_local_notifications: ^22.0.0
 
+  # -------------------------
+  # Device / IDs
+  # -------------------------
+  device_info_plus: ^12.4.0
+  uuid: ^4.5.1
+  permission_handler: 12.0.3
 
 dependency_overrides:
   shared_preferences_android: 2.4.10
-
 
 dev_dependencies:
   flutter_test:
@@ -76,12 +88,10 @@ dev_dependencies:
   flutter_launcher_icons: ^0.13.1
   flutter_native_splash: ^2.4.1
 
-
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon.png"
-
 
 flutter_native_splash:
   color: "#ffffff"
@@ -89,7 +99,6 @@ flutter_native_splash:
   android: true
   ios: true
   fullscreen: true
-
 
 flutter:
   uses-material-design: true

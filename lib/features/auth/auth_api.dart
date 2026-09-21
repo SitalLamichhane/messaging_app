@@ -49,11 +49,35 @@ class AuthApi {
             _extractErrorValue(data['phone']),
           );
         }
+
+        if (data['non_field_errors'] != null) {
+          throw Exception(
+            _extractErrorValue(
+              data['non_field_errors'],
+            ),
+          );
+        }
       }
 
+      // No HTTP response means the request did not successfully
+      // reach/receive a response from the backend.
       if (e.response == null) {
         throw Exception(
           _getNetworkErrorMessage(e),
+        );
+      }
+
+      if (e.response?.statusCode == 429) {
+        throw Exception(
+          'Too many OTP requests. Please try again later.',
+        );
+      }
+
+      if (e.response != null &&
+          e.response!.statusCode != null &&
+          e.response!.statusCode! >= 500) {
+        throw Exception(
+          'Server error. Please try again.',
         );
       }
 
@@ -91,15 +115,14 @@ class AuthApi {
       final data = e.response?.data;
 
       if (data is Map) {
-        /*
-         * Your backend currently returns:
-         *
-         * {
-         *   "code": "Invalid OTP."
-         * }
-         *
-         * So "code" must be checked before Dio's generic message.
-         */
+        // Backend example:
+        //
+        // {
+        //   "code": "Invalid OTP."
+        // }
+        //
+        // Therefore code should be checked first.
+
         if (data['code'] != null) {
           throw Exception(
             _extractErrorValue(data['code']),
@@ -139,27 +162,27 @@ class AuthApi {
         );
       }
 
-      if (e.response?.statusCode == 400) {
+      final statusCode = e.response?.statusCode;
+
+      if (statusCode == 400) {
         throw Exception(
           'Invalid OTP.',
         );
       }
 
-      if (e.response?.statusCode == 401) {
+      if (statusCode == 401) {
         throw Exception(
           'OTP verification failed.',
         );
       }
 
-      if (e.response?.statusCode == 429) {
+      if (statusCode == 429) {
         throw Exception(
           'Too many attempts. Please try again later.',
         );
       }
 
-      if (e.response != null &&
-          e.response!.statusCode != null &&
-          e.response!.statusCode! >= 500) {
+      if (statusCode != null && statusCode >= 500) {
         throw Exception(
           'Server error. Please try again.',
         );
@@ -255,21 +278,27 @@ class AuthApi {
         );
       }
 
-      if (e.response?.statusCode == 401) {
+      final statusCode = e.response?.statusCode;
+
+      if (statusCode == 401) {
         throw Exception(
           'Signup session expired. Please request OTP again.',
         );
       }
 
-      if (e.response?.statusCode == 400) {
+      if (statusCode == 400) {
         throw Exception(
           'Unable to complete signup. Please check your information.',
         );
       }
 
-      if (e.response != null &&
-          e.response!.statusCode != null &&
-          e.response!.statusCode! >= 500) {
+      if (statusCode == 429) {
+        throw Exception(
+          'Too many requests. Please try again later.',
+        );
+      }
+
+      if (statusCode != null && statusCode >= 500) {
         throw Exception(
           'Server error. Please try again.',
         );
@@ -293,7 +322,13 @@ class AuthApi {
     }
 
     if (value is String) {
-      return value.trim();
+      final text = value.trim();
+
+      if (text.isEmpty) {
+        return 'Something went wrong.';
+      }
+
+      return text;
     }
 
     if (value is List) {
@@ -316,7 +351,13 @@ class AuthApi {
       );
     }
 
-    return value.toString().trim();
+    final text = value.toString().trim();
+
+    if (text.isEmpty) {
+      return 'Something went wrong.';
+    }
+
+    return text;
   }
 
   // ============================================================
@@ -335,6 +376,11 @@ class AuthApi {
 
       case DioExceptionType.receiveTimeout:
         return 'Server response timeout. Please try again.';
+
+      // Required by the Dio version currently installed
+      // in your project.
+      case DioExceptionType.transformTimeout:
+        return 'Request processing timeout. Please try again.';
 
       case DioExceptionType.connectionError:
         return 'Unable to connect to the server. Check your internet connection.';

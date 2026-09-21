@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:hiddenly/groupCall/domain/call_models.dart';
 
 import '../application/group_call_controller.dart';
-import '../domain/call_models.dart';
 import '../presentation/screens/group_call_screen.dart';
 
 /// Call this from your group chat's audio/video button.

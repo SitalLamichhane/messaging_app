@@ -1,146 +1,127 @@
 import 'package:flutter/material.dart';
 
-import '../../domain/call_models.dart';
-import '../../infrastructure/call_api_service.dart';
+import 'package:hiddenly/groupCall/domain/application/group_call_controller.dart';
+import 'package:hiddenly/groupCall/domain/call_models.dart';
 
-class OngoingCallBanner extends StatefulWidget {
-  final int conversationId;
-  final CallApiService api;
-  final Future<void> Function(CallSessionDto call) onJoin;
+class OngoingCallBanner
+    extends StatelessWidget {
+  final GroupCallController controller;
+  final Future<void> Function() onJoin;
 
   const OngoingCallBanner({
     super.key,
-    required this.conversationId,
-    required this.api,
+    required this.controller,
     required this.onJoin,
   });
 
   @override
-  State<OngoingCallBanner> createState() =>
-      _OngoingCallBannerState();
-}
-
-class _OngoingCallBannerState
-    extends State<OngoingCallBanner>
-    with WidgetsBindingObserver {
-  CallSessionDto? _active;
-  bool _loading = true;
-
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addObserver(this);
-    _refresh();
-  }
-
-  @override
-  void didUpdateWidget(
-    covariant OngoingCallBanner oldWidget,
-  ) {
-    super.didUpdateWidget(oldWidget);
-
-    if (oldWidget.conversationId !=
-        widget.conversationId) {
-      _refresh();
-    }
-  }
-
-  @override
-  void didChangeAppLifecycleState(
-    AppLifecycleState state,
-  ) {
-    if (state == AppLifecycleState.resumed) {
-      _refresh();
-    }
-  }
-
-  Future<void> _refresh() async {
-    if (mounted) setState(() => _loading = true);
-
-    try {
-      final result = await widget.api
-          .getActiveGroupCall(widget.conversationId);
-
-      if (!mounted) return;
-
-      setState(() {
-        _active =
-            result.active ? result.call : null;
-        _loading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-
-      setState(() {
-        _active = null;
-        _loading = false;
-      });
-    }
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    if (_loading || _active == null) {
-      return const SizedBox.shrink();
-    }
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, _) {
+        final call =
+            controller
+                .activeDiscoveredCall;
 
-    final call = _active!;
+        if (call == null ||
+            !call.isActive) {
+          return const SizedBox.shrink();
+        }
 
-    return Material(
-      color: const Color(0xFF075E54),
-      child: InkWell(
-        onTap: () => widget.onJoin(call),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 11,
-          ),
-          child: Row(
-            children: [
-              Icon(
-                call.isVideo
-                    ? Icons.videocam
-                    : Icons.call,
-                color: Colors.white,
+        final joinedCount =
+            call.participants
+                .where(
+                  (participant) =>
+                      participant.status ==
+                      CallParticipantStatus
+                          .joined,
+                )
+                .length;
+
+        return Material(
+          color:
+              const Color(0xFF075E54),
+          child: InkWell(
+            onTap:
+                controller.isBusy
+                    ? null
+                    : () {
+                        onJoin();
+                      },
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
               ),
-              const SizedBox(width: 10),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Ongoing group call',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w700,
-                      ),
+              child: Row(
+                children: [
+                  Icon(
+                    call.isVideo
+                        ? Icons
+                            .videocam_rounded
+                        : Icons
+                            .call_rounded,
+                    color: Colors.white,
+                  ),
+                  const SizedBox(
+                    width: 10,
+                  ),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment
+                              .start,
+                      children: [
+                        const Text(
+                          'Ongoing group call',
+                          style: TextStyle(
+                            color:
+                                Colors.white,
+                            fontWeight:
+                                FontWeight
+                                    .w700,
+                          ),
+                        ),
+                        Text(
+                          joinedCount > 0
+                              ? '$joinedCount in call • Tap to join'
+                              : 'Tap to join',
+                          style:
+                              const TextStyle(
+                            color:
+                                Colors
+                                    .white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      'Tap to join',
-                      style: TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
+                  ),
+                  if (controller.isBusy)
+                    const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child:
+                          CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color:
+                            Colors.white,
                       ),
+                    )
+                  else
+                    const Icon(
+                      Icons
+                          .chevron_right_rounded,
+                      color:
+                          Colors.white,
                     ),
-                  ],
-                ),
+                ],
               ),
-              const Icon(
-                Icons.arrow_forward_ios,
-                size: 16,
-                color: Colors.white,
-              ),
-            ],
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }

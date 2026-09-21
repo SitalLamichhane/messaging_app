@@ -12,11 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/config/app_config.dart';
-import 'package:hiddenly/group/group_api_service.dart';
-import 'package:hiddenly/group/group_call_screen.dart';
-import 'package:hiddenly/group/group_call_token_service.dart';
-import 'package:hiddenly/group/group_info_screen.dart';
-import 'package:hiddenly/group/group_models.dart';
 import 'package:hiddenly/widgets/smooth_media_zoom.dart';
 import 'package:saver_gallery/saver_gallery.dart';
 import 'package:image_picker/image_picker.dart';
@@ -35,12 +30,24 @@ import 'package:record/record.dart';
 import 'package:video_player/video_player.dart';
 import 'package:wechat_assets_picker/wechat_assets_picker.dart';
 
+typedef GroupConversationBuilder = Widget Function(
+  BuildContext context,
+  ChatItem groupChat,
+);
+
 class ChatDetailScreen extends StatefulWidget {
   final ChatItem chat;
+
+  /// Optional handoff used only when a private-chat settings screen creates
+  /// a new group. Existing ChatDetailScreen callers do not need to change.
+  ///
+  /// Point this to your modular ConversationChatScreen integration.
+  final GroupConversationBuilder? groupConversationBuilder;
 
   const ChatDetailScreen({
     super.key,
     required this.chat,
+    this.groupConversationBuilder,
   });
 
   @override
@@ -62,11 +69,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   bool _isSendingLike = false;
   bool _isStartingCall = false;
   bool _isSendingMedia = false;
-
-  // WhatsApp-style group-call state.
-  // Group calls use one server-side call session + one LiveKit room.
-  GroupCallSessionInfo? _activeGroupCall;
-  bool _checkingActiveGroupCall = false;
 
   final Map<String, String> _messageReactions = {};
   final Set<String> _pinnedMessageIds = {};
@@ -261,133 +263,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
 
-  String _groupHeaderSubtitle(ChatItem chat) {
-    if (!chat.isGroup) {
-      return chat.isOnline ? 'Active now' : 'Offline';
-    }
-
-    final members = chat.members;
-    if (members.isEmpty) return 'Group';
-
-    final names = <String>[];
-
-    for (final member in members) {
-      final id = member.id.toString().trim();
-      final name = member.name.trim();
-
-      if (id.isNotEmpty && id == _currentUserId.trim()) {
-        names.add('You');
-      } else if (name.isNotEmpty) {
-        names.add(name);
-      }
-    }
-
-    if (names.isEmpty) {
-      return '${members.length} participants';
-    }
-
-    // Keep the app-bar subtitle short like WhatsApp.
-    if (names.length <= 3) {
-      return names.join(', ');
-    }
-
-    final visible = names.take(3).join(', ');
-    return '$visible +${names.length - 3}';
-  }
-
-  Future<void> _refreshActiveGroupCall({
-    bool showErrors = false,
-  }) async {
-    final chat = _freshChat();
-    if (!chat.isGroup) return;
-    if (_checkingActiveGroupCall) return;
-
-    final conversationId = chat.id.toString().trim();
-    if (conversationId.isEmpty) return;
-
-    if (mounted) {
-      setState(() {
-        _checkingActiveGroupCall = true;
-      });
-    }
-
-    try {
-      final call = await GroupApiService.getActiveCall(conversationId);
-
-      if (!mounted) return;
-
-      setState(() {
-        _activeGroupCall =
-            call != null && call.isActive ? call : null;
-      });
-    } catch (e) {
-      debugPrint('ACTIVE GROUP CALL CHECK ERROR: $e');
-
-      if (showErrors && mounted) {
-        _showMessengerPop(
-          'Could not check group call',
-          icon: Icons.error_rounded,
-        );
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _checkingActiveGroupCall = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _openGroupCall(
-    GroupCallSessionInfo call,
-  ) async {
-    if (_isStartingCall) return;
-
-    setState(() {
-      _isStartingCall = true;
-    });
-
-    try {
-      final credentials = await GroupCallTokenService.join(
-        callId: call.callId,
-      );
-
-      if (!mounted) return;
-
-      final latestChat = _freshChat();
-
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => GroupCallScreen(
-            callId: credentials.call.callId,
-            conversationId: latestChat.id.toString(),
-            groupName: _chatDisplayName(),
-            serverUrl: credentials.url,
-            token: credentials.token,
-            roomName: credentials.call.roomName,
-            startWithVideo: credentials.call.isVideo,
-          ),
-        ),
-      );
-    } catch (e, stackTrace) {
-      debugPrint('JOIN GROUP CALL ERROR: $e');
-      debugPrintStack(stackTrace: stackTrace);
-
-      if (!mounted) return;
-
-      _showMessengerPop(
-        'Could not join group call',
-        icon: Icons.error_rounded,
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isStartingCall = false;
-        });
-
-        await _refreshActiveGroupCall();
-      }
-    }
+  String _privateHeaderSubtitle(ChatItem chat) {
+    return chat.isOnline ? 'Active now' : 'Offline';
   }
 
   String _targetUserIdForBlock({String currentUserId = ''}) {
@@ -727,14 +604,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       if (!mounted) return;
 
-      // Private block state is irrelevant to a shared group conversation.
-      // For groups, check whether there is already an active call so the
-      // chat can show the WhatsApp-style "Join" banner.
-      if (widget.chat.isGroup) {
-        await _refreshActiveGroupCall();
-      } else {
-        await _reloadBlockStatus();
-      }
+      // ChatDetailScreen is now the legacy one-to-one chat screen.
+      // Group chat/call state is owned by the modular ConversationChatScreen.
+      await _reloadBlockStatus();
 
       if (!mounted) return;
 
@@ -2322,15 +2194,10 @@ void _openReactionPicker(
                                         isDark: true,
                                         isOnlyEmoji: _isOnlyEmoji(message.text),
                                         compact: true,
-                                        onCallAction: () => widget.chat.isGroup
-                                            ? _startGroupCall(
-                                                message.callType ==
-                                                    CallEntryType.video,
-                                              )
-                                            : _startCall(
-                                                message.callType ==
-                                                    CallEntryType.video,
-                                              ),
+                                        onCallAction: () => _startCall(
+                                          message.callType ==
+                                              CallEntryType.video,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -3430,10 +3297,11 @@ void _openReactionPicker(
 Future<void> _startCall(bool isVideo) async {
   if (_isStartingCall) return;
 
+  // Safety guard: group conversations must use the modular group-call flow.
   if (widget.chat.isGroup) {
     _showMessengerPop(
-      'Calling is only available for private chat',
-      icon: Icons.call_rounded,
+      'Open the group chat to start a group call',
+      icon: Icons.groups_rounded,
     );
     return;
   }
@@ -3571,136 +3439,6 @@ Future<void> _startCall(bool isVideo) async {
   }
 }
 
-  Future<void> _startGroupCall(bool isVideo) async {
-    if (_isStartingCall) return;
-
-    final latestChat = _freshChat();
-
-    if (!latestChat.isGroup) {
-      await _startCall(isVideo);
-      return;
-    }
-
-    final conversationId = latestChat.id.toString().trim();
-
-    if (conversationId.isEmpty) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
-      return;
-    }
-
-    final currentUserId = _currentUserId.trim().isNotEmpty
-        ? _currentUserId.trim()
-        : ((await ApiClient.storage.read(key: 'user_id')) ?? '').trim();
-
-    final otherMembers = latestChat.members.where((member) {
-      final memberId = member.id.toString().trim();
-      return memberId.isNotEmpty &&
-          (currentUserId.isEmpty || memberId != currentUserId);
-    }).toList();
-
-    if (otherMembers.isEmpty) {
-      _showMessengerPop(
-        'No other group member is available',
-        icon: Icons.groups_rounded,
-      );
-      return;
-    }
-
-    setState(() {
-      _isStartingCall = true;
-    });
-
-    try {
-      // If this group already has a running call, WhatsApp-style behavior is
-      // to join that existing call rather than create a second room.
-      final active = await GroupApiService.getActiveCall(
-        conversationId,
-      );
-
-      if (active != null && active.isActive) {
-        final credentials = await GroupCallTokenService.join(
-          callId: active.callId,
-        );
-
-        if (!mounted) return;
-
-        setState(() {
-          _activeGroupCall = credentials.call;
-        });
-
-        await Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => GroupCallScreen(
-              callId: credentials.call.callId,
-              conversationId: conversationId,
-              groupName: _chatDisplayName(),
-              serverUrl: credentials.url,
-              token: credentials.token,
-              roomName: credentials.call.roomName,
-              startWithVideo: credentials.call.isVideo,
-            ),
-          ),
-        );
-
-        return;
-      }
-
-      final credentials = await GroupCallTokenService.start(
-        conversationId: conversationId,
-        isVideoCall: isVideo,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        _activeGroupCall = credentials.call;
-      });
-
-      AppChatData.addCallLog(
-        chat: latestChat,
-        type: isVideo ? CallEntryType.video : CallEntryType.voice,
-        status: CallEntryStatus.outgoing,
-      );
-
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          builder: (_) => GroupCallScreen(
-            callId: credentials.call.callId,
-            conversationId: conversationId,
-            groupName: _chatDisplayName(),
-            serverUrl: credentials.url,
-            token: credentials.token,
-            roomName: credentials.call.roomName,
-            startWithVideo: isVideo,
-          ),
-        ),
-      );
-    } catch (error, stackTrace) {
-      debugPrint('GROUP CALL START ERROR: $error');
-      debugPrintStack(stackTrace: stackTrace);
-
-      if (!mounted) return;
-
-      _showMessengerPop(
-        'Could not start group call',
-        icon: Icons.error_rounded,
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isStartingCall = false;
-        });
-
-        await _refreshActiveGroupCall();
-      }
-    }
-  }
-
-
-
   Future<void> _openProfile() async {
     final currentUserId =
         (await ApiClient.storage.read(key: 'user_id')) ?? '';
@@ -3715,40 +3453,13 @@ Future<void> _startCall(bool isVideo) async {
 
     final latestChat = _freshChat();
 
-    // WhatsApp-style group header opens Group info, not private-chat settings.
+    // This file is intentionally kept as the one-to-one chat screen.
+    // Group conversations are owned by the modular ConversationChatScreen.
     if (latestChat.isGroup) {
-      final result = await Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => GroupInfoScreen(
-            conversationId: latestChat.id.toString(),
-          ),
-        ),
+      _showMessengerPop(
+        'Open this group from the group chat screen',
+        icon: Icons.groups_rounded,
       );
-
-      if (!mounted) return;
-
-      if (result == 'exited') {
-        AppChatData.chats.removeWhere(
-          (chat) => chat.id.toString() == latestChat.id.toString(),
-        );
-        AppChatData.notify();
-
-        Navigator.pop(context, true);
-        return;
-      }
-
-      await context.read<ChatProvider>().loadConversations();
-
-      if (!mounted) return;
-
-      await _refreshActiveGroupCall();
-
-      if (!mounted) return;
-
-      setState(() {
-        _syncLocalMessages();
-      });
       return;
     }
 
@@ -3761,7 +3472,7 @@ Future<void> _startCall(bool isVideo) async {
 
     if (!mounted) return;
 
-    final result = await Navigator.push(
+    final result = await Navigator.push<dynamic>(
       context,
       MaterialPageRoute(
         builder: (_) => ChatSettingsScreen(
@@ -3776,6 +3487,31 @@ Future<void> _startCall(bool isVideo) async {
 
     if (!mounted) return;
 
+    // "Create group with <user>" returns the newly-created ChatItem.
+    // Do NOT reopen that group in this legacy one-to-one screen.
+    if (result is ChatItem && result.isGroup) {
+      AppChatData.notify();
+
+      final groupBuilder = widget.groupConversationBuilder;
+
+      if (groupBuilder != null) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(
+            builder: (routeContext) => groupBuilder(
+              routeContext,
+              result,
+            ),
+          ),
+        );
+      } else {
+        // Backward-compatible fallback:
+        // return the created group to whichever screen opened ChatDetailScreen.
+        Navigator.pop<ChatItem>(context, result);
+      }
+
+      return;
+    }
+
     await _reloadBlockStatus(forceRefresh: true);
 
     if (mounted) {
@@ -3784,6 +3520,7 @@ Future<void> _startCall(bool isVideo) async {
 
     if (!mounted) return;
 
+    // Existing settings/search behavior is preserved.
     if (result is String && result.isNotEmpty) {
       final index = _messages.indexWhere((m) => m.id == result);
       if (index != -1 && _scrollController.hasClients) {
@@ -3898,112 +3635,11 @@ Future<void> _startCall(bool isVideo) async {
   }
 
 
-  Widget _buildActiveGroupCallBanner(bool isDark) {
-    final call = _activeGroupCall;
-
-    if (!widget.chat.isGroup || call == null || !call.isActive) {
-      return const SizedBox.shrink();
-    }
-
-    final joinedCount = call.joinedMembers.length;
-    final callLabel = call.isVideo ? 'Video call' : 'Voice call';
-
-    String subtitle;
-    if (joinedCount <= 0) {
-      subtitle = '${call.startedByName} started $callLabel';
-    } else if (joinedCount == 1) {
-      subtitle = '1 person in $callLabel';
-    } else {
-      subtitle = '$joinedCount people in $callLabel';
-    }
-
-    return Material(
-      color: isDark
-          ? const Color(0xFF11241C)
-          : const Color(0xFFE7F8EF),
-      child: InkWell(
-        onTap: _isStartingCall ? null : () => _openGroupCall(call),
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 10, 12, 10),
-          child: Row(
-            children: [
-              Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                  color: Color(0xFF00A884),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  call.isVideo
-                      ? Icons.videocam_rounded
-                      : Icons.call_rounded,
-                  color: Colors.white,
-                  size: 21,
-                ),
-              ),
-              const SizedBox(width: 11),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Ongoing group call',
-                      style: TextStyle(
-                        color: isDark
-                            ? Colors.white
-                            : const Color(0xFF111B21),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: isDark
-                            ? const Color(0xFFA7B7AF)
-                            : const Color(0xFF667781),
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              FilledButton(
-                onPressed:
-                    _isStartingCall ? null : () => _openGroupCall(call),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF00A884),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 18,
-                    vertical: 10,
-                  ),
-                  minimumSize: Size.zero,
-                ),
-                child: const Text(
-                  'Join',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _buildCustomAppBar(bool isDark) {
     final chat = _freshChat();
     final chatAvatarUrl = _resolvedChatAvatarUrl();
     final chatDisplayName = _chatDisplayName();
-    final subtitle = _groupHeaderSubtitle(chat);
+    final subtitle = _privateHeaderSubtitle(chat);
 
     debugPrint('DETAIL CHAT AVATAR: $chatAvatarUrl');
     debugPrint('DETAIL CHAT NAME: $chatDisplayName');
@@ -4051,26 +3687,20 @@ Future<void> _startCall(bool isVideo) async {
                                   }
                                 : null,
                             child: chatAvatarUrl.isEmpty
-                                ? (chat.isGroup
-                                    ? const Icon(
-                                        Icons.groups_rounded,
-                                        color: Color(0xFF667781),
-                                      )
-                                    : Text(
-                                        chatDisplayName.trim().isNotEmpty
-                                            ? chatDisplayName
-                                                .trim()[0]
-                                                .toUpperCase()
-                                            : 'U',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                        ),
-                                      ))
+                                ? Text(
+                                    chatDisplayName.trim().isNotEmpty
+                                        ? chatDisplayName
+                                            .trim()[0]
+                                            .toUpperCase()
+                                        : 'U',
+                                    style: const TextStyle(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  )
                                 : null,
                           ),
 
-                          // Presence dot belongs to one-to-one chats only.
-                          if (!chat.isGroup && chat.isOnline)
+                          if (chat.isOnline)
                             Positioned(
                               right: -1,
                               bottom: -1,
@@ -4124,34 +3754,18 @@ Future<void> _startCall(bool isVideo) async {
               ),
             ),
             IconButton(
-              tooltip: chat.isGroup
-                  ? (_activeGroupCall?.isActive == true
-                      ? 'Join group call'
-                      : 'Start group voice call')
-                  : 'Voice call',
-              onPressed: _isStartingCall
-                  ? null
-                  : () => chat.isGroup
-                      ? _startGroupCall(false)
-                      : _startCall(false),
-              icon: Icon(
-                _activeGroupCall?.isActive == true && chat.isGroup
-                    ? Icons.group_rounded
-                    : Icons.call_rounded,
-                color: const Color(0xFF1877F2),
+              tooltip: 'Voice call',
+              onPressed:
+                  _isStartingCall ? null : () => _startCall(false),
+              icon: const Icon(
+                Icons.call_rounded,
+                color: Color(0xFF1877F2),
               ),
             ),
             IconButton(
-              tooltip: chat.isGroup
-                  ? (_activeGroupCall?.isActive == true
-                      ? 'Join group call'
-                      : 'Start group video call')
-                  : 'Video call',
-              onPressed: _isStartingCall
-                  ? null
-                  : () => chat.isGroup
-                      ? _startGroupCall(true)
-                      : _startCall(true),
+              tooltip: 'Video call',
+              onPressed:
+                  _isStartingCall ? null : () => _startCall(true),
               icon: const Icon(
                 Icons.videocam_rounded,
                 color: Color(0xFF1877F2),
@@ -4658,15 +4272,10 @@ Future<void> _startCall(bool isVideo) async {
                                   message: message,
                                   isDark: isDark,
                                   isOnlyEmoji: _isOnlyEmoji(message.text),
-                                  onCallAction: () => widget.chat.isGroup
-                                      ? _startGroupCall(
-                                          message.callType ==
-                                              CallEntryType.video,
-                                        )
-                                      : _startCall(
-                                          message.callType ==
-                                              CallEntryType.video,
-                                        ),
+                                  onCallAction: () => _startCall(
+                                    message.callType ==
+                                        CallEntryType.video,
+                                  ),
                                 ),
                               ),
                               if (reaction != null)
@@ -4767,7 +4376,6 @@ Future<void> _startCall(bool isVideo) async {
       body: Column(
         children: [
           _buildCustomAppBar(isDark),
-          _buildActiveGroupCallBanner(isDark),
           _buildPinnedMessagesBar(isDark),
           Expanded(
             child: ListView.builder(

@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/livekit_call_service.dart';
 import 'package:livekit_client/livekit_client.dart';
-
-import '../../infrastructure/livekit_call_service.dart';
 
 class ParticipantTile extends StatelessWidget {
   final Participant participant;
-  final LiveKitCallService liveKit;
+  final LiveKitMediaService liveKit;
   final bool isLocal;
 
   const ParticipantTile({
@@ -17,22 +16,27 @@ class ParticipantTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final track = liveKit.videoTrackFor(participant);
-    final name = liveKit.displayNameFor(participant);
-    final avatar = liveKit.avatarFor(participant);
-    final speaking = participant.isSpeaking;
+    final track =
+        liveKit.videoTrackFor(participant);
+
+    final name =
+        liveKit.displayNameFor(participant);
+
+    final avatar =
+        liveKit.avatarFor(participant);
 
     return Container(
-      margin: const EdgeInsets.all(4),
+      margin: const EdgeInsets.all(3),
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.black87,
+        color: const Color(0xFF202C33),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: speaking
-              ? Colors.greenAccent
+          color: participant.isSpeaking
+              ? const Color(0xFF25D366)
               : Colors.white12,
-          width: speaking ? 3 : 1,
+          width:
+              participant.isSpeaking ? 3 : 1,
         ),
       ),
       child: Stack(
@@ -51,27 +55,29 @@ class ParticipantTile extends StatelessWidget {
           Positioned(
             left: 10,
             right: 10,
-            bottom: 9,
+            bottom: 8,
             child: Row(
               children: [
                 Expanded(
                   child: Text(
-                    isLocal ? '$name (You)' : name,
-                    overflow: TextOverflow.ellipsis,
+                    isLocal
+                        ? '$name (You)'
+                        : name,
+                    maxLines: 1,
+                    overflow:
+                        TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontWeight: FontWeight.w600,
+                      fontWeight:
+                          FontWeight.w600,
                     ),
                   ),
                 ),
                 if (participant.isMuted)
-                  const Padding(
-                    padding: EdgeInsets.only(left: 6),
-                    child: Icon(
-                      Icons.mic_off,
-                      size: 18,
-                      color: Colors.white,
-                    ),
+                  const Icon(
+                    Icons.mic_off_rounded,
+                    size: 17,
+                    color: Colors.white,
                   ),
               ],
             ),
@@ -93,28 +99,28 @@ class _AvatarFallback extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final letter = name.trim().isEmpty
-        ? '?'
-        : name.trim().characters.first.toUpperCase();
+    final trimmed = name.trim();
 
-    return ColoredBox(
-      color: const Color(0xFF202C33),
-      child: Center(
-        child: CircleAvatar(
-          radius: 48,
-          backgroundImage: avatarUrl.isNotEmpty
-              ? NetworkImage(avatarUrl)
-              : null,
-          child: avatarUrl.isEmpty
-              ? Text(
-                  letter,
-                  style: const TextStyle(
-                    fontSize: 34,
-                    fontWeight: FontWeight.w700,
-                  ),
-                )
-              : null,
-        ),
+    final initial = trimmed.isEmpty
+        ? '?'
+        : trimmed.substring(0, 1).toUpperCase();
+
+    return Center(
+      child: CircleAvatar(
+        radius: 48,
+        backgroundImage:
+            avatarUrl.trim().isNotEmpty
+                ? NetworkImage(avatarUrl)
+                : null,
+        child: avatarUrl.trim().isEmpty
+            ? Text(
+                initial,
+                style: const TextStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w700,
+                ),
+              )
+            : null,
       ),
     );
   }

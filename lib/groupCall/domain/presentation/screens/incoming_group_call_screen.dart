@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 
-import '../../application/group_call_controller.dart';
-import 'group_call_screen.dart';
+import 'package:hiddenly/groupCall/domain/call_models.dart';
+import 'package:hiddenly/groupCall/domain/presentation/screens/group_call_screen.dart';
 
-class IncomingGroupCallScreen extends StatefulWidget {
+import '../../application/group_call_controller.dart';
+
+class IncomingGroupCallScreen
+    extends StatefulWidget {
   final IncomingCallPayload payload;
   final GroupCallController controller;
 
@@ -14,133 +17,339 @@ class IncomingGroupCallScreen extends StatefulWidget {
   });
 
   @override
-  State<IncomingGroupCallScreen> createState() =>
-      _IncomingGroupCallScreenState();
+  State<IncomingGroupCallScreen>
+      createState() =>
+          _IncomingGroupCallScreenState();
 }
 
 class _IncomingGroupCallScreenState
     extends State<IncomingGroupCallScreen> {
-  bool _busy = false;
+  bool _handling = false;
+  bool _finished = false;
 
-  Future<void> _accept() async {
-    if (_busy) return;
-    setState(() => _busy = true);
+  String? _error;
 
-    try {
-      // No separate action=accept call.
-      // LiveKitTokenView marks JOINED in your backend.
-      await widget.controller.joinExistingCall(
-        widget.payload.call,
+  Future<CallSessionDto?>
+      _findActiveCall() async {
+    final active =
+        await widget.controller
+            .checkActiveCall(
+      widget.payload.conversationId,
+    );
+
+    if (active == null) {
+      return null;
+    }
+
+    /*
+     * Ignore stale FCM notification.
+     */
+    if (widget.payload.callId > 0 &&
+        active.callId > 0 &&
+        active.callId !=
+            widget.payload.callId) {
+      debugPrint(
+        '[INCOMING GROUP CALL] '
+        'stale push ignored. '
+        'push=${widget.payload.callId} '
+        'active=${active.callId}',
       );
 
-      if (!mounted) return;
+      return null;
+    }
 
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(
-          builder: (_) => GroupCallScreen(
-            controller: widget.controller,
+    return active;
+  }
+
+  Future<void> _accept() async {
+    if (_handling || _finished) {
+      return;
+    }
+
+    setState(() {
+      _handling = true;
+      _error = null;
+    });
+
+    try {
+      final call =
+          await _findActiveCall();
+
+      if (!mounted) {
+        return;
+      }
+
+      if (call == null ||
+          !call.isActive) {
+        setState(() {
+          _handling = false;
+          _error =
+              'This group call is no longer active.';
+        });
+
+        return;
+      }
+
+      await widget.controller
+          .joinExistingCall(call);
+
+      if (!mounted) {
+        return;
+      }
+
+      if (!widget.controller.connected) {
+        setState(() {
+          _handling = false;
+          _error =
+              widget.controller.error ??
+              'Unable to join group call.';
+        });
+
+        return;
+      }
+
+      _finished = true;
+
+      await Navigator.of(context)
+          .pushReplacement<void, void>(
+        MaterialPageRoute<void>(
+          builder: (_) =>
+              GroupCallScreen(
+            controller:
+                widget.controller,
           ),
         ),
       );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _busy = false);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Could not join: $e'),
-        ),
+    } catch (e, stackTrace) {
+      debugPrint(
+        '[INCOMING GROUP CALL] '
+        'accept error: $e',
       );
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _handling = false;
+
+        _error =
+            widget.controller.error ??
+            'Unable to join group call.';
+      });
     }
   }
 
   Future<void> _decline() async {
-    if (_busy) return;
-    setState(() => _busy = true);
+    if (_handling || _finished) {
+      return;
+    }
+
+    setState(() {
+      _handling = true;
+      _error = null;
+    });
 
     try {
-      await widget.controller.declineIncoming(
-        widget.payload.call,
+      final call =
+          await _findActiveCall();
+
+      if (call != null &&
+          call.isActive) {
+        await widget.controller
+            .declineIncoming(call);
+      }
+
+      if (!mounted) {
+        return;
+      }
+
+      _finished = true;
+
+      Navigator.of(context).pop();
+    } catch (e, stackTrace) {
+      debugPrint(
+        '[INCOMING GROUP CALL] '
+        'decline error: $e',
       );
-    } finally {
-      if (mounted) Navigator.of(context).pop();
+
+      debugPrint(
+        stackTrace.toString(),
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _handling = false;
+
+        _error =
+            widget.controller.error ??
+            'Unable to decline call.';
+      });
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final call = widget.payload.call;
+    final payload =
+        widget.payload;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF0B141A),
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(28),
-          child: Column(
-            children: [
-              const Spacer(),
-              CircleAvatar(
-                radius: 56,
-                backgroundImage:
-                    call.callerAvatar.isNotEmpty
-                        ? NetworkImage(
-                            call.callerAvatar,
-                          )
-                        : null,
-                child: call.callerAvatar.isEmpty
-                    ? const Icon(
-                        Icons.groups,
-                        size: 48,
-                      )
-                    : null,
-              ),
-              const SizedBox(height: 24),
-              Text(
-                call.conversationName.isNotEmpty
-                    ? call.conversationName
-                    : 'Group call',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 26,
-                  fontWeight: FontWeight.w700,
+    final groupName =
+        payload.conversationName.trim();
+
+    final callerName =
+        payload.callerName.trim();
+
+    return PopScope(
+      canPop: !_handling,
+      child: Scaffold(
+        backgroundColor:
+            Colors.black,
+        body: SafeArea(
+          child: Padding(
+            padding:
+                const EdgeInsets.all(
+              24,
+            ),
+            child: Column(
+              children: [
+                const Spacer(),
+
+                CircleAvatar(
+                  radius: 54,
+                  backgroundColor:
+                      Colors.white
+                          .withOpacity(
+                    0.15,
+                  ),
+                  child: const Icon(
+                    Icons.groups_rounded,
+                    color: Colors.white,
+                    size: 54,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '${call.callerName.isEmpty ? 'Someone' : call.callerName} started a ${call.isVideo ? 'video' : 'voice'} call',
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 16,
+
+                const SizedBox(
+                  height: 28,
                 ),
-              ),
-              const Spacer(),
-              if (_busy)
-                const CircularProgressIndicator()
-              else
-                Row(
-                  mainAxisAlignment:
-                      MainAxisAlignment.spaceEvenly,
-                  children: [
-                    _RoundAction(
-                      icon: Icons.call_end,
-                      label: 'Decline',
-                      color: Colors.red,
-                      onTap: _decline,
+
+                Text(
+                  groupName.isNotEmpty
+                      ? groupName
+                      : 'Group call',
+                  textAlign:
+                      TextAlign.center,
+                  style:
+                      const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight:
+                        FontWeight.bold,
+                  ),
+                ),
+
+                const SizedBox(
+                  height: 10,
+                ),
+
+                Text(
+                  payload.isVideo
+                      ? 'Incoming group video call'
+                      : 'Incoming group audio call',
+                  style:
+                      const TextStyle(
+                    color:
+                        Colors.white70,
+                    fontSize: 16,
+                  ),
+                ),
+
+                if (callerName
+                    .isNotEmpty) ...[
+                  const SizedBox(
+                    height: 8,
+                  ),
+                  Text(
+                    'From $callerName',
+                    style:
+                        const TextStyle(
+                      color:
+                          Colors.white60,
+                      fontSize: 14,
                     ),
-                    _RoundAction(
-                      icon: call.isVideo
-                          ? Icons.videocam
-                          : Icons.call,
-                      label: 'Join',
-                      color: Colors.green,
-                      onTap: _accept,
+                  ),
+                ],
+
+                if (_error != null) ...[
+                  const SizedBox(
+                    height: 20,
+                  ),
+                  Text(
+                    _error!,
+                    textAlign:
+                        TextAlign.center,
+                    style:
+                        const TextStyle(
+                      color:
+                          Colors.redAccent,
                     ),
-                  ],
+                  ),
+                ],
+
+                const Spacer(),
+
+                if (_handling)
+                  const Padding(
+                    padding:
+                        EdgeInsets.only(
+                      bottom: 30,
+                    ),
+                    child:
+                        CircularProgressIndicator(
+                      color: Colors.white,
+                    ),
+                  )
+                else
+                  Row(
+                    mainAxisAlignment:
+                        MainAxisAlignment
+                            .spaceEvenly,
+                    children: [
+                      _CallButton(
+                        icon:
+                            Icons.call_end,
+                        label: 'Decline',
+                        backgroundColor:
+                            Colors.red,
+                        onPressed:
+                            _decline,
+                      ),
+                      _CallButton(
+                        icon:
+                            payload.isVideo
+                                ? Icons
+                                    .videocam
+                                : Icons.call,
+                        label: 'Accept',
+                        backgroundColor:
+                            Colors.green,
+                        onPressed:
+                            _accept,
+                      ),
+                    ],
+                  ),
+
+                const SizedBox(
+                  height: 40,
                 ),
-              const SizedBox(height: 28),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -148,17 +357,17 @@ class _IncomingGroupCallScreenState
   }
 }
 
-class _RoundAction extends StatelessWidget {
+class _CallButton extends StatelessWidget {
   final IconData icon;
   final String label;
-  final Color color;
-  final VoidCallback onTap;
+  final Color backgroundColor;
+  final VoidCallback? onPressed;
 
-  const _RoundAction({
+  const _CallButton({
     required this.icon,
     required this.label,
-    required this.color,
-    required this.onTap,
+    required this.backgroundColor,
+    required this.onPressed,
   });
 
   @override
@@ -166,25 +375,31 @@ class _RoundAction extends StatelessWidget {
     return Column(
       children: [
         Material(
-          color: color,
-          shape: const CircleBorder(),
+          color: backgroundColor,
+          shape:
+              const CircleBorder(),
           child: InkWell(
-            customBorder: const CircleBorder(),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.all(20),
+            customBorder:
+                const CircleBorder(),
+            onTap: onPressed,
+            child: SizedBox(
+              width: 68,
+              height: 68,
               child: Icon(
                 icon,
                 color: Colors.white,
-                size: 30,
+                size: 32,
               ),
             ),
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(
+          height: 10,
+        ),
         Text(
           label,
-          style: const TextStyle(
+          style:
+              const TextStyle(
             color: Colors.white,
           ),
         ),

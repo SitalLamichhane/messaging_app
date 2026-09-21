@@ -4,6 +4,7 @@ class CallControls extends StatelessWidget {
   final bool microphoneEnabled;
   final bool cameraEnabled;
   final bool speakerEnabled;
+
   final VoidCallback onMicrophone;
   final VoidCallback onCamera;
   final VoidCallback onSwitchCamera;
@@ -28,52 +29,43 @@ class CallControls extends StatelessWidget {
       top: false,
       child: Container(
         padding: const EdgeInsets.fromLTRB(
-          12,
+          8,
           10,
-          12,
+          8,
           14,
         ),
-        decoration: const BoxDecoration(
-          color: Color(0xFF111B21),
-          borderRadius: BorderRadius.vertical(
-            top: Radius.circular(24),
-          ),
-        ),
+        color: const Color(0xFF111B21),
         child: Row(
           mainAxisAlignment:
               MainAxisAlignment.spaceEvenly,
           children: [
-            _ControlButton(
+            _button(
               icon: microphoneEnabled
-                  ? Icons.mic
-                  : Icons.mic_off,
-              label: microphoneEnabled ? 'Mute' : 'Unmute',
+                  ? Icons.mic_rounded
+                  : Icons.mic_off_rounded,
               onTap: onMicrophone,
             ),
-            _ControlButton(
+            _button(
               icon: cameraEnabled
-                  ? Icons.videocam
-                  : Icons.videocam_off,
-              label: cameraEnabled ? 'Camera' : 'Camera',
+                  ? Icons.videocam_rounded
+                  : Icons.videocam_off_rounded,
               onTap: onCamera,
             ),
-            _ControlButton(
-              icon: Icons.cameraswitch,
-              label: 'Flip',
+            _button(
+              icon:
+                  Icons.cameraswitch_rounded,
               onTap: cameraEnabled
                   ? onSwitchCamera
                   : null,
             ),
-            _ControlButton(
+            _button(
               icon: speakerEnabled
-                  ? Icons.volume_up
-                  : Icons.hearing,
-              label: 'Audio',
+                  ? Icons.volume_up_rounded
+                  : Icons.hearing_rounded,
               onTap: onSpeaker,
             ),
-            _ControlButton(
-              icon: Icons.call_end,
-              label: 'Leave',
+            _button(
+              icon: Icons.call_end_rounded,
               background: Colors.red,
               onTap: onLeave,
             ),
@@ -82,55 +74,27 @@ class CallControls extends StatelessWidget {
       ),
     );
   }
-}
 
-class _ControlButton extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback? onTap;
-  final Color? background;
-
-  const _ControlButton({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.background,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final enabled = onTap != null;
-
-    return Opacity(
-      opacity: enabled ? 1 : 0.4,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Material(
-            color: background ??
-                const Color(0xFF2A3942),
-            shape: const CircleBorder(),
-            child: InkWell(
-              customBorder: const CircleBorder(),
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.all(13),
-                child: Icon(
-                  icon,
-                  color: Colors.white,
-                ),
-              ),
-            ),
+  Widget _button({
+    required IconData icon,
+    required VoidCallback? onTap,
+    Color? background,
+  }) {
+    return Material(
+      color: background ??
+          const Color(0xFF2A3942),
+      shape: const CircleBorder(),
+      child: InkWell(
+        onTap: onTap,
+        customBorder:
+            const CircleBorder(),
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Icon(
+            icon,
+            color: Colors.white,
           ),
-          const SizedBox(height: 5),
-          Text(
-            label,
-            style: const TextStyle(
-              color: Colors.white70,
-              fontSize: 11,
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }

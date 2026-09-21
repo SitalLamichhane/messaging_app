@@ -1,9 +1,10 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import '../infrastructure/call_api_service.dart';
-import '../infrastructure/call_socket_service.dart';
-import '../infrastructure/livekit_call_service.dart';
+import 'package:hiddenly/groupCall/domain/call_models.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/call_api_service.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/livekit_call_service.dart';
+import 'package:hiddenly/realtime/realtime_service.dart';
 
 enum GroupCallPhase {
   idle,
@@ -17,32 +18,66 @@ enum GroupCallPhase {
 }
 
 class GroupCallController extends ChangeNotifier {
+  final int conversationId;
   final CallApiService api;
-  final CallSocketService socket;
-  final LiveKitCallService liveKit;
+  final ConversationRealtimeService realtime;
+  final LiveKitMediaService liveKit;
 
   GroupCallPhase _phase = GroupCallPhase.idle;
+
   CallSessionDto? _call;
   CallSessionDto? _activeDiscoveredCall;
+
   String? _error;
-  StreamSubscription<CallSocketEvent>? _socketSub;
+
+  StreamSubscription<ConversationRealtimeEvent>?
+      _realtimeSubscription;
+
   bool _disposed = false;
 
+  bool _joining = false;
+  bool _leaving = false;
+
   GroupCallController({
+    required this.conversationId,
     required this.api,
-    required this.socket,
-    required this.liveKit,
-  }) {
-    liveKit.addListener(_forwardLiveKitChanges);
+    required this.realtime,
+    LiveKitMediaService? liveKit,
+  }) : liveKit =
+            liveKit ?? LiveKitMediaService() {
+    this.liveKit.addListener(
+          _forwardMediaChanges,
+        );
+
+    _realtimeSubscription =
+        realtime.events.listen(
+      _onRealtimeEvent,
+      onError: (
+        Object error,
+        StackTrace stackTrace,
+      ) {
+        debugPrint(
+          '[GROUP CALL] realtime error: $error',
+        );
+      },
+    );
   }
 
   GroupCallPhase get phase => _phase;
+
   CallSessionDto? get call => _call;
+
   CallSessionDto? get activeDiscoveredCall =>
       _activeDiscoveredCall;
+
   String? get error => _error;
 
-  bool get isBusy => {
+  bool get isDisposed => _disposed;
+
+  bool get isBusy =>
+      _joining ||
+      _leaving ||
+      {
         GroupCallPhase.checking,
         GroupCallPhase.starting,
         GroupCallPhase.joining,
@@ -50,292 +85,633 @@ class GroupCallController extends ChangeNotifier {
       }.contains(_phase);
 
   bool get connected =>
+      !_disposed &&
       _phase == GroupCallPhase.connected &&
       liveKit.connected;
 
-  void _forwardLiveKitChanges() {
-    if (!_disposed) notifyListeners();
+  void _safeNotify() {
+    if (!_disposed) {
+      notifyListeners();
+    }
+  }
+
+  void _forwardMediaChanges() {
+    _safeNotify();
   }
 
   Future<CallSessionDto?> checkActiveCall(
-    int conversationId,
+    int requestedConversationId,
   ) async {
+    if (_disposed) {
+      return null;
+    }
+
+    if (requestedConversationId !=
+        conversationId) {
+      throw ArgumentError(
+        'GroupCallController belongs to conversation '
+        '$conversationId, not $requestedConversationId.',
+      );
+    }
+
     _phase = GroupCallPhase.checking;
     _error = null;
-    notifyListeners();
+    _safeNotify();
 
     try {
       final result =
-          await api.getActiveGroupCall(conversationId);
+          await api.getActiveGroupCall(
+        conversationId,
+      );
+
+      if (_disposed) {
+        return null;
+      }
 
       _activeDiscoveredCall =
-          result.active ? result.call : null;
+          result.active &&
+                  result.call != null &&
+                  result.call!.isActive
+              ? result.call
+              : null;
 
-      _phase = GroupCallPhase.idle;
-      notifyListeners();
+      if (_call != null &&
+          liveKit.connected) {
+        _phase = GroupCallPhase.connected;
+      } else {
+        _phase = GroupCallPhase.idle;
+      }
+
+      _safeNotify();
+
       return _activeDiscoveredCall;
-    } on CallApiException catch (e) {
-      // If you have not added ActiveGroupCallView yet,
-      // a 404 here simply means the banner cannot be discovered.
-      _error = e.message;
-      _phase = GroupCallPhase.idle;
-      notifyListeners();
-      return null;
     } catch (e) {
+      if (_disposed) {
+        return null;
+      }
+
       _error = e.toString();
-      _phase = GroupCallPhase.idle;
-      notifyListeners();
+
+      if (_call != null &&
+          liveKit.connected) {
+        _phase = GroupCallPhase.connected;
+      } else {
+        _phase = GroupCallPhase.idle;
+      }
+
+      _safeNotify();
+
       return null;
     }
   }
 
-  /// Starts a brand-new group call.
-  ///
-  /// If backend returns 409 because the group already has an active call,
-  /// we discover that call and JOIN it rather than creating a second room.
   Future<void> startGroupCall({
     required int conversationId,
     required bool video,
   }) async {
+    if (_disposed) {
+      return;
+    }
+
+    if (conversationId !=
+        this.conversationId) {
+      throw ArgumentError(
+        'Wrong conversation for this call controller.',
+      );
+    }
+
+    if (_joining ||
+        _phase == GroupCallPhase.connected) {
+      return;
+    }
+
     _phase = GroupCallPhase.starting;
     _error = null;
-    notifyListeners();
+    _safeNotify();
 
     try {
-      final started = await api.startGroupCall(
+      final started =
+          await api.startGroupCall(
         conversationId: conversationId,
         isVideo: video,
       );
 
+      if (_disposed) {
+        return;
+      }
+
       _call = started;
+      _activeDiscoveredCall = started;
+
       await _joinCurrentCall();
     } on CallApiException catch (e) {
+      if (_disposed) {
+        return;
+      }
+
+      // Existing active group call.
       if (e.statusCode == 409) {
         final active =
-            await api.getActiveGroupCall(conversationId);
+            await api.getActiveGroupCall(
+          conversationId,
+        );
 
-        if (active.active && active.call != null) {
+        if (_disposed) {
+          return;
+        }
+
+        if (active.active &&
+            active.call != null &&
+            active.call!.isActive) {
           _call = active.call;
+          _activeDiscoveredCall =
+              active.call;
+
           await _joinCurrentCall();
+
           return;
         }
       }
 
       _phase = GroupCallPhase.error;
       _error = e.message;
-      notifyListeners();
+      _safeNotify();
+
       rethrow;
     } catch (e) {
+      if (_disposed) {
+        return;
+      }
+
       _phase = GroupCallPhase.error;
       _error = e.toString();
-      notifyListeners();
+      _safeNotify();
+
       rethrow;
     }
   }
 
-  /// Join/rejoin an existing ongoing call.
-  ///
-  /// Backend requirement:
-  /// group participants in LEFT / DECLINED / MISSED state must be allowed
-  /// to receive a fresh LiveKit token while the CallSession is still active.
   Future<void> joinExistingCall(
     CallSessionDto call,
   ) async {
+    if (_disposed) {
+      return;
+    }
+
+    if (_joining ||
+        connected) {
+      return;
+    }
+
+    if (call.conversationId !=
+        conversationId) {
+      throw ArgumentError(
+        'Call belongs to another conversation.',
+      );
+    }
+
+    if (!call.isGroup) {
+      throw ArgumentError(
+        'Call is not a group call.',
+      );
+    }
+
+    if (!call.isActive) {
+      throw StateError(
+        'Group call is no longer active.',
+      );
+    }
+
     _call = call;
+    _activeDiscoveredCall = call;
     _error = null;
+
     await _joinCurrentCall();
   }
 
   Future<void> _joinCurrentCall() async {
-    final call = _call;
-    if (call == null) {
-      throw StateError('No call selected.');
+    if (_disposed || _joining) {
+      return;
     }
 
+    final selectedCall = _call;
+
+    if (selectedCall == null) {
+      throw StateError(
+        'No call selected.',
+      );
+    }
+
+    _joining = true;
     _phase = GroupCallPhase.joining;
-    notifyListeners();
+    _error = null;
+    _safeNotify();
 
     try {
-      await socket.connect(call.conversationId);
-
-      await _socketSub?.cancel();
-      _socketSub = socket.events.listen(
-        _onSocketEvent,
+      /*
+       * Backend LiveKitTokenView is expected to mark
+       * this participant as JOINED.
+       *
+       * Therefore we don't call "accept" separately.
+       */
+      final credentials =
+          await api.getLiveKitToken(
+        selectedCall.callId,
       );
 
-      // Do NOT separately call action=accept for a group join.
-      // LiveKitTokenView already marks the participant JOINED in your backend.
-      final credentials =
-          await api.getLiveKitToken(call.callId);
+      if (_disposed) {
+        return;
+      }
 
       await liveKit.connect(
         credentials: credentials,
-        enableCameraInitially: call.isVideo,
+        startWithVideo:
+            selectedCall.isVideo,
       );
 
-      _call = call.copyWith(
-        status: call.status ==
-                CallSessionStatus.ringing
-            ? CallSessionStatus.accepted
-            : call.status,
+      if (_disposed) {
+        await liveKit.disconnect();
+        return;
+      }
+
+      _call = selectedCall.copyWith(
+        status:
+            selectedCall.status ==
+                    CallSessionStatus.ringing
+                ? CallSessionStatus.accepted
+                : selectedCall.status,
         roomName: credentials.roomName,
+        myParticipantStatus: 'joined',
       );
 
       _activeDiscoveredCall = _call;
+
       _phase = GroupCallPhase.connected;
       _error = null;
-      notifyListeners();
+
+      _safeNotify();
     } on CallApiException catch (e) {
-      _phase = GroupCallPhase.error;
-      _error = e.message;
-      notifyListeners();
+      if (!_disposed) {
+        _phase = GroupCallPhase.error;
+        _error = e.message;
+        _safeNotify();
+      }
+
       rethrow;
     } catch (e) {
-      _phase = GroupCallPhase.error;
-      _error = e.toString();
-      notifyListeners();
+      if (!_disposed) {
+        _phase = GroupCallPhase.error;
+        _error = e.toString();
+        _safeNotify();
+      }
+
       rethrow;
-    }
-  }
-
-  /// Incoming "decline".
-  ///
-  /// With the backend rejoin fix, the member may still join later while
-  /// the same group CallSession remains active.
-  Future<void> declineIncoming(
-    CallSessionDto incoming,
-  ) async {
-    _call = incoming;
-
-    try {
-      await api.updateStatus(
-        callId: incoming.callId,
-        action: 'reject',
-      );
     } finally {
-      _phase = GroupCallPhase.ended;
-      notifyListeners();
+      _joining = false;
     }
   }
 
-  /// The red button in a GROUP CALL must ALWAYS use "leave".
-  ///
-  /// Never send "ended" from this button. The backend should end the
-  /// CallSession only when nobody remains JOINED.
-  Future<void> leave() async {
-    final call = _call;
-    if (call == null) return;
+  Future<void> declineIncoming(
+    CallSessionDto call,
+  ) async {
+    if (_disposed) {
+      return;
+    }
 
-    _phase = GroupCallPhase.leaving;
-    notifyListeners();
-
-    Object? apiError;
+    if (call.conversationId !=
+        conversationId) {
+      return;
+    }
 
     try {
       await api.updateStatus(
         callId: call.callId,
-        action: 'leave',
+        action: 'reject',
       );
-    } catch (e) {
-      apiError = e;
-    }
+    } finally {
+      if (_call?.callId ==
+          call.callId) {
+        _call = null;
+      }
 
-    await liveKit.disconnect();
-    await _socketSub?.cancel();
-    _socketSub = null;
-    await socket.disconnect();
+      if (_activeDiscoveredCall?.callId ==
+          call.callId) {
+        _activeDiscoveredCall = null;
+      }
 
-    _phase = GroupCallPhase.ended;
-    _activeDiscoveredCall = null;
-    notifyListeners();
+      _error = null;
+      _phase = GroupCallPhase.idle;
 
-    if (apiError != null) {
-      // If the app loses network here, LiveKit webhook on the backend should
-      // be the final authority and mark the participant LEFT.
-      throw apiError;
+      _safeNotify();
     }
   }
 
-  Future<void> _terminateLocally() async {
-    await liveKit.disconnect();
-    await _socketSub?.cancel();
-    _socketSub = null;
-    await socket.disconnect();
-
-    _phase = GroupCallPhase.ended;
-    _activeDiscoveredCall = null;
-    notifyListeners();
-  }
-
-  void _onSocketEvent(CallSocketEvent event) {
-    final data = event.data;
-
-    final incomingConversationId =
-        int.tryParse(
-          (data['conversation_id'] ?? '').toString(),
-        ) ??
-        0;
-
-    if (_call != null &&
-        incomingConversationId != 0 &&
-        incomingConversationId !=
-            _call!.conversationId) {
+  /// Group red button means:
+  ///
+  /// LEAVE THIS PARTICIPANT.
+  ///
+  /// It must NOT automatically end the entire
+  /// group call while other members remain joined.
+  Future<void> leave() async {
+    if (_disposed || _leaving) {
       return;
     }
 
-    if (event.type == 'call_status_updated') {
-      final status =
-          CallSessionStatus.fromJson(data['status']);
+    _leaving = true;
 
-      if (_call != null) {
-        _call = _call!.copyWith(status: status);
+    final selectedCall = _call;
+
+    _phase = GroupCallPhase.leaving;
+    _error = null;
+    _safeNotify();
+
+    Object? requestError;
+
+    try {
+      if (selectedCall != null) {
+        try {
+          await api.updateStatus(
+            callId: selectedCall.callId,
+            action: 'leave',
+          );
+        } catch (e) {
+          requestError = e;
+        }
       }
 
-      if (status.isTerminal) {
-        _terminateLocally();
+      await liveKit.disconnect();
+
+      if (_disposed) {
+        return;
+      }
+
+      _call = null;
+
+      /*
+       * Other participants may still be inside.
+       * Refresh server state instead of assuming
+       * the whole call ended.
+       */
+      try {
+        final active =
+            await api.getActiveGroupCall(
+          conversationId,
+        );
+
+        if (!_disposed) {
+          _activeDiscoveredCall =
+              active.active &&
+                      active.call != null &&
+                      active.call!.isActive
+                  ? active.call
+                  : null;
+        }
+      } catch (e) {
+        debugPrint(
+          '[GROUP CALL] active-call refresh '
+          'after leave failed: $e',
+        );
+      }
+
+      if (!_disposed) {
+        _phase = GroupCallPhase.idle;
+        _safeNotify();
+      }
+
+      if (requestError != null) {
+        throw requestError;
+      }
+    } finally {
+      _leaving = false;
+    }
+  }
+
+  void _onRealtimeEvent(
+    ConversationRealtimeEvent event,
+  ) {
+    if (_disposed) {
+      return;
+    }
+
+    final data = event.data;
+
+    final eventConversationId =
+        int.tryParse(
+          (data['conversation_id'] ?? '')
+              .toString(),
+        ) ??
+        0;
+
+    if (eventConversationId != 0 &&
+        eventConversationId !=
+            conversationId) {
+      return;
+    }
+
+    switch (event.type) {
+      case 'incoming_call':
+        _handleIncomingRealtime(data);
+        break;
+
+      case 'call_status_updated':
+        _handleStatusRealtime(data);
+        break;
+
+      case 'call_participant_joined':
+      case 'call_participant_left':
+        unawaited(
+          _refreshActiveCallSilently(),
+        );
+        break;
+
+      default:
+        break;
+    }
+  }
+
+  void _handleIncomingRealtime(
+    Map<String, dynamic> data,
+  ) {
+    try {
+      final incoming =
+          CallSessionDto.fromJson(data);
+
+      if (!incoming.isGroup ||
+          !incoming.isActive ||
+          incoming.conversationId !=
+              conversationId) {
+        return;
+      }
+
+      _activeDiscoveredCall =
+          incoming;
+
+      _safeNotify();
+    } catch (e) {
+      debugPrint(
+        '[GROUP CALL] incoming realtime '
+        'parse error: $e',
+      );
+    }
+  }
+
+  void _handleStatusRealtime(
+    Map<String, dynamic> data,
+  ) {
+    final eventCallId =
+        int.tryParse(
+          (data['call_id'] ??
+                  data['id'] ??
+                  '')
+              .toString(),
+        ) ??
+        0;
+
+    final status =
+        CallSessionStatus.fromJson(
+      data['status'],
+    );
+
+    /*
+     * Ignore events belonging to another call
+     * in the same conversation.
+     */
+    if (eventCallId > 0) {
+      final knownCallId =
+          _call?.callId ??
+          _activeDiscoveredCall?.callId;
+
+      if (knownCallId != null &&
+          knownCallId > 0 &&
+          knownCallId != eventCallId) {
         return;
       }
     }
 
-    if (event.type == 'call_participant_joined') {
-      // LiveKit itself is the source of truth for who is actually in the room.
-      // Room ChangeNotifier will rebuild participant tiles automatically.
-      notifyListeners();
+    if (_activeDiscoveredCall != null) {
+      _activeDiscoveredCall =
+          _activeDiscoveredCall!.copyWith(
+        status: status,
+      );
+    }
+
+    if (_call != null) {
+      _call = _call!.copyWith(
+        status: status,
+      );
+    }
+
+    if (status.isTerminal) {
+      _activeDiscoveredCall = null;
+
+      if (_call != null ||
+          liveKit.connected) {
+        unawaited(
+          _endMediaLocally(),
+        );
+      } else {
+        _phase = GroupCallPhase.ended;
+        _safeNotify();
+      }
+
       return;
     }
 
-    if (event.type == 'incoming_call') {
-      // Useful when the call started while this group chat was already open.
-      try {
-        final incoming = CallSessionDto.fromJson(data);
-        if (incoming.isGroup &&
-            incoming.status.isActive) {
-          _activeDiscoveredCall = incoming;
-          notifyListeners();
-        }
-      } catch (_) {}
+    _safeNotify();
+  }
+
+  Future<void> _refreshActiveCallSilently() async {
+    if (_disposed) {
+      return;
+    }
+
+    try {
+      final result =
+          await api.getActiveGroupCall(
+        conversationId,
+      );
+
+      if (_disposed) {
+        return;
+      }
+
+      _activeDiscoveredCall =
+          result.active &&
+                  result.call != null &&
+                  result.call!.isActive
+              ? result.call
+              : null;
+
+      _safeNotify();
+    } catch (e) {
+      debugPrint(
+        '[GROUP CALL] silent active-call '
+        'refresh failed: $e',
+      );
     }
   }
 
-  Future<void> toggleMicrophone() =>
-      liveKit.toggleMicrophone();
+  Future<void> _endMediaLocally() async {
+    try {
+      await liveKit.disconnect();
+    } catch (_) {}
 
-  Future<void> toggleCamera() =>
-      liveKit.toggleCamera();
+    if (_disposed) {
+      return;
+    }
 
-  Future<void> switchCamera() =>
-      liveKit.switchCamera();
+    _call = null;
+    _activeDiscoveredCall = null;
 
-  Future<void> toggleSpeaker() =>
-      liveKit.toggleSpeaker();
+    _phase = GroupCallPhase.ended;
+    _error = null;
+
+    _safeNotify();
+  }
+
+  Future<void> toggleMicrophone() async {
+    if (_disposed) return;
+    await liveKit.toggleMicrophone();
+  }
+
+  Future<void> toggleCamera() async {
+    if (_disposed) return;
+    await liveKit.toggleCamera();
+  }
+
+  Future<void> switchCamera() async {
+    if (_disposed) return;
+    await liveKit.switchCamera();
+  }
+
+  Future<void> toggleSpeaker() async {
+    if (_disposed) return;
+    await liveKit.toggleSpeaker();
+  }
 
   @override
   void dispose() {
+    if (_disposed) {
+      return;
+    }
+
     _disposed = true;
-    liveKit.removeListener(_forwardLiveKitChanges);
-    _socketSub?.cancel();
+
+    liveKit.removeListener(
+      _forwardMediaChanges,
+    );
+
+    final subscription =
+        _realtimeSubscription;
+
+    _realtimeSubscription = null;
+
+    if (subscription != null) {
+      unawaited(subscription.cancel());
+    }
+
     liveKit.dispose();
-    socket.dispose();
+
     super.dispose();
   }
 }

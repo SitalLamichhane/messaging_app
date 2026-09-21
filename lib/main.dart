@@ -9,6 +9,7 @@ import 'package:flutter_callkit_incoming/entities/call_event.dart';
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart' as riverpod;
 import 'package:flutter_webrtc/flutter_webrtc.dart' hide MessageType;
+import 'package:hiddenly/core/config/app_config.dart';
 import 'package:provider/provider.dart' as provider;
 
 import 'package:hiddenly/auth_gate.dart';
@@ -27,9 +28,20 @@ import 'package:hiddenly/core/call/call_lifecycle_watcher.dart';
 import 'package:hiddenly/core/call/call_provider.dart';
 import 'package:hiddenly/core/call/call_overlay_controller.dart';
 import 'package:hiddenly/core/call/call_state.dart';
+import 'package:hiddenly/groupCall/domain/application/group_call_controller.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/call_api_service.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/call_push_service.dart';
+import 'package:hiddenly/groupCall/domain/integration/call_push_router.dart';
+import 'package:hiddenly/groupCall/domain/integration/incoming_group_call_bundle.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/livekit_call_service.dart';
+import 'package:hiddenly/realtime/realtime_service.dart';
+
 
 bool _handlingColdStartCallKit = false;
 StreamSubscription<CallEvent?>? _callKitSubscription;
+
+CallPushRouter? _groupCallPushRouter;
+bool _groupCallPushRouterStarting = false;
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -91,23 +103,83 @@ Future<void> main() async {
   });
 }
 
+Future<IncomingGroupCallBundle> _createIncomingGroupCallBundle(
+  int conversationId,
+) async {
+  final realtime = ConversationRealtimeService(
+    uriBuilder: (int requestedConversationId) async {
+      final token =
+          (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
+
+      if (token.isEmpty) {
+        throw StateError('Access token missing');
+      }
+
+      final cleanToken = Uri.encodeComponent(token);
+
+      return Uri.parse(
+        '${AppConfig.wsBaseUrl}'
+        '/ws/chat/$requestedConversationId/'
+        '?token=$cleanToken',
+      );
+    },
+  );
+
+  final controller = GroupCallController(
+    conversationId: conversationId,
+    api: CallApiService(),
+    realtime: realtime,
+    liveKit: LiveKitMediaService(),
+  );
+
+  return IncomingGroupCallBundle(
+    realtime: realtime,
+    controller: controller,
+  );
+}
+
+Future<void> _initializeGroupCallPushRouter() async {
+  if (_groupCallPushRouter != null || _groupCallPushRouterStarting) {
+    return;
+  }
+
+  _groupCallPushRouterStarting = true;
+
+  try {
+    debugPrint('[MAIN GROUP CALL] Initializing group call push router...');
+
+    final router = CallPushRouter(
+      navigatorKey: GlobalCallHandler.navigatorKey,
+      pushService: CallPushService(),
+      controllerFactory: _createIncomingGroupCallBundle,
+    );
+
+    await router.initialize();
+    _groupCallPushRouter = router;
+
+    debugPrint('[MAIN GROUP CALL] Group call push router initialized');
+  } catch (e, st) {
+    debugPrint('[MAIN GROUP CALL] Router initialization error: $e');
+    debugPrint(st.toString());
+  } finally {
+    _groupCallPushRouterStarting = false;
+  }
+}
+
 Future<void> _initAfterFirstFrame() async {
   try {
     debugPrint('[MAIN] _initAfterFirstFrame started');
 
-    /*
-      Initialize notification service after navigator exists.
-      This sets up FCM/local notification/CallKit logic.
-    */
+    // Existing private notification / CallKit system.
     debugPrint('[MAIN] Calling NotificationService.init()...');
     await NotificationService.init();
     debugPrint('[MAIN] NotificationService.init() completed');
 
-    /*
-      Keep this enabled.
-      In killed state, sometimes CallKit accept event is not received by
-      onEvent listener, so we check active calls after Flutter opens.
-    */
+    // Group calls: foreground / opened-app push routing.
+    // Do NOT register another FirebaseMessaging background handler here.
+    await _initializeGroupCallPushRouter();
+
+    // Existing private CallKit killed-state recovery.
     await _checkKilledStateCallKit();
 
     debugPrint('[MAIN] _initAfterFirstFrame completed');

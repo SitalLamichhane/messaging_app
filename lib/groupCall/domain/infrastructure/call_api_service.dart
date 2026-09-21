@@ -1,175 +1,260 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
+import 'package:dio/dio.dart';
 
-import '../domain/call_models.dart';
-
-typedef AccessTokenGetter = Future<String?> Function();
+import 'package:hiddenly/core/api_client.dart';
+import 'package:hiddenly/groupCall/domain/call_models.dart';
 
 class CallApiException implements Exception {
-  final int statusCode;
-  final Map<String, dynamic> data;
+  final int? statusCode;
+  final String message;
+  final Object? data;
 
-  const CallApiException(this.statusCode, this.data);
-
-  String get message =>
-      (data['error'] ?? data['detail'] ?? 'Request failed').toString();
-
-  @override
-  String toString() => 'CallApiException($statusCode): $message';
-}
-
-class CallEndpoints {
-  /// Change ONLY these path strings if your urls.py uses different paths.
-  final String startCall;
-  final String liveKitToken;
-  final String Function(Object callId) updateStatus;
-  final String Function(int conversationId) activeGroupCall;
-
-  const CallEndpoints({
-    this.startCall = '/calls/start/',
-    this.liveKitToken = '/calls/livekit-token/',
-    this.updateStatus = _defaultUpdateStatus,
-    this.activeGroupCall = _defaultActiveGroupCall,
+  const CallApiException({
+    required this.statusCode,
+    required this.message,
+    this.data,
   });
 
-  static String _defaultUpdateStatus(Object callId) =>
-      '/calls/$callId/status/';
+  factory CallApiException.fromDio(
+    DioException error,
+  ) {
+    final data =
+        error.response?.data;
 
-  static String _defaultActiveGroupCall(int conversationId) =>
-      '/conversations/$conversationId/active-call/';
+    String message =
+        'Call request failed';
+
+    if (data is Map) {
+      message =
+          (data['error'] ??
+                  data['detail'] ??
+                  data['message'] ??
+                  message)
+              .toString();
+    } else if (data != null) {
+      message = data.toString();
+    } else if (error.message != null) {
+      message = error.message!;
+    }
+
+    return CallApiException(
+      statusCode:
+          error.response?.statusCode,
+      message: message,
+      data: data,
+    );
+  }
+
+  @override
+  String toString() {
+    return 'CallApiException('
+        '$statusCode): $message';
+  }
 }
 
 class CallApiService {
-  final String baseUrl;
-  final AccessTokenGetter accessTokenGetter;
-  final http.Client _client;
-  final CallEndpoints endpoints;
+  final Dio dio;
 
   CallApiService({
-    required this.baseUrl,
-    required this.accessTokenGetter,
-    http.Client? client,
-    this.endpoints = const CallEndpoints(),
-  }) : _client = client ?? http.Client();
+    Dio? dio,
+  }) : dio = dio ?? ApiClient.dio;
 
-  Uri _uri(String path) {
-    final root =
-        baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
-    final clean = path.startsWith('/') ? path : '/$path';
-    return Uri.parse('$root$clean');
-  }
+  Map<String, dynamic> _requireMap(
+    dynamic value,
+    String endpoint,
+  ) {
+    if (value is Map) {
+      return Map<String, dynamic>.from(
+        value,
+      );
+    }
 
-  Future<Map<String, String>> _headers() async {
-    final token = await accessTokenGetter();
-    return {
-      'Content-Type': 'application/json',
-      'Accept': 'application/json',
-      if (token != null && token.isNotEmpty)
-        'Authorization': 'Bearer $token',
-    };
+    throw CallApiException(
+      statusCode: null,
+      message:
+          'Invalid response from $endpoint',
+      data: value,
+    );
   }
 
   Future<CallSessionDto> startGroupCall({
     required int conversationId,
     required bool isVideo,
   }) async {
-    final response = await _client.post(
-      _uri(endpoints.startCall),
-      headers: await _headers(),
-      body: jsonEncode({
-        'conversation_id': conversationId,
-        'is_video_call': isVideo,
-      }),
-    );
+    try {
+      final response = await dio.post(
+        '/chat/calls/start/',
+        data: {
+          'conversation_id':
+              conversationId,
+          'is_video_call': isVideo,
+        },
+      );
 
-    final data = _decode(response.body);
+      final raw = _requireMap(
+        response.data,
+        '/chat/calls/start/',
+      );
 
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw CallApiException(response.statusCode, data);
+      /*
+       * Some backend serializers may not include
+       * these values in the start response.
+       */
+      final normalized =
+          <String, dynamic>{
+        ...raw,
+        'conversation_id':
+            raw['conversation_id'] ??
+                conversationId,
+        'conversation_type':
+            raw['conversation_type'] ??
+                'group',
+        'is_group_call':
+            raw['is_group_call'] ??
+                true,
+      };
+
+      final call =
+          CallSessionDto.fromJson(
+        normalized,
+      );
+
+      if (call.callId <= 0) {
+        throw CallApiException(
+          statusCode:
+              response.statusCode,
+          message:
+              'Backend did not return a valid call_id.',
+          data: response.data,
+        );
+      }
+
+      return call;
+    } on CallApiException {
+      rethrow;
+    } on DioException catch (e) {
+      throw CallApiException.fromDio(e);
     }
-
-    return CallSessionDto.fromJson({
-      ...data,
-      'conversation_type':
-          data['conversation_type'] ?? 'group',
-      'conversation_id':
-          data['conversation_id'] ?? conversationId,
-    });
   }
 
-  Future<LiveKitCredentials> getLiveKitToken(
-    Object callId,
+  Future<LiveKitCredentials>
+      getLiveKitToken(
+    int callId,
   ) async {
-    final response = await _client.post(
-      _uri(endpoints.liveKitToken),
-      headers: await _headers(),
-      body: jsonEncode({
-        'call_id': callId,
-      }),
-    );
-
-    final data = _decode(response.body);
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw CallApiException(response.statusCode, data);
+    if (callId <= 0) {
+      throw const CallApiException(
+        statusCode: null,
+        message: 'Invalid call ID.',
+      );
     }
 
-    return LiveKitCredentials.fromJson(data);
+    try {
+      final response = await dio.post(
+        '/chat/calls/livekit-token/',
+        data: {
+          'call_id': callId,
+        },
+      );
+
+      final raw = _requireMap(
+        response.data,
+        '/chat/calls/livekit-token/',
+      );
+
+      final credentials =
+          LiveKitCredentials.fromJson(
+        raw,
+      );
+
+      if (credentials.serverUrl
+              .trim()
+              .isEmpty ||
+          credentials.participantToken
+              .trim()
+              .isEmpty) {
+        throw CallApiException(
+          statusCode:
+              response.statusCode,
+          message:
+              'LiveKit server URL or token is missing.',
+          data: response.data,
+        );
+      }
+
+      return credentials;
+    } on CallApiException {
+      rethrow;
+    } on DioException catch (e) {
+      throw CallApiException.fromDio(e);
+    }
   }
 
-  Future<Map<String, dynamic>> updateStatus({
-    required Object callId,
+  Future<Map<String, dynamic>>
+      updateStatus({
+    required int callId,
     required String action,
   }) async {
-    final response = await _client.post(
-      _uri(endpoints.updateStatus(callId)),
-      headers: await _headers(),
-      body: jsonEncode({
-        'action': action,
-      }),
-    );
-
-    final data = _decode(response.body);
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw CallApiException(response.statusCode, data);
+    if (callId <= 0) {
+      throw const CallApiException(
+        statusCode: null,
+        message: 'Invalid call ID.',
+      );
     }
 
-    return data;
+    try {
+      final response = await dio.post(
+        '/chat/calls/$callId/status/',
+        data: {
+          'action': action,
+        },
+      );
+
+      if (response.data == null) {
+        return <String, dynamic>{};
+      }
+
+      if (response.data is Map) {
+        return Map<String, dynamic>.from(
+          response.data as Map,
+        );
+      }
+
+      return <String, dynamic>{};
+    } on DioException catch (e) {
+      throw CallApiException.fromDio(e);
+    }
   }
 
-  Future<ActiveCallResult> getActiveGroupCall(
+  Future<ActiveCallResult>
+      getActiveGroupCall(
     int conversationId,
   ) async {
-    final response = await _client.get(
-      _uri(endpoints.activeGroupCall(conversationId)),
-      headers: await _headers(),
-    );
-
-    final data = _decode(response.body);
-
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw CallApiException(response.statusCode, data);
+    if (conversationId <= 0) {
+      throw const CallApiException(
+        statusCode: null,
+        message:
+            'Invalid conversation ID.',
+      );
     }
 
-    return ActiveCallResult.fromJson(data);
-  }
+    try {
+      final response = await dio.get(
+        '/chat/conversations/'
+        '$conversationId/active-call/',
+      );
 
-  Map<String, dynamic> _decode(String body) {
-    if (body.trim().isEmpty) return <String, dynamic>{};
+      final raw = _requireMap(
+        response.data,
+        '/chat/conversations/'
+        '$conversationId/active-call/',
+      );
 
-    final decoded = jsonDecode(body);
-    if (decoded is Map<String, dynamic>) return decoded;
-    if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
+      return ActiveCallResult.fromJson(
+        raw,
+      );
+    } on CallApiException {
+      rethrow;
+    } on DioException catch (e) {
+      throw CallApiException.fromDio(e);
     }
-
-    return <String, dynamic>{
-      'data': decoded,
-    };
-  }
-
-  void dispose() {
-    _client.close();
   }
 }

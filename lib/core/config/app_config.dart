@@ -1,18 +1,21 @@
 class AppConfig {
   static const bool useEmulator = false;
 
-  static const String host = '147.93.40.65';
+  static const String host = 'hiddenly.org';
 
-  static String get serverUrl => 'http://$host';
+  // REST API
+  static String get serverUrl => 'https://$host';
   static String get apiBaseUrl => '$serverUrl/api';
 
-  static String get wsBaseUrl => 'ws://$host:80';
+  // WebSocket
+  static String get wsBaseUrl => 'wss://$host';
 
   static String chatSocketUrl({
     required int conversationId,
     required String token,
   }) {
     final cleanToken = Uri.encodeComponent(token.trim());
+
     return '$wsBaseUrl/ws/chat/$conversationId/?token=$cleanToken';
   }
 
@@ -21,6 +24,7 @@ class AppConfig {
     required String token,
   }) {
     final cleanToken = Uri.encodeComponent(token.trim());
+
     return '$wsBaseUrl/ws/call/$conversationId/?token=$cleanToken';
   }
 
@@ -28,6 +32,7 @@ class AppConfig {
     required String token,
   }) {
     final cleanToken = Uri.encodeComponent(token.trim());
+
     return '$wsBaseUrl/ws/global-call/?token=$cleanToken';
   }
 }
