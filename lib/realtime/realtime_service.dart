@@ -288,97 +288,119 @@ class ConversationRealtimeService {
     );
   }
 
-  void _onRawMessage(dynamic raw) {
-    if (_disposed || _events.isClosed) {
+ void _onRawMessage(dynamic raw) {
+  if (_disposed || _events.isClosed) {
+    return;
+  }
+
+  try {
+    debugPrint(
+      'CHAT WS RAW <= $raw',
+    );
+
+    final decoded =
+        jsonDecode(raw.toString());
+
+    if (decoded is! Map) {
       return;
     }
 
-    try {
-      final decoded =
-          jsonDecode(raw.toString());
+    final root =
+        Map<String, dynamic>.from(
+      decoded,
+    );
 
-      if (decoded is! Map) {
-        return;
-      }
-
-      final root =
+    /*
+     * CALL EVENT
+     *
+     * Backend:
+     * {
+     *   "action": "call_event",
+     *   "event": "call_event",
+     *   "type": "call_event",
+     *   "data": {
+     *     "type": "incoming_call",
+     *     ...
+     *   }
+     * }
+     */
+    if (root['type']?.toString() ==
+            'call_event' &&
+        root['data'] is Map) {
+      final data =
           Map<String, dynamic>.from(
-        decoded,
+        root['data'] as Map,
       );
 
-      /*
-       * Supported call shape:
-       *
-       * {
-       *   "type": "call_event",
-       *   "data": {
-       *     "type": "incoming_call",
-       *     ...
-       *   }
-       * }
-       */
-      if (root['type']?.toString() ==
-              'call_event' &&
-          root['data'] is Map) {
-        final data =
-            Map<String, dynamic>.from(
-          root['data'] as Map,
-        );
-
-        final nestedType =
-            (data['type'] ?? 'call_event')
-                .toString();
-
-        if (nestedType.isEmpty) {
-          return;
-        }
-
-        _addEvent(
-          ConversationRealtimeEvent(
-            type: nestedType,
-            data: data,
-          ),
-        );
-
-        return;
-      }
-
-      /*
-       * Normal shape:
-       *
-       * {
-       *   "type": "chat_message",
-       *   ...
-       * }
-       *
-       * or:
-       *
-       * {
-       *   "type": "incoming_call",
-       *   ...
-       * }
-       */
-      final type =
-          (root['type'] ?? '')
+      final nestedType =
+          (data['type'] ?? 'call_event')
               .toString()
               .trim();
 
-      if (type.isEmpty) {
+      if (nestedType.isEmpty) {
         return;
       }
 
       _addEvent(
         ConversationRealtimeEvent(
-          type: type,
-          data: root,
+          type: nestedType,
+          data: data,
         ),
       );
-    } catch (e) {
-      debugPrint(
-        'CHAT WS PARSE ERROR => $e',
-      );
+
+      return;
     }
+
+    /*
+     * NORMAL CHAT EVENTS
+     *
+     * Your Django ChatConsumer sends:
+     *
+     * {
+     *   "action": "new_message",
+     *   "message": {...}
+     * }
+     *
+     * It also sends:
+     * action: typing
+     * action: read_message
+     * action: delete_message
+     * action: edit_message
+     *
+     * Therefore we must support BOTH:
+     * type and action.
+     */
+    final type =
+        (root['type'] ??
+                root['action'] ??
+                root['event'] ??
+                '')
+            .toString()
+            .trim();
+
+    if (type.isEmpty) {
+      debugPrint(
+        'CHAT WS IGNORED => no type/action/event: $root',
+      );
+      return;
+    }
+
+    debugPrint(
+      'CHAT WS EVENT => type=$type data=$root',
+    );
+
+    _addEvent(
+      ConversationRealtimeEvent(
+        type: type,
+        data: root,
+      ),
+    );
+  } catch (e) {
+    debugPrint(
+      'CHAT WS PARSE ERROR => $e',
+    );
   }
+}
 
   void _addEvent(
     ConversationRealtimeEvent event,

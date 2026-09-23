@@ -17,28 +17,33 @@ class CallApiException implements Exception {
   factory CallApiException.fromDio(
     DioException error,
   ) {
-    final data =
-        error.response?.data;
+    final data = error.response?.data;
 
-    String message =
-        'Call request failed';
+    String message = 'Call request failed';
 
     if (data is Map) {
-      message =
-          (data['error'] ??
-                  data['detail'] ??
-                  data['message'] ??
-                  message)
-              .toString();
-    } else if (data != null) {
-      message = data.toString();
-    } else if (error.message != null) {
-      message = error.message!;
+      final candidate =
+          data['error'] ??
+          data['detail'] ??
+          data['message'] ??
+          data['non_field_errors'];
+
+      if (candidate is List &&
+          candidate.isNotEmpty) {
+        message = candidate.first.toString();
+      } else if (candidate != null) {
+        message = candidate.toString();
+      }
+    } else if (data is String &&
+        data.trim().isNotEmpty) {
+      message = data.trim();
+    } else if (error.message != null &&
+        error.message!.trim().isNotEmpty) {
+      message = error.message!.trim();
     }
 
     return CallApiException(
-      statusCode:
-          error.response?.statusCode,
+      statusCode: error.response?.statusCode,
       message: message,
       data: data,
     );
@@ -46,8 +51,11 @@ class CallApiException implements Exception {
 
   @override
   String toString() {
-    return 'CallApiException('
-        '$statusCode): $message';
+    if (statusCode == null) {
+      return message;
+    }
+
+    return 'CallApiException($statusCode): $message';
   }
 }
 
@@ -57,6 +65,10 @@ class CallApiService {
   CallApiService({
     Dio? dio,
   }) : dio = dio ?? ApiClient.dio;
+
+  // ============================================================
+  // RESPONSE MAP
+  // ============================================================
 
   Map<String, dynamic> _requireMap(
     dynamic value,
@@ -70,47 +82,89 @@ class CallApiService {
 
     throw CallApiException(
       statusCode: null,
-      message:
-          'Invalid response from $endpoint',
+      message: 'Invalid response from $endpoint',
       data: value,
     );
   }
+
+  // ============================================================
+  // UNWRAP OPTIONAL NESTED RESPONSE
+  // ============================================================
+
+  Map<String, dynamic> _unwrapMap(
+    dynamic value,
+    String endpoint, {
+    List<String> keys = const [],
+  }) {
+    final raw = _requireMap(
+      value,
+      endpoint,
+    );
+
+    for (final key in keys) {
+      final nested = raw[key];
+
+      if (nested is Map) {
+        return Map<String, dynamic>.from(
+          nested,
+        );
+      }
+    }
+
+    return raw;
+  }
+
+  // ============================================================
+  // START GROUP CALL
+  // ============================================================
 
   Future<CallSessionDto> startGroupCall({
     required int conversationId,
     required bool isVideo,
   }) async {
+    if (conversationId <= 0) {
+      throw const CallApiException(
+        statusCode: null,
+        message: 'Invalid conversation ID.',
+      );
+    }
+
     try {
       final response = await dio.post(
         '/chat/calls/start/',
         data: {
-          'conversation_id':
-              conversationId,
+          'conversation_id': conversationId,
           'is_video_call': isVideo,
         },
       );
 
-      final raw = _requireMap(
+      final raw = _unwrapMap(
         response.data,
         '/chat/calls/start/',
+        keys: const [
+          'call',
+          'data',
+        ],
       );
 
-      /*
-       * Some backend serializers may not include
-       * these values in the start response.
-       */
-      final normalized =
-          <String, dynamic>{
+      final normalized = <String, dynamic>{
         ...raw,
+
         'conversation_id':
             raw['conversation_id'] ??
-                conversationId,
+            conversationId,
+
         'conversation_type':
             raw['conversation_type'] ??
-                'group',
+            'group',
+
         'is_group_call':
             raw['is_group_call'] ??
-                true,
+            true,
+
+        'is_video_call':
+            raw['is_video_call'] ??
+            isVideo,
       };
 
       final call =
@@ -120,8 +174,7 @@ class CallApiService {
 
       if (call.callId <= 0) {
         throw CallApiException(
-          statusCode:
-              response.statusCode,
+          statusCode: response.statusCode,
           message:
               'Backend did not return a valid call_id.',
           data: response.data,
@@ -131,10 +184,16 @@ class CallApiService {
       return call;
     } on CallApiException {
       rethrow;
-    } on DioException catch (e) {
-      throw CallApiException.fromDio(e);
+    } on DioException catch (error) {
+      throw CallApiException.fromDio(
+        error,
+      );
     }
   }
+
+  // ============================================================
+  // LIVEKIT TOKEN
+  // ============================================================
 
   Future<LiveKitCredentials>
       getLiveKitToken(
@@ -155,9 +214,14 @@ class CallApiService {
         },
       );
 
-      final raw = _requireMap(
+      final raw = _unwrapMap(
         response.data,
         '/chat/calls/livekit-token/',
+        keys: const [
+          'credentials',
+          'livekit',
+          'data',
+        ],
       );
 
       final credentials =
@@ -172,10 +236,9 @@ class CallApiService {
               .trim()
               .isEmpty) {
         throw CallApiException(
-          statusCode:
-              response.statusCode,
+          statusCode: response.statusCode,
           message:
-              'LiveKit server URL or token is missing.',
+              'LiveKit server URL or participant token is missing.',
           data: response.data,
         );
       }
@@ -183,10 +246,16 @@ class CallApiService {
       return credentials;
     } on CallApiException {
       rethrow;
-    } on DioException catch (e) {
-      throw CallApiException.fromDio(e);
+    } on DioException catch (error) {
+      throw CallApiException.fromDio(
+        error,
+      );
     }
   }
+
+  // ============================================================
+  // UPDATE CALL STATUS
+  // ============================================================
 
   Future<Map<String, dynamic>>
       updateStatus({
@@ -200,11 +269,22 @@ class CallApiService {
       );
     }
 
+    final cleanAction =
+        action.trim();
+
+    if (cleanAction.isEmpty) {
+      throw const CallApiException(
+        statusCode: null,
+        message:
+            'Call status action cannot be empty.',
+      );
+    }
+
     try {
       final response = await dio.post(
         '/chat/calls/$callId/status/',
         data: {
-          'action': action,
+          'action': cleanAction,
         },
       );
 
@@ -213,16 +293,35 @@ class CallApiService {
       }
 
       if (response.data is Map) {
-        return Map<String, dynamic>.from(
+        final raw =
+            Map<String, dynamic>.from(
           response.data as Map,
         );
+
+        final nested =
+            raw['call'] ??
+            raw['data'];
+
+        if (nested is Map) {
+          return Map<String, dynamic>.from(
+            nested,
+          );
+        }
+
+        return raw;
       }
 
       return <String, dynamic>{};
-    } on DioException catch (e) {
-      throw CallApiException.fromDio(e);
+    } on DioException catch (error) {
+      throw CallApiException.fromDio(
+        error,
+      );
     }
   }
+
+  // ============================================================
+  // GET ACTIVE GROUP CALL
+  // ============================================================
 
   Future<ActiveCallResult>
       getActiveGroupCall(
@@ -231,8 +330,7 @@ class CallApiService {
     if (conversationId <= 0) {
       throw const CallApiException(
         statusCode: null,
-        message:
-            'Invalid conversation ID.',
+        message: 'Invalid conversation ID.',
       );
     }
 
@@ -242,10 +340,13 @@ class CallApiService {
         '$conversationId/active-call/',
       );
 
-      final raw = _requireMap(
+      final raw = _unwrapMap(
         response.data,
         '/chat/conversations/'
         '$conversationId/active-call/',
+        keys: const [
+          'data',
+        ],
       );
 
       return ActiveCallResult.fromJson(
@@ -253,8 +354,10 @@ class CallApiService {
       );
     } on CallApiException {
       rethrow;
-    } on DioException catch (e) {
-      throw CallApiException.fromDio(e);
+    } on DioException catch (error) {
+      throw CallApiException.fromDio(
+        error,
+      );
     }
   }
 }

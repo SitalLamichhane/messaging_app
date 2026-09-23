@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:characters/characters.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 
@@ -10,8 +11,14 @@ import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/chat/chat_provider.dart';
 
 class CreateGroupChatScreen extends StatefulWidget {
+
+  final String currentUserId;
+  final ChatUser? preSelectedUser;
+
   const CreateGroupChatScreen({
     super.key,
+    this.currentUserId = '',
+    this.preSelectedUser,
   });
 
   @override
@@ -47,6 +54,24 @@ class _CreateGroupChatScreenState
   void initState() {
     super.initState();
 
+    _currentUserId = widget.currentUserId.trim();
+
+    // Auto select the user when creating group from private chat settings
+    if (widget.preSelectedUser != null) {
+      final user = widget.preSelectedUser!;
+
+      final id = int.tryParse(user.id.toString());
+
+      if (id != null) {
+        _selectedUsers[id] = {
+          "id": id,
+          "name": user.name,
+          "phone_number": user.phone,
+          "avatar_url": user.avatarUrl,
+        };
+      }
+    }
+
     WidgetsBinding.instance.addPostFrameCallback(
       (_) async {
         await _loadCurrentUser();
@@ -55,6 +80,11 @@ class _CreateGroupChatScreenState
   }
 
   Future<void> _loadCurrentUser() async {
+
+    if (_currentUserId.trim().isNotEmpty) {
+      return;
+    }
+
     final id =
         (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
 
@@ -1458,69 +1488,86 @@ class _CreateGroupChatScreenState
 // USER AVATAR
 // =================================================================
 
-class _UserAvatar
-    extends StatelessWidget {
+class _AvatarFallback extends StatelessWidget {
   final String name;
   final String avatarUrl;
 
-  const _UserAvatar({
+  const _AvatarFallback({
     required this.name,
     required this.avatarUrl,
   });
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final cleanUrl =
-        avatarUrl.trim();
+  Widget build(BuildContext context) {
+    final trimmed = name.trim();
+
+    String initial = '?';
+
+    if (trimmed.isNotEmpty) {
+      initial = trimmed.characters.first.toUpperCase();
+    }
+
+    return Center(
+      child: CircleAvatar(
+        radius: 48,
+
+        backgroundImage:
+            avatarUrl.trim().isNotEmpty
+                ? NetworkImage(
+                    avatarUrl.trim(),
+                  )
+                : null,
+
+        child: avatarUrl.trim().isEmpty
+            ? Text(
+                initial,
+                style: const TextStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w700,
+                ),
+              )
+            : null,
+      ),
+    );
+  }
+}
+
+// =================================================================
+// USER AVATAR - UTF-16 / EMOJI SAFE
+// =================================================================
+
+class _UserAvatar extends StatelessWidget {
+  final String name;
+  final String avatarUrl;
+  final double radius;
+
+  const _UserAvatar({
+    required this.name,
+    required this.avatarUrl,
+    this.radius = 28,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmedName = name.trim();
+    final imageUrl = avatarUrl.trim();
+
+    final String initial = trimmedName.isEmpty
+        ? '?'
+        : trimmedName.characters.first.toUpperCase();
 
     return CircleAvatar(
-      radius: 25,
-      backgroundColor:
-          const Color(
-        0xFFE7EEFF,
-      ),
-      backgroundImage:
-          cleanUrl.isNotEmpty
-              ? NetworkImage(
-                  cleanUrl,
-                )
-              : null,
-      onBackgroundImageError:
-          cleanUrl.isNotEmpty
-              ? (
-                  Object error,
-                  StackTrace?
-                      stackTrace,
-                ) {
-                  debugPrint(
-                    'User avatar error: $error',
-                  );
-                }
-              : null,
-      child:
-          cleanUrl.isEmpty
-              ? Text(
-                  name
-                          .trim()
-                          .isNotEmpty
-                      ? name
-                          .trim()[0]
-                          .toUpperCase()
-                      : 'U',
-                  style:
-                      const TextStyle(
-                    fontWeight:
-                        FontWeight
-                            .w800,
-                    color:
-                        Color(
-                      0xFF1877F2,
-                    ),
-                  ),
-                )
-              : null,
+      radius: radius,
+      backgroundImage: imageUrl.isNotEmpty ? NetworkImage(imageUrl) : null,
+      child: imageUrl.isEmpty
+          ? Text(
+              initial,
+              style: TextStyle(
+                fontSize: radius * 0.65,
+                fontWeight: FontWeight.w700,
+              ),
+            )
+          : null,
     );
   }
 }

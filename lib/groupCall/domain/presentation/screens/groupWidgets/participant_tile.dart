@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:hiddenly/groupCall/domain/infrastructure/livekit_call_service.dart';
 import 'package:livekit_client/livekit_client.dart';
-
 class ParticipantTile extends StatelessWidget {
   final Participant participant;
   final LiveKitMediaService liveKit;
@@ -101,17 +100,23 @@ class _AvatarFallback extends StatelessWidget {
   Widget build(BuildContext context) {
     final trimmed = name.trim();
 
-    final initial = trimmed.isEmpty
-        ? '?'
-        : trimmed.substring(0, 1).toUpperCase();
+    String initial = '?';
+
+    if (trimmed.isNotEmpty) {
+      initial = trimmed.characters.first.toUpperCase();
+    }
 
     return Center(
       child: CircleAvatar(
         radius: 48,
+
         backgroundImage:
             avatarUrl.trim().isNotEmpty
-                ? NetworkImage(avatarUrl)
+                ? NetworkImage(
+                    avatarUrl.trim(),
+                  )
                 : null,
+
         child: avatarUrl.trim().isEmpty
             ? Text(
                 initial,

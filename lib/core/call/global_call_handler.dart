@@ -4,8 +4,8 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:hiddenly/core/call/call_api.dart';
+import 'package:hiddenly/groupCall/domain/presentation/screens/group_call_screen.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:hiddenly/incoming_call_screen.dart';
@@ -14,6 +14,11 @@ import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/config/app_config.dart';
 import 'package:hiddenly/core/call/call_socket_service.dart';
 import 'package:hiddenly/core/call/global_call_socket_service.dart';
+import 'package:hiddenly/groupCall/domain/application/group_call_controller.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/call_api_service.dart';
+import 'package:hiddenly/groupCall/domain/presentation/screens/incoming_group_call_screen.dart';
+import 'package:hiddenly/groupCall/domain/call_models.dart';
+import 'package:hiddenly/realtime/realtime_service.dart';
 
 class GlobalCallHandler {
   static final GlobalCallHandler instance = GlobalCallHandler._internal();
@@ -589,6 +594,67 @@ class GlobalCallHandler {
         callId: callId,
       );
 
+      // GROUP CALLS MUST NEVER ENTER THE PRIVATE WebRTC SIGNALING FLOW.
+      //
+      // Some FCM/CallKit payloads omit the group markers. Verify the active
+      // group call with the backend BEFORE falling through to private WebRTC.
+      bool isGroupCall = h._isGroupCallPayload(data);
+
+      if (!isGroupCall && conversationId != null) {
+        final parsedConversationId = int.tryParse(conversationId.trim());
+
+        if (parsedConversationId != null && parsedConversationId > 0) {
+          try {
+            final active = await CallApiService().getActiveGroupCall(
+              parsedConversationId,
+            );
+
+            final activeCall = active.call;
+            final sameCall = active.active &&
+                activeCall != null &&
+                activeCall.isActive &&
+                (callId == null ||
+                    callId.trim().isEmpty ||
+                    activeCall.callId.toString() == callId.trim());
+
+            if (sameCall) {
+              isGroupCall = true;
+              data['conversation_type'] = 'group';
+              data['is_group_call'] = true;
+              data['isGroupCall'] = true;
+
+              debugPrint(
+                'GLOBAL GROUP DETECTED BY BACKEND: '
+                'conversation=$parsedConversationId '
+                'call=${activeCall.callId}',
+              );
+            }
+          } catch (e, st) {
+            debugPrint('GLOBAL GROUP BACKEND CHECK ERROR: $e');
+            debugPrint(st.toString());
+          }
+        }
+      }
+
+      if (isGroupCall) {
+        final parsedConversationId =
+            int.tryParse(conversationId?.trim() ?? '');
+
+        if (parsedConversationId == null || parsedConversationId <= 0) {
+          debugPrint('GROUP INCOMING CALL ERROR: invalid conversation id');
+          return;
+        }
+
+        await h._openIncomingGroupCallScreen(
+          data: data,
+          callerId: callerId,
+          conversationId: parsedConversationId,
+          callId: callId,
+          incomingKey: incomingKey,
+        );
+        return;
+      }
+
       // If the real per-conversation signaling socket is already active for
       // this same call, this is only a duplicate global notification caused by
       // offer resend / call_ready. Ignore it without using a long-lived UI lock.
@@ -703,6 +769,182 @@ class GlobalCallHandler {
     } catch (e, st) {
       debugPrint('GLOBAL INCOMING CALL ERROR: $e');
       debugPrint(st.toString());
+    }
+  }
+
+  bool _readBool(dynamic value) {
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    final clean = value?.toString().trim().toLowerCase() ?? '';
+    return clean == 'true' || clean == '1' || clean == 'yes';
+  }
+
+  bool _isGroupCallPayload(Map<String, dynamic> data) {
+    final conversationType =
+        (data['conversation_type'] ?? data['conversationType'])
+            ?.toString()
+            .trim()
+            .toLowerCase();
+
+    return _readBool(data['is_group_call']) ||
+        _readBool(data['isGroupCall']) ||
+        conversationType == 'group';
+  }
+
+  Future<Uri> _buildConversationRealtimeUri(int conversationId) async {
+    final token = await _freshAccessToken();
+    if (token == null || token.trim().isEmpty) {
+      throw StateError('No valid access token for conversation websocket.');
+    }
+
+    return Uri.parse(
+      AppConfig.chatSocketUrl(
+        conversationId: conversationId,
+        token: token.trim(),
+      ),
+    );
+  }
+
+  Future<void> _openIncomingGroupCallScreen({
+    required Map<String, dynamic> data,
+    required String callerId,
+    required int conversationId,
+    required String? callId,
+    required String incomingKey,
+  }) async {
+    if (_isRecentDuplicateIncoming(incomingKey)) {
+      debugPrint('GROUP INCOMING SKIP DUPLICATE: $incomingKey');
+      return;
+    }
+
+    if (_callScreenOpen || _openingIncomingScreen) {
+      if (_isSameActiveIncomingCall(
+        callerId: callerId,
+        conversationId: conversationId.toString(),
+        callId: callId,
+      )) {
+        debugPrint('GROUP INCOMING IGNORED: same call already open');
+        return;
+      }
+
+      if (_isIncomingUiLockExpired()) {
+        forceResetCallUiLocks(reason: 'stale_group_incoming_lock');
+      } else {
+        debugPrint('GROUP INCOMING BLOCKED: another call UI is active');
+        return;
+      }
+    }
+
+    final payloadData = Map<String, dynamic>.from(data);
+    payloadData['conversation_id'] = conversationId;
+    payloadData['conversationId'] = conversationId;
+    payloadData['is_group_call'] = true;
+    payloadData['isGroupCall'] = true;
+    payloadData['conversation_type'] = 'group';
+
+    final payload = IncomingCallPayload.fromMap(payloadData);
+
+    if (!payload.isValid) {
+      debugPrint('GROUP INCOMING ERROR: invalid IncomingCallPayload');
+      return;
+    }
+
+    final realtime = ConversationRealtimeService(
+      uriBuilder: _buildConversationRealtimeUri,
+    );
+
+    final controller = GroupCallController(
+      conversationId: conversationId,
+      api: CallApiService(),
+      realtime: realtime,
+    );
+
+    _openingIncomingScreen = true;
+    _callScreenOpen = true;
+    _activeIncomingCallerId = callerId;
+    _activeIncomingConversationId = conversationId.toString();
+    _activeIncomingCallId = callId;
+    _lastIncomingKey = incomingKey;
+    _lastIncomingKeyTime = DateTime.now();
+
+    final navigator = await _waitForNavigator();
+    if (navigator == null) {
+      controller.dispose();
+      await realtime.dispose();
+      markCallScreenClosed();
+      return;
+    }
+
+    try {
+      await realtime.connect(conversationId);
+
+      final acceptedFromCallKit = _readBool(data['accepted_from_callkit']);
+
+      if (acceptedFromCallKit) {
+        debugPrint(
+          'GROUP CALLKIT ACCEPT -> DIRECT LIVEKIT JOIN ' 
+          'conversation=$conversationId call=${callId ?? ''}',
+        );
+
+        final activeCall = await controller.checkActiveCall(conversationId);
+        if (activeCall == null) {
+          throw StateError('No active group call found after CallKit accept.');
+        }
+
+        if (callId != null &&
+            callId.trim().isNotEmpty &&
+            activeCall.callId.toString() != callId.trim()) {
+          throw StateError(
+            'Active group call mismatch: expected $callId, got ${activeCall.callId}.',
+          );
+        }
+
+        await controller.joinExistingCall(activeCall);
+
+        if (!controller.connected) {
+          throw StateError(
+            controller.error ?? 'LiveKit did not connect after CallKit accept.',
+          );
+        }
+
+        debugPrint(
+          'GROUP CALLKIT ACCEPT -> LIVEKIT CONNECTED ' 
+          'call=${activeCall.callId}',
+        );
+
+        await navigator.push(
+          MaterialPageRoute(
+            fullscreenDialog: true,
+            builder: (_) => GroupCallScreen(controller: controller),
+          ),
+        );
+        return;
+      }
+
+      debugPrint(
+        'GROUP INCOMING -> IncomingGroupCallScreen '
+        'conversation=$conversationId call=${callId ?? ''}',
+      );
+
+      await navigator.push(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) => IncomingGroupCallScreen(
+            payload: payload,
+            controller: controller,
+          ),
+        ),
+      );
+    } catch (e, st) {
+      debugPrint('GROUP INCOMING OPEN ERROR: $e');
+      debugPrint(st.toString());
+    } finally {
+      // IncomingGroupCallScreen replaces itself with GroupCallScreen on accept.
+      // navigator.push() completes only after that whole route eventually closes,
+      // so this is the correct owner for standalone incoming-call resources.
+      controller.dispose();
+      await realtime.dispose();
+      markCallScreenClosed();
     }
   }
 

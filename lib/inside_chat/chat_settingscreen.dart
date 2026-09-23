@@ -5,6 +5,7 @@ import 'package:dio/dio.dart';
 import 'dart:io';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:characters/characters.dart';
 import 'package:hiddenly/profile_data/block_page.dart';
 import 'package:provider/provider.dart';
 import 'package:hiddenly/call_screen.dart';
@@ -40,6 +41,12 @@ class ChatSettingsScreen extends StatefulWidget {
 
 class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     with TickerProviderStateMixin {
+  String _safeInitial(String? value, {String fallback = 'U'}) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return fallback;
+    return text.characters.first.toUpperCase();
+  }
+
   bool isPinned = false;
   bool isBlocked = false;
   bool _blockedMe = false;
@@ -1086,9 +1093,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                                   : null,
                               child: foundUser!.avatarUrl.isEmpty
                                   ? Text(
-                                      foundUser!.name.isNotEmpty
-                                          ? foundUser!.name[0].toUpperCase()
-                                          : 'U',
+                                      _safeInitial(foundUser!.name),
                                     )
                                   : null,
                             ),
@@ -1420,9 +1425,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                         : null,
                     child: _resolvedChatAvatarUrl().isEmpty
                         ? Text(
-                            widget.chat.name.isNotEmpty
-                                ? widget.chat.name[0].toUpperCase()
-                                : 'U',
+                            _safeInitial(widget.chat.name),
                             style: TextStyle(
                               fontSize: 26,
                               color: mainTextColor,
@@ -1842,6 +1845,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       },
     );
 
+    controller.dispose();
+
     if (result == null || result.trim().isEmpty) return;
 
     emoji = result;
@@ -1969,7 +1974,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                               return _NicknameRowTile(
                                 avatarUrl: member.avatarUrl,
                                 fallbackLetter: member.name.isNotEmpty
-                                    ? member.name[0].toUpperCase()
+                                    ? _safeInitial(member.name)
                                     : 'U',
                                 nickname: nickname,
                                 realName: member.name,
@@ -2017,7 +2022,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                       _NicknameRowTile(
                         avatarUrl: _resolvedChatAvatarUrl(),
                         fallbackLetter: latestOtherName.isNotEmpty
-                            ? latestOtherName[0].toUpperCase()
+                            ? _safeInitial(latestOtherName)
                             : 'U',
                         nickname: displayOtherNickname,
                         realName: latestOtherName,
@@ -2070,7 +2075,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                       _NicknameRowTile(
                         avatarUrl: widget.currentUserAvatar,
                         fallbackLetter: latestMyName.isNotEmpty
-                            ? latestMyName[0].toUpperCase()
+                            ? _safeInitial(latestMyName)
                             : 'Y',
                         nickname: displayMyNickname,
                         realName: latestMyName,
@@ -2141,7 +2146,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
   }) async {
     final controller = TextEditingController(text: initialValue);
 
-    return showModalBottomSheet<String>(
+    final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: sheetColor,
@@ -2254,6 +2259,9 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         );
       },
     );
+
+    controller.dispose();
+    return result;
   }
 
   Future<void> _openBlockOptions() async {

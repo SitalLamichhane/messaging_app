@@ -9,9 +9,9 @@ enum ChatMessageType {
   unknown;
 
   static ChatMessageType fromJson(Object? value) {
-    final raw = value?.toString().trim().toLowerCase();
+    final raw = value?.toString().toLowerCase().trim();
 
-    for (final item in ChatMessageType.values) {
+    for (final item in values) {
       if (item.name == raw) {
         return item;
       }
@@ -44,25 +44,27 @@ class ChatAttachmentDto {
     Map<String, dynamic> json,
   ) {
     return ChatAttachmentDto(
-      id: _asInt(json['id']),
-      url: _firstString([
-        json['file'],
+      id: _int(json['id']),
+      url: _string([
         json['url'],
+        json['file'],
         json['media'],
       ]),
-      thumbnailUrl: _firstString([
+      thumbnailUrl: _string([
         json['thumbnail'],
         json['thumbnail_url'],
       ]),
-      fileName: _firstString([
+      fileName: _string([
         json['file_name'],
         json['name'],
       ]),
-      mimeType: _firstString([
+      mimeType: _string([
         json['mime_type'],
         json['content_type'],
       ]),
-      fileSize: _asInt(json['file_size']),
+      fileSize: _int(
+        json['file_size'] ?? json['size'],
+      ),
       type: ChatMessageType.fromJson(
         json['attachment_type'] ??
             json['message_type'] ??
@@ -78,13 +80,23 @@ class ChatMessageDto {
   final int senderId;
   final String senderName;
   final String senderAvatar;
+
   final ChatMessageType type;
+
   final String text;
+
   final bool isEdited;
   final bool isDeleted;
+
+  final bool delivered;
+  final bool seen;
+
   final DateTime? createdAt;
+
   final List<ChatAttachmentDto> attachments;
+
   final int? replyToId;
+
   final String reaction;
 
   const ChatMessageDto({
@@ -97,6 +109,8 @@ class ChatMessageDto {
     required this.text,
     required this.isEdited,
     required this.isDeleted,
+    required this.delivered,
+    required this.seen,
     required this.createdAt,
     required this.attachments,
     required this.replyToId,
@@ -106,120 +120,163 @@ class ChatMessageDto {
   factory ChatMessageDto.fromJson(
     Map<String, dynamic> json,
   ) {
-    final senderRaw = json['sender'];
+    final sender = json['sender'];
 
-    int senderId = _asInt(json['sender_id']) ?? 0;
-    String senderName = _firstString([
+    int senderId =
+        _int(json['sender_id']) ?? 0;
+
+    String senderName = _string([
       json['sender_name'],
     ]);
-    String senderAvatar = _firstString([
+
+    String senderAvatar = _string([
       json['sender_avatar'],
+      json['avatar'],
     ]);
 
-    if (senderRaw is Map) {
-      final sender = Map<String, dynamic>.from(senderRaw);
+    if (sender is Map) {
+      senderId =
+          _int(sender['id']) ?? senderId;
 
-      senderId = _asInt(sender['id']) ??
-          _asInt(sender['user_id']) ??
-          senderId;
-
-      senderName = _firstString([
-        sender['full_name'],
+      senderName = _string([
         sender['name'],
         sender['username'],
+        sender['full_name'],
         senderName,
       ]);
 
-      senderAvatar = _firstString([
-        sender['profile_picture'],
+      senderAvatar = _string([
         sender['avatar'],
-        sender['avatar_url'],
+        sender['profile_picture'],
+        sender['profile_image'],
         senderAvatar,
       ]);
-    } else {
-      senderId = _asInt(senderRaw) ?? senderId;
     }
 
-    final parsedAttachments = <ChatAttachmentDto>[];
+    final attachments =
+        <ChatAttachmentDto>[];
 
-    final attachmentsRaw = json['attachments'];
+    final rawAttachments =
+        json['attachments'];
 
-    if (attachmentsRaw is List) {
-      for (final item in attachmentsRaw) {
+    if (rawAttachments is List) {
+      for (final item in rawAttachments) {
         if (item is Map) {
-          parsedAttachments.add(
-            ChatAttachmentDto.fromJson(
-              Map<String, dynamic>.from(item),
-            ),
+          final attachment =
+              ChatAttachmentDto.fromJson(
+            Map<String, dynamic>.from(item),
           );
+
+          if (attachment.url.isNotEmpty) {
+            attachments.add(attachment);
+          }
         }
       }
     }
 
-    // Your backend keeps Message.media for exactly one uploaded file.
-    if (parsedAttachments.isEmpty) {
-      final media = _firstString([
+    if (attachments.isEmpty) {
+      final mediaUrl = _string([
         json['media'],
         json['file'],
+        json['url'],
       ]);
 
-      if (media.isNotEmpty) {
-        parsedAttachments.add(
+      if (mediaUrl.isNotEmpty) {
+        attachments.add(
           ChatAttachmentDto(
             id: null,
-            url: media,
-            thumbnailUrl: _firstString([
+            url: mediaUrl,
+            thumbnailUrl: _string([
               json['thumbnail'],
               json['thumbnail_url'],
             ]),
-            fileName: _firstString([
+            fileName: _string([
               json['file_name'],
+              json['name'],
             ]),
-            mimeType: _firstString([
+            mimeType: _string([
               json['mime_type'],
+              json['content_type'],
             ]),
-            fileSize: _asInt(json['file_size']),
+            fileSize: _int(
+              json['file_size'] ??
+                  json['size'],
+            ),
             type: ChatMessageType.fromJson(
-              json['message_type'],
+              json['message_type'] ??
+                  json['type'],
             ),
           ),
         );
       }
     }
 
-    final replyRaw = json['reply_to'];
-
     return ChatMessageDto(
-      id: _asInt(json['id']) ??
-          _asInt(json['message_id']) ??
-          0,
-      conversationId:
-          _asInt(json['conversation_id']) ??
-              _asInt(json['conversation']),
+      id: _int(json['id']) ?? 0,
+
+      conversationId: _int(
+        json['conversation_id'] ??
+            json['conversation'],
+      ),
+
       senderId: senderId,
+
       senderName: senderName,
+
       senderAvatar: senderAvatar,
+
       type: ChatMessageType.fromJson(
-        json['message_type'] ?? json['type'],
+        json['message_type'] ??
+            json['type'],
       ),
+
       text: (json['text'] ?? '').toString(),
-      isEdited: _asBool(json['is_edited']),
-      isDeleted: _asBool(json['is_deleted']),
-      createdAt: _asDate(
-        json['created_at'] ?? json['timestamp'],
+
+      isEdited: _bool(
+        json['is_edited'] ??
+            json['edited'],
       ),
-      attachments: parsedAttachments,
-      replyToId: replyRaw is Map
-          ? _asInt(replyRaw['id'])
-          : _asInt(replyRaw),
-      reaction: (json['reaction'] ?? '').toString(),
+
+      isDeleted: _bool(
+        json['is_deleted'] ??
+            json['deleted'],
+      ),
+
+      delivered: _bool(
+        json['delivered'] ??
+            json['is_delivered'],
+      ),
+
+      seen: _bool(
+        json['seen'] ??
+            json['is_seen'] ??
+            json['read'] ??
+            json['is_read'],
+      ),
+
+      createdAt: _date(
+        json['created_at'] ??
+            json['timestamp'],
+      ),
+
+      attachments: attachments,
+
+      replyToId: _replyId(
+        json['reply_to'] ??
+            json['reply_to_id'],
+      ),
+
+      reaction:
+          (json['reaction'] ?? '').toString(),
     );
   }
 
   ChatMessageDto copyWith({
     String? text,
-    bool? isEdited,
     bool? isDeleted,
+    bool? seen,
+    bool? delivered,
+    bool? isEdited,
   }) {
     return ChatMessageDto(
       id: id,
@@ -229,8 +286,14 @@ class ChatMessageDto {
       senderAvatar: senderAvatar,
       type: type,
       text: text ?? this.text,
-      isEdited: isEdited ?? this.isEdited,
-      isDeleted: isDeleted ?? this.isDeleted,
+      isEdited:
+          isEdited ?? this.isEdited,
+      isDeleted:
+          isDeleted ?? this.isDeleted,
+      delivered:
+          delivered ?? this.delivered,
+      seen:
+          seen ?? this.seen,
       createdAt: createdAt,
       attachments: attachments,
       replyToId: replyToId,
@@ -239,29 +302,86 @@ class ChatMessageDto {
   }
 }
 
-int? _asInt(Object? value) {
-  if (value == null) return null;
-  if (value is int) return value;
-  return int.tryParse(value.toString());
+int? _replyId(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+
+  if (value is Map) {
+    return _int(
+      value['id'] ??
+          value['message_id'],
+    );
+  }
+
+  return _int(value);
 }
 
-bool _asBool(Object? value) {
-  if (value is bool) return value;
-  final raw = value?.toString().toLowerCase();
-  return raw == '1' || raw == 'true' || raw == 'yes';
+int? _int(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+
+  if (value is int) {
+    return value;
+  }
+
+  if (value is num) {
+    return value.toInt();
+  }
+
+  return int.tryParse(
+    value.toString(),
+  );
 }
 
-DateTime? _asDate(Object? value) {
-  if (value == null) return null;
-  return DateTime.tryParse(value.toString());
+bool _bool(dynamic value) {
+  if (value == null) {
+    return false;
+  }
+
+  if (value is bool) {
+    return value;
+  }
+
+  if (value is num) {
+    return value != 0;
+  }
+
+  final raw =
+      value.toString().toLowerCase().trim();
+
+  return raw == 'true' ||
+      raw == '1' ||
+      raw == 'yes';
 }
 
-String _firstString(List<Object?> values) {
+DateTime? _date(dynamic value) {
+  if (value == null) {
+    return null;
+  }
+
+  if (value is DateTime) {
+    return value;
+  }
+
+  return DateTime.tryParse(
+    value.toString(),
+  );
+}
+
+String _string(
+  List<dynamic> values,
+) {
   for (final value in values) {
-    final text = value?.toString().trim() ?? '';
-    if (text.isNotEmpty && text != 'null') {
+    final text =
+        value?.toString().trim() ?? '';
+
+    if (text.isNotEmpty &&
+        text.toLowerCase() != 'null') {
       return text;
     }
   }
+
   return '';
 }

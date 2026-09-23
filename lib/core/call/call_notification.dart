@@ -21,6 +21,7 @@ import 'package:hiddenly/core/call/call_api.dart';
 import 'package:hiddenly/core/call/call_socket_service.dart';
 import 'package:hiddenly/core/call/global_call_handler.dart';
 import 'package:hiddenly/core/config/app_config.dart';
+import 'package:hiddenly/groupCall/domain/infrastructure/call_api_service.dart';
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
@@ -342,6 +343,34 @@ class NotificationService {
         'callerAvatar': callerAvatar,
         'is_video_call': isVideoCall.toString(),
         'isVideoCall': isVideoCall.toString(),
+
+        // IMPORTANT: preserve group-call metadata through native CallKit.
+        // Without these fields, actionCallAccept cannot distinguish a
+        // LiveKit group call from the private WebRTC call flow.
+        'is_group_call': (
+          _readBool(data['is_group_call']) ||
+          _readBool(data['isGroupCall']) ||
+          data['conversation_type']?.toString().trim().toLowerCase() == 'group'
+        ).toString(),
+        'isGroupCall': (
+          _readBool(data['is_group_call']) ||
+          _readBool(data['isGroupCall']) ||
+          data['conversation_type']?.toString().trim().toLowerCase() == 'group'
+        ).toString(),
+        'conversation_type':
+            data['conversation_type']?.toString() ??
+            data['conversationType']?.toString() ??
+            '',
+        'conversation_name':
+            data['conversation_name']?.toString() ??
+            data['conversationName']?.toString() ??
+            data['group_name']?.toString() ??
+            '',
+        'conversationName':
+            data['conversation_name']?.toString() ??
+            data['conversationName']?.toString() ??
+            data['group_name']?.toString() ??
+            '',
       };
 
       final params = CallKitParams(
@@ -440,7 +469,26 @@ class NotificationService {
       'conversation_id',
       'conversationId',
     ]);
-    
+
+    final conversationName = _readFirstString(
+      extra,
+      body,
+      const [
+        'conversation_name',
+        'conversationName',
+        'group_name',
+        'groupName',
+      ],
+    );
+
+    final conversationType = _readFirstString(
+      extra,
+      body,
+      const [
+        'conversation_type',
+        'conversationType',
+      ],
+    ).trim().toLowerCase();
 
     final isVideoCall = _readBool(extra['is_video_call']) ||
         _readBool(extra['isVideoCall']) ||
@@ -449,16 +497,136 @@ class NotificationService {
         body['type'] == 1 ||
         body['type']?.toString() == '1';
 
+    bool isGroupCall = _readBool(extra['is_group_call']) ||
+        _readBool(extra['isGroupCall']) ||
+        _readBool(body['is_group_call']) ||
+        _readBool(body['isGroupCall']) ||
+        conversationType == 'group';
+
+    // Native CallKit can occasionally return an older/minimal `extra` map
+    // (for example after app restart). Before falling back to the private
+    // WebRTC flow, ask the authoritative active-group-call endpoint.
+    if (!isGroupCall && conversationId.isNotEmpty) {
+      final parsedConversationId = int.tryParse(conversationId);
+      if (parsedConversationId != null) {
+        try {
+          final active = await CallApiService().getActiveGroupCall(
+            parsedConversationId,
+          );
+          final activeCall = active.call;
+          final sameCall = active.active &&
+              activeCall != null &&
+              activeCall.isActive &&
+              (callId.isEmpty || activeCall.callId.toString() == callId);
+
+          if (sameCall) {
+            isGroupCall = true;
+            debugPrint(
+              'CALLKIT ACCEPT GROUP DETECTED BY BACKEND: call=$callId',
+            );
+          }
+        } catch (e) {
+          debugPrint('CALLKIT GROUP FALLBACK CHECK ERROR: $e');
+        }
+      }
+    }
+
     debugPrint('================ CALLKIT ACCEPT ================');
     debugPrint('callId=$callId');
     debugPrint('callerId=$callerId');
     debugPrint('conversationId=$conversationId');
+    debugPrint('conversationType=$conversationType');
+    debugPrint('isGroupCall=$isGroupCall');
     debugPrint('isVideoCall=$isVideoCall');
     debugPrint('===============================================');
 
-    if (callerId.isEmpty || conversationId.isEmpty) return;
+    if (callerId.isEmpty || conversationId.isEmpty) {
+      debugPrint(
+        'CALLKIT ACCEPT IGNORED: missing callerId/conversationId',
+      );
+      return;
+    }
 
     _answerOpeningCallScreen = true;
+
+    // ============================================================
+    // GROUP CALL -> LiveKit route
+    // ============================================================
+    //
+    // NEVER call openIncomingCallFromCallKit() for a group call.
+    // That method belongs to the old/private CallProvider + WebRTC
+    // flow and is what produced:
+    //
+    //   CALL PROVIDER: connecting signaling socket...
+    //   WEBRTC RENDERERS INITIALIZED
+    //   CALL READY SENT
+    //
+    // Also do NOT call _safeUpdateCallStatus(... accepted) here.
+    // GroupCallController.joinExistingCall() obtains the LiveKit token;
+    // the backend token endpoint marks the participant joined/accepted.
+    if (isGroupCall) {
+      debugPrint(
+        'CALLKIT ACCEPT -> GROUP/LIVEKIT ROUTE: call=$callId '
+        'conversation=$conversationId',
+      );
+
+      final groupPayload = <String, dynamic>{
+        'type': 'incoming_call',
+        'call_id': callId,
+        'callId': callId,
+        'conversation_id': conversationId,
+        'conversationId': conversationId,
+        'conversation_type': 'group',
+        'is_group_call': true,
+        'isGroupCall': true,
+        'caller_id': callerId,
+        'callerId': callerId,
+        'caller_name': callerName,
+        'callerName': callerName,
+        'caller_avatar': callerAvatar,
+        'callerAvatar': callerAvatar,
+        'conversation_name': conversationName,
+        'conversationName': conversationName,
+        'is_video_call': isVideoCall,
+        'isVideoCall': isVideoCall,
+
+        // Tells the group-call route that the native Accept button
+        // initiated this navigation. The private flow never sees this.
+        'accepted_from_callkit': true,
+      };
+
+      // Route back through GlobalCallHandler because that is now the
+      // single owner of group-call controller/realtime construction.
+      await GlobalCallHandler.handleIncomingCall(groupPayload);
+
+      Future.delayed(const Duration(seconds: 6), () {
+        _answerOpeningCallScreen = false;
+      });
+
+      if (callId.isNotEmpty) {
+        Future.delayed(const Duration(milliseconds: 250), () async {
+          try {
+            await FlutterCallkitIncoming.endCall(callId);
+            debugPrint(
+              'CALLKIT GROUP ACCEPT CLEANUP END CALL: $callId',
+            );
+          } catch (e) {
+            debugPrint(
+              'CALLKIT GROUP ACCEPT CLEANUP ERROR: $e',
+            );
+          }
+        });
+      }
+
+      return;
+    }
+
+    // ============================================================
+    // PRIVATE CALL -> existing manual WebRTC route
+    // ============================================================
+    debugPrint(
+      'CALLKIT ACCEPT -> PRIVATE/WEBRTC ROUTE: call=$callId',
+    );
 
     await GlobalCallHandler.instance.openIncomingCallFromCallKit(
       callId: callId,
@@ -491,6 +659,7 @@ class NotificationService {
       });
     }
   }
+
   static String _fixAvatarUrl(String url) {
     final clean = url.trim();
 

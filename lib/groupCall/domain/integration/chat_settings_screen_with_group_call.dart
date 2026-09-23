@@ -8,6 +8,7 @@ import 'package:dio/dio.dart';
 import 'dart:io';
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
+import 'package:characters/characters.dart';
 import 'package:hiddenly/profile_data/block_page.dart';
 import 'package:provider/provider.dart';
 import 'package:hiddenly/call_screen.dart';
@@ -20,6 +21,12 @@ import 'package:hiddenly/profile_data/photos_media_page.dart';
 // import 'package:hiddenly/profile_data/profile_data_page.dart';
 import 'package:hiddenly/theme_controller.dart';
 
+
+String _safeInitial(String? value, {String fallback = '?'}) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return fallback;
+  return text.characters.first.toUpperCase();
+}
 
 class ChatSettingsScreen extends StatefulWidget {
   final ChatItem chat;
@@ -891,6 +898,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 errorText = '';
               });
 
+              bool sheetClosing = false;
+
               try {
                 final response = await ApiClient.dio.post(
                   '/chat/groups/${widget.chat.id}/add-member/',
@@ -939,11 +948,16 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                   setState(() {});
                 }
 
+                sheetClosing = true;
                 if (sheetContext.mounted) {
                   Navigator.pop(sheetContext);
                 }
 
+                // Important: return immediately after closing the sheet.
+                // This prevents the finally block from calling setModalState
+                // while the bottom sheet is being disposed.
                 _showSnackBar('${user.name} added to group');
+                return;
               } on DioException catch (e) {
                 setModalState(() {
                   errorText = e.response?.data is Map
@@ -956,9 +970,11 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                   errorText = 'Could not add member';
                 });
               } finally {
-                setModalState(() {
-                  adding = false;
-                });
+                if (!sheetClosing && sheetContext.mounted) {
+                  setModalState(() {
+                    adding = false;
+                  });
+                }
               }
             }
 
@@ -1073,7 +1089,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                               child: foundUser!.avatarUrl.isEmpty
                                   ? Text(
                                       foundUser!.name.isNotEmpty
-                                          ? foundUser!.name[0].toUpperCase()
+                                          ? _safeInitial(foundUser!.name, fallback: 'U')
                                           : 'U',
                                     )
                                   : null,
@@ -1125,7 +1141,9 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       },
     );
 
-    phoneController.dispose();
+    // Do not manually dispose this temporary controller here.
+    // The modal route can still rebuild during its closing transition.
+    // Once this method returns there are no retained references, so it can be GC'd safely.
   }
 
 
@@ -1646,7 +1664,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                     child: _resolvedChatAvatarUrl().isEmpty
                         ? Text(
                             widget.chat.name.isNotEmpty
-                                ? widget.chat.name[0].toUpperCase()
+                                ? _safeInitial(widget.chat.name)
                                 : 'U',
                             style: TextStyle(
                               fontSize: 26,
@@ -2067,7 +2085,11 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       },
     );
 
-    if (result == null || result.trim().isEmpty) return;
+    // Do not dispose here: EmojiPicker can still rebuild while the modal route
+    // is completing its closing transition. The controller becomes unreachable
+    // after this method returns and can be garbage-collected safely.
+
+    if (!mounted || result == null || result.trim().isEmpty) return;
 
     emoji = result;
     _notifyDataChanged();
@@ -2194,7 +2216,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                               return _NicknameRowTile(
                                 avatarUrl: member.avatarUrl,
                                 fallbackLetter: member.name.isNotEmpty
-                                    ? member.name[0].toUpperCase()
+                                    ? _safeInitial(member.name, fallback: 'U')
                                     : 'U',
                                 nickname: nickname,
                                 realName: member.name,
@@ -2242,7 +2264,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                       _NicknameRowTile(
                         avatarUrl: _resolvedChatAvatarUrl(),
                         fallbackLetter: latestOtherName.isNotEmpty
-                            ? latestOtherName[0].toUpperCase()
+                            ? _safeInitial(latestOtherName)
                             : 'U',
                         nickname: displayOtherNickname,
                         realName: latestOtherName,
@@ -2295,7 +2317,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                       _NicknameRowTile(
                         avatarUrl: widget.currentUserAvatar,
                         fallbackLetter: latestMyName.isNotEmpty
-                            ? latestMyName[0].toUpperCase()
+                            ? _safeInitial(latestMyName)
                             : 'Y',
                         nickname: displayMyNickname,
                         realName: latestMyName,
@@ -2366,7 +2388,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
   }) async {
     final controller = TextEditingController(text: initialValue);
 
-    return showModalBottomSheet<String>(
+    final result = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
       backgroundColor: sheetColor,
@@ -2479,6 +2501,10 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         );
       },
     );
+
+    // Do not dispose here: the TextField may still rebuild during the modal
+    // closing transition. No reference is retained after this method returns.
+    return result;
   }
 
   Future<void> _openBlockOptions() async {

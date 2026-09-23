@@ -28,6 +28,7 @@ class ChatProvider extends ChangeNotifier {
   final Map<String, Set<String>> conversationPinnedMessageIds = {};
 
   final ChatSocketService socket = ChatSocketService();
+  final GlobalChatSocketService globalChatSocket = GlobalChatSocketService();
   final List<dynamic> searchedUsers = [];
 
   Future<String> _myUserId() async {
@@ -92,6 +93,91 @@ class ChatProvider extends ChangeNotifier {
   void clearError() {
     error = null;
     notifyListeners();
+  }
+
+  Future<void> connectGlobalSocket() async {
+    if (globalChatSocket.isConnected || globalChatSocket.isConnecting) {
+      debugPrint('GLOBAL CHAT SOCKET ALREADY ACTIVE');
+      return;
+    }
+
+    await globalChatSocket.connect(
+      onMessage: (data) async {
+        debugPrint('GLOBAL CHAT EVENT: $data');
+        final type = (data['type'] ?? data['action'] ?? '').toString().trim().toLowerCase();
+        final payload = data['data'] ?? data['conversation'] ?? data['message'];
+
+        if (type == 'global_chat_connected') {
+          debugPrint('GLOBAL CHAT READY');
+          return;
+        }
+
+        if (type == 'conversation_created' || type == 'conversation_updated') {
+          if (payload is! Map) return;
+          try {
+            final chat = await _mapConversation(Map<String, dynamic>.from(payload));
+            _upsertConversation(chat);
+            debugPrint('REALTIME CONVERSATION APPLIED: ${chat.id}');
+          } catch (e) {
+            debugPrint('REALTIME CONVERSATION MAP ERROR: $e');
+          }
+          return;
+        }
+
+        if (type == 'new_message') {
+          if (payload is! Map) return;
+          final messageJson = Map<String, dynamic>.from(payload);
+          final rawConversationId = messageJson['conversation'] ?? messageJson['conversation_id'];
+          final conversationId = int.tryParse(rawConversationId?.toString() ?? '');
+          if (conversationId == null) {
+            debugPrint('GLOBAL CHAT MESSAGE: conversation id missing');
+            return;
+          }
+
+          try {
+            final message = await _mapMessage(messageJson);
+            _syncMessageMetaFromJson(
+              conversationId: conversationId,
+              messageId: message.id,
+              json: messageJson,
+            );
+
+            final conversationExists = conversations.any(
+              (chat) => chat.id == conversationId.toString(),
+            );
+            if (!conversationExists) {
+              await loadConversations();
+              return;
+            }
+
+            final key = '$conversationId';
+            conversationMessages.putIfAbsent(key, () => []);
+            final alreadyExists = conversationMessages[key]!.any(
+              (item) => item.id == message.id,
+            );
+
+            if (!alreadyExists) {
+              _addLocalMessage(conversationId, message);
+            } else {
+              _updateConversationPreviewFromMessage(conversationId, message);
+            }
+            debugPrint('GLOBAL CHAT MESSAGE APPLIED: ${message.id}');
+          } catch (e) {
+            debugPrint('GLOBAL CHAT MESSAGE ERROR: $e');
+          }
+        }
+      },
+      onError: (err) {
+        debugPrint('GLOBAL CHAT PROVIDER ERROR: $err');
+      },
+      onDisconnected: () {
+        debugPrint('GLOBAL CHAT PROVIDER DISCONNECTED');
+      },
+    );
+  }
+
+  Future<void> disconnectGlobalSocket() async {
+    await globalChatSocket.disconnect();
   }
 
   Future<void> connectSocket({
@@ -368,42 +454,88 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<void> sendText({
-    required int conversationId,
-    required String text,
-  }) async {
-    if (text.trim().isEmpty) return;
+  required int conversationId,
+  required String text,
+}) async {
+  if (text.trim().isEmpty) return;
 
-    final cleanText = text.trim();
+  final cleanText = text.trim();
 
-    final temp = ChatMessage(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      type: MessageType.text,
-      text: cleanText,
-      isMe: true,
-      sentAt: DateTime.now(),
-      isSeen: false,
-    );
+  // Make sure this socket belongs to this conversation.
+  final canSendBySocket =
+      socket.isConnected &&
+      socket.conversationId == conversationId;
 
-    _addLocalMessage(conversationId, temp);
+  if (canSendBySocket) {
+    final sent = socket.send({
+      'action': 'send_message',
+      'type': 'send_message',
+      'message': cleanText,
+    });
 
-    _setSending(true);
-    error = null;
-
-    try {
-      final response = await ChatApi.sendText(
-        conversationId: conversationId,
-        text: cleanText,
+    if (sent) {
+      debugPrint(
+        'MESSAGE SENT THROUGH WEBSOCKET '
+        'conversation=$conversationId',
       );
 
-      final realMessage = await _mapMessage(response.data);
-      _replaceMessage(conversationId, temp.id, realMessage);
-    } catch (e) {
-      error = e.toString();
-      notifyListeners();
+      // Don't add an optimistic message here.
+      // ChatConsumer broadcasts the saved message back to this
+      // conversation, and connectSocket() will add that real
+      // server message.
+      return;
     }
-
-    _setSending(false);
   }
+
+  // ----------------------------------------------------------
+  // FALLBACK
+  // ----------------------------------------------------------
+  // If the WebSocket isn't ready, use your existing HTTP API.
+  // This prevents the user from losing the message.
+  // ----------------------------------------------------------
+
+  debugPrint(
+    'CHAT WS NOT AVAILABLE - USING HTTP FALLBACK',
+  );
+
+  final temp = ChatMessage(
+    id: DateTime.now().microsecondsSinceEpoch.toString(),
+    type: MessageType.text,
+    text: cleanText,
+    isMe: true,
+    sentAt: DateTime.now(),
+    isSeen: false,
+  );
+
+  _addLocalMessage(
+    conversationId,
+    temp,
+  );
+
+  _setSending(true);
+  error = null;
+
+  try {
+    final response = await ChatApi.sendText(
+      conversationId: conversationId,
+      text: cleanText,
+    );
+
+    final realMessage =
+        await _mapMessage(response.data);
+
+    _replaceMessage(
+      conversationId,
+      temp.id,
+      realMessage,
+    );
+  } catch (e) {
+    error = e.toString();
+    notifyListeners();
+  }
+
+  _setSending(false);
+}
 
   Future<void> sendReply({
     required int conversationId,
@@ -939,6 +1071,21 @@ class ChatProvider extends ChangeNotifier {
     return true;
   }
 
+
+  void _updateConversationPreviewFromMessage(
+    int conversationId,
+    ChatMessage message,
+  ) {
+    final key = '$conversationId';
+    final index = conversations.indexWhere((chat) => chat.id == key);
+    if (index == -1) return;
+
+    conversations[index].message = _preview(message);
+    conversations[index].time = _formatChatTime(message.sentAt);
+    final chat = conversations.removeAt(index);
+    conversations.insert(0, chat);
+    notifyListeners();
+  }
 
   void _addLocalMessage(int conversationId, ChatMessage message) {
     if (message.type == MessageType.text && message.text.trim().isEmpty) {

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:characters/characters.dart';
 import 'package:hiddenly/calls.dart';
 import 'package:hiddenly/chat_detail.dart';
 import 'package:hiddenly/chat_models.dart';
@@ -62,7 +63,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
       // Initial conversation load.
       await provider.loadConversations();
-
+      
+      await provider.connectGlobalSocket();
       if (!mounted) return;
 
       debugPrint(
@@ -215,8 +217,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           isGroup: true,
           title:
               _chatDisplayName(chat),
-          avatarUrl:
-              _chatAvatarUrl(chat),
+           members: '',
           currentUserId:
               currentUserId,
           socketUriBuilder:
@@ -1765,11 +1766,8 @@ class _Avatar
               cleanAvatarUrl
                       .isEmpty
                   ? Text(
-                      (name
-                                  .trim()
-                                  .isNotEmpty
-                              ? name
-                                  .trim()[0]
+                      (name.trim().isNotEmpty
+                              ? name.trim().characters.first
                               : 'U')
                           .toUpperCase(),
                       style:
