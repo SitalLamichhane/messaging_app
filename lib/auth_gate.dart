@@ -323,11 +323,17 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       return;
     }
 
-    if (socket.isConnected && _globalCallSocketUserId == currentUserId) {
-      _globalCallSocketStarted = true;
-      debugPrint('AUTH GATE GLOBAL CALL: socket already healthy');
-      return;
-    }
+    if (socket.isConnected &&
+        socket.isHealthy &&
+        _globalCallSocketUserId == currentUserId) {
+     _globalCallSocketStarted = true;
+
+  debugPrint(
+    'AUTH GATE GLOBAL CALL: socket already connected and healthy',
+  );
+
+   return;
+ }
 
     _globalCallSocketStarting = true;
 
@@ -501,7 +507,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     }
 
     final globalSocketHealthy =
-        GlobalCallSocketService.instance.isConnected;
+       GlobalCallSocketService.instance.isConnected &&
+       GlobalCallSocketService.instance.isHealthy;
 
     if (currentUserId.isNotEmpty &&
         !_globalCallSocketStarting &&

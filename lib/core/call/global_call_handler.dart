@@ -243,27 +243,47 @@ class GlobalCallHandler {
   }
 
   Future<void> ensureGlobalIncomingCallSocketConnected() async {
-    final socket = GlobalCallSocketService.instance;
+  final socket = GlobalCallSocketService.instance;
 
-    if (socket.isConnected || socket.isConnecting) {
-      return;
-    }
-
-    if ((_currentUserId ?? '').trim().isEmpty) {
-      await _loadCurrentUserFromStorage();
-    }
-
-    final currentUserId = (_currentUserId ?? '').trim();
-
-    if (currentUserId.isEmpty) {
-      debugPrint('GLOBAL SOCKET ENSURE ERROR: user id unavailable');
-      return;
-    }
-
-    socket.setReconnectUrlProvider(() => _buildFreshGlobalSocketUrl());
-
-    await socket.ensureConnected();
+  if (socket.isConnecting) {
+    debugPrint('GLOBAL SOCKET ENSURE: connection already in progress');
+    return;
   }
+
+  if (( _currentUserId ?? '').trim().isEmpty) {
+    await _loadCurrentUserFromStorage();
+  }
+
+  final currentUserId = (_currentUserId ?? '').trim();
+
+  if (currentUserId.isEmpty) {
+    debugPrint('GLOBAL SOCKET ENSURE ERROR: user id unavailable');
+    return;
+  }
+
+  socket.setReconnectUrlProvider(
+    () => _buildFreshGlobalSocketUrl(),
+  );
+
+  if (socket.isConnected && socket.isHealthy) {
+    debugPrint('GLOBAL SOCKET ENSURE: already connected and healthy');
+    return;
+  }
+
+  if (socket.isConnected && !socket.isHealthy) {
+    debugPrint('GLOBAL SOCKET ENSURE: connected but unhealthy');
+
+    await socket.forceReconnect(
+      reason: 'global_handler_unhealthy_socket',
+    );
+
+    return;
+  }
+
+  debugPrint('GLOBAL SOCKET ENSURE: socket disconnected -> connecting');
+
+  await socket.ensureConnected();
+}
 
   Future<void> _saveCurrentUserToStorage({
     required String currentUserId,
