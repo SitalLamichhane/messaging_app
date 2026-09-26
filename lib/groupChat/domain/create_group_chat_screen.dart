@@ -1256,228 +1256,214 @@ class _CreateGroupChatScreenState
     required List<dynamic> users,
     required Color secondaryTextColor,
   }) {
-    final query =
-        _searchController.text.trim();
+    final query = _searchController.text.trim();
 
+    // =============================================================
+    // EMPTY SEARCH STATE
+    // =============================================================
     if (query.isEmpty) {
-      return Center(
-        child: Padding(
-          padding:
-              const EdgeInsets
-                  .all(
-            30,
-          ),
-          child: Column(
-            mainAxisSize:
-                MainAxisSize.min,
-            children: [
-              Icon(
-                Icons
-                    .person_search_rounded,
-                size: 55,
-                color:
-                    secondaryTextColor
-                        .withValues(
-                  alpha: 0.7,
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          // On small screens / while the keyboard is open, the
+          // remaining Expanded area can become extremely small.
+          // Do not force the large empty-state UI into that space.
+          if (constraints.maxHeight < 80) {
+            return const SizedBox.shrink();
+          }
+
+          return SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 8,
+            ),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight > 16
+                    ? constraints.maxHeight - 16
+                    : 0,
+              ),
+              child: Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.person_search_rounded,
+                      size: constraints.maxHeight < 130 ? 36 : 55,
+                      color: secondaryTextColor.withValues(
+                        alpha: 0.7,
+                      ),
+                    ),
+                    SizedBox(
+                      height: constraints.maxHeight < 130 ? 6 : 14,
+                    ),
+                    Text(
+                      'Search for people by phone number',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: secondaryTextColor,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-
-              const SizedBox(
-                height: 14,
-              ),
-
-              Text(
-                'Search for people by phone number',
-                textAlign:
-                    TextAlign.center,
-                style:
-                    TextStyle(
-                  color:
-                      secondaryTextColor,
-                  fontWeight:
-                      FontWeight
-                          .w600,
-                ),
-              ),
-            ],
-          ),
-        ),
+            ),
+          );
+        },
       );
     }
 
+    // =============================================================
+    // QUERY TOO SHORT
+    // =============================================================
     if (query.length < 3) {
-      return Center(
-        child: Text(
-          'Enter at least 3 digits',
-          style:
-              TextStyle(
-            color:
-                secondaryTextColor,
-            fontWeight:
-                FontWeight
-                    .w600,
-          ),
-        ),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxHeight < 30) {
+            return const SizedBox.shrink();
+          }
+
+          return SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 8,
+            ),
+            child: Center(
+              child: Text(
+                'Enter at least 3 digits',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: secondaryTextColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          );
+        },
       );
     }
 
+    // =============================================================
+    // NO USERS FOUND
+    // =============================================================
     if (users.isEmpty) {
-      return Center(
-        child: Text(
-          'No users found',
-          style:
-              TextStyle(
-            color:
-                secondaryTextColor,
-            fontWeight:
-                FontWeight
-                    .w600,
-          ),
-        ),
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxHeight < 30) {
+            return const SizedBox.shrink();
+          }
+
+          return SingleChildScrollView(
+            physics: const ClampingScrollPhysics(),
+            padding: const EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 8,
+            ),
+            child: Center(
+              child: Text(
+                'No users found',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: secondaryTextColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          );
+        },
       );
     }
 
+    // =============================================================
+    // SEARCH RESULTS
+    // =============================================================
     return ListView.separated(
-      padding:
-          const EdgeInsets.only(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      padding: const EdgeInsets.only(
         bottom: 20,
       ),
-      itemCount:
-          users.length,
-      separatorBuilder:
-          (
+      itemCount: users.length,
+      separatorBuilder: (
         context,
         index,
       ) =>
-              const Divider(
+          const Divider(
         height: 1,
         indent: 82,
       ),
-      itemBuilder:
-          (
+      itemBuilder: (
         context,
         index,
       ) {
-        final user =
-            users[index];
+        final user = users[index];
 
-        final id =
-            _userId(user);
-
-        final name =
-            _userName(user);
-
-        final phone =
-            _userPhone(user);
-
-        final avatarUrl =
-            _userAvatar(user);
-
-        final selected =
-            _isSelected(user);
+        final id = _userId(user);
+        final name = _userName(user);
+        final phone = _userPhone(user);
+        final avatarUrl = _userAvatar(user);
+        final selected = _isSelected(user);
 
         return ListTile(
-          enabled:
-              !_creatingGroup,
-          contentPadding:
-              const EdgeInsets
-                  .symmetric(
+          enabled: !_creatingGroup,
+          contentPadding: const EdgeInsets.symmetric(
             horizontal: 18,
             vertical: 5,
           ),
-
-          leading:
-              _UserAvatar(
+          leading: _UserAvatar(
             name: name,
-            avatarUrl:
-                avatarUrl,
+            avatarUrl: avatarUrl,
           ),
-
           title: Text(
             name,
             maxLines: 1,
-            overflow:
-                TextOverflow
-                    .ellipsis,
-            style:
-                const TextStyle(
-              fontWeight:
-                  FontWeight
-                      .w700,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontWeight: FontWeight.w700,
             ),
           ),
-
-          subtitle:
-              phone.isEmpty
-                  ? null
-                  : Text(
-                      phone,
-                      maxLines:
-                          1,
-                      overflow:
-                          TextOverflow
-                              .ellipsis,
-                      style:
-                          TextStyle(
-                        color:
-                            secondaryTextColor,
-                      ),
-                    ),
-
-          trailing:
-              AnimatedContainer(
-            duration:
-                const Duration(
-              milliseconds:
-                  150,
+          subtitle: phone.isEmpty
+              ? null
+              : Text(
+                  phone,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: secondaryTextColor,
+                  ),
+                ),
+          trailing: AnimatedContainer(
+            duration: const Duration(
+              milliseconds: 150,
             ),
             width: 27,
             height: 27,
-            decoration:
-                BoxDecoration(
-              color:
-                  selected
-                      ? const Color(
-                          0xFF1877F2,
-                        )
-                      : Colors
-                          .transparent,
-              shape:
-                  BoxShape
-                      .circle,
-              border:
-                  Border.all(
-                color:
-                    selected
-                        ? const Color(
-                            0xFF1877F2,
-                          )
-                        : secondaryTextColor,
-                width:
-                    1.8,
+            decoration: BoxDecoration(
+              color: selected
+                  ? const Color(0xFF1877F2)
+                  : Colors.transparent,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: selected
+                    ? const Color(0xFF1877F2)
+                    : secondaryTextColor,
+                width: 1.8,
               ),
             ),
-            child:
-                selected
-                    ? const Icon(
-                        Icons
-                            .check_rounded,
-                        color:
-                            Colors.white,
-                        size:
-                            18,
-                      )
-                    : null,
+            child: selected
+                ? const Icon(
+                    Icons.check_rounded,
+                    color: Colors.white,
+                    size: 18,
+                  )
+                : null,
           ),
-
-          onTap:
-              id == null
-                  ? null
-                  : () {
-                      _toggleUser(
-                        user,
-                      );
-                    },
+          onTap: id == null
+              ? null
+              : () {
+                  _toggleUser(user);
+                },
         );
       },
     );

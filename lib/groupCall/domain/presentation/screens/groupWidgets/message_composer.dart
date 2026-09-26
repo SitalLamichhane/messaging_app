@@ -11,6 +11,7 @@ import 'package:record/record.dart';
 class MessageComposer extends StatefulWidget {
   final bool sending;
   final Future<void> Function(String text) onSendText;
+  final ValueChanged<String>? onTypingChanged;
 
   /// type must be: image, video, audio, or file.
   final Future<void> Function(
@@ -24,6 +25,7 @@ class MessageComposer extends StatefulWidget {
     required this.sending,
     required this.onSendText,
     required this.onSendMedia,
+    this.onTypingChanged,
   });
 
   @override
@@ -68,6 +70,7 @@ class _MessageComposerState extends State<MessageComposer> {
     if (text.isEmpty) return;
 
     _controller.clear();
+    widget.onTypingChanged?.call('');
 
     try {
       await widget.onSendText(text);
@@ -113,6 +116,7 @@ class _MessageComposerState extends State<MessageComposer> {
         offset: start + emoji.emoji.length,
       ),
     );
+    widget.onTypingChanged?.call(updated);
   }
 
   Future<void> _pickGalleryImages() async {
@@ -129,6 +133,7 @@ class _MessageComposerState extends State<MessageComposer> {
 
       final caption = _controller.text.trim();
       _controller.clear();
+      widget.onTypingChanged?.call('');
 
       try {
         await widget.onSendMedia(files, caption, 'image');
@@ -158,6 +163,7 @@ class _MessageComposerState extends State<MessageComposer> {
 
       final caption = _controller.text.trim();
       _controller.clear();
+      widget.onTypingChanged?.call('');
 
       try {
         await widget.onSendMedia([file], caption, 'image');
@@ -186,6 +192,7 @@ class _MessageComposerState extends State<MessageComposer> {
 
       final caption = _controller.text.trim();
       _controller.clear();
+      widget.onTypingChanged?.call('');
 
       try {
         await widget.onSendMedia([file], caption, 'video');
@@ -228,6 +235,7 @@ class _MessageComposerState extends State<MessageComposer> {
 
       final caption = _controller.text.trim();
       _controller.clear();
+      widget.onTypingChanged?.call('');
 
       try {
         await widget.onSendMedia(files, caption, 'file');
@@ -480,6 +488,7 @@ class _MessageComposerState extends State<MessageComposer> {
 
   @override
   void dispose() {
+    widget.onTypingChanged?.call('');
     _recordTimer?.cancel();
     _focusNode.removeListener(_handleFocus);
     _focusNode.dispose();
@@ -652,7 +661,8 @@ class _MessageComposerState extends State<MessageComposer> {
                         vertical: 12,
                       ),
                     ),
-                    onChanged: (_) {
+                    onChanged: (value) {
+                      widget.onTypingChanged?.call(value);
                       if (mounted) setState(() {});
                     },
                   ),

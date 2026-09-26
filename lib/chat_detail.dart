@@ -77,6 +77,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final Set<String> _hiddenMessageIds = {};
 
   Timer? _recordTicker;
+  Timer? _typingStopTimer;
+  bool _sentTypingState = false;
   Duration _recordDuration = Duration.zero;
   String? _currentRecordPath;
   int _lastRenderedMessageCount = 0;
@@ -619,6 +621,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         conversationId: conversationId,
       );
 
+      // The backend already supports read_message over this socket.
+      // Mark the loaded incoming messages read now that the socket is ready.
+      provider.markLoadedIncomingMessagesRead(conversationId);
+
       final currentUserId = await ApiClient.storage.read(key: 'user_id');
 
       if (mounted) {
@@ -641,9 +647,49 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
   }
 
+  void _handleTypingChanged(String value) {
+    final typing = value.trim().isNotEmpty;
+
+    _typingStopTimer?.cancel();
+
+    if (typing && !_sentTypingState) {
+      _sentTypingState = true;
+      _chatProvider.sendSocketTyping(typing: true);
+    }
+
+    if (!typing) {
+      _stopTyping();
+      return;
+    }
+
+    // Messenger-like debounce: stop typing after the user pauses.
+    _typingStopTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (!mounted) return;
+      _stopTyping();
+    });
+  }
+
+  void _stopTyping() {
+    _typingStopTimer?.cancel();
+    _typingStopTimer = null;
+
+    if (!_sentTypingState) return;
+
+    _sentTypingState = false;
+    _chatProvider.sendSocketTyping(typing: false);
+  }
+
   @override
   void dispose() {
     _recordTicker?.cancel();
+    _typingStopTimer?.cancel();
+
+    if (_sentTypingState) {
+      _chatProvider.sendSocketTyping(typing: false);
+    }
+
+    _chatProvider.disconnectSocket();
+
     _messageController.dispose();
     _scrollController.dispose();
     _recorder.dispose();
@@ -851,11 +897,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     final provider = _chatProvider;
     _messageController.clear();
-
-    // IMPORTANT:
-    // Do not call sendSocketTyping() here until your backend consumer has
-    // a separate typing handler. In your logs, typing socket events were being
-    // broadcast back as blank "new_message" objects with text: "".
+    _stopTyping();
 
     try {
       if (_replyingTo != null) {
@@ -3795,6 +3837,23 @@ Future<void> _startCall(bool isVideo) async {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (_chatProvider.isTyping)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 6),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    (_chatProvider.typingUserName ?? '').trim().isNotEmpty
+                        ? '${_chatProvider.typingUserName} is typing…'
+                        : '${_chatDisplayName()} is typing…',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: Color(0xFF1877F2),
+                    ),
+                  ),
+                ),
+              ),
             if (_isSendingMedia)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
@@ -3920,15 +3979,9 @@ Future<void> _startCall(bool isVideo) async {
                               keyboardType: TextInputType.multiline,
                               textInputAction: TextInputAction.newline,
                               onSubmitted: null,
-                              onChanged: (_) {
+                              onChanged: (value) {
                                 setState(() {});
-
-                                // Disabled for now: your backend is treating typing
-                                // socket events as blank messages. Re-enable only
-                                // after the backend consumer handles typing separately.
-                                // _chatProvider.sendSocketTyping(
-                                //   typing: _messageController.text.trim().isNotEmpty,
-                                // );
+                                _handleTypingChanged(value);
                               },
                               onTap: () {
                                 if (_showEmoji) {
@@ -4165,11 +4218,31 @@ Future<void> _startCall(bool isVideo) async {
     );
   }
 
+  bool _isMessageSeenNow(ChatMessage message) {
+    if (!message.isMe) return false;
+
+    // Always read the latest receipt state directly from ChatProvider.
+    // This avoids rendering a stale ChatMessage instance after a realtime
+    // read_message event replaces the message with copyWith(isSeen: true).
+    try {
+      final latest = _chatProvider
+          .getMessagesForChat(widget.chat.id)
+          .where((m) => m.id.toString() == message.id.toString())
+          .cast<ChatMessage?>()
+          .firstWhere((m) => m != null, orElse: () => null);
+
+      return latest?.isSeen ?? message.isSeen;
+    } catch (_) {
+      return message.isSeen;
+    }
+  }
+
   Widget _buildMessageItem({
     required ChatMessage message,
     required int index,
     required bool isDark,
   }) {
+    final isSeenNow = _isMessageSeenNow(message);
     final showAvatar = !message.isMe &&
         (index == _messages.length - 1 ||
             _messages[index + 1].isMe ||
@@ -4311,12 +4384,33 @@ Future<void> _startCall(bool isVideo) async {
                           SizedBox(height: reaction == null ? 4 : 18),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 6),
-                            child: Text(
-                              _time(message.sentAt),
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280),
-                              ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  _time(message.sentAt),
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isDark
+                                        ? const Color(0xFF94A3B8)
+                                        : const Color(0xFF6B7280),
+                                  ),
+                                ),
+                                if (message.isMe) ...[
+                                  const SizedBox(width: 4),
+                                  Icon(
+                                    isSeenNow
+                                        ? Icons.done_all_rounded
+                                        : Icons.done_rounded,
+                                    size: 15,
+                                    color: isSeenNow
+                                        ? const Color(0xFF1877F2)
+                                        : (isDark
+                                            ? const Color(0xFF94A3B8)
+                                            : const Color(0xFF6B7280)),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ],
@@ -4391,7 +4485,7 @@ Future<void> _startCall(bool isVideo) async {
                 final message = _messages[index];
 
                 return RepaintBoundary(
-                  key: ValueKey('message_${message.id}'),
+                  key: ValueKey('message_${message.id}_${message.isSeen}'),
                   child: _buildMessageItem(
                     message: message,
                     index: index,

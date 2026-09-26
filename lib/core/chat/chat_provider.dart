@@ -11,6 +11,7 @@ class ChatProvider extends ChangeNotifier {
   bool isLoading = false;
   bool isSending = false;
   bool isTyping = false;
+  String? typingUserName;
   String? error;
 
   int? currentUserId;
@@ -192,8 +193,19 @@ class ChatProvider extends ChangeNotifier {
     socket.connect(
       conversationId: conversationId,
       onMessage: (data) async {
-        final action = data['action']?.toString();
-        final type = data['type']?.toString();
+        final action = (data['action'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        final type = (data['type'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+
+        debugPrint(
+          'PRIVATE CHAT WS EVENT conversation=$conversationId '
+          'action=$action type=$type data=$data',
+        );
 
         if (_isReactionPayload(data)) {
           _applyReactionPayload(
@@ -219,8 +231,29 @@ class ChatProvider extends ChangeNotifier {
           return;
         }
 
-        if (action == 'new_message' || type == 'message') {
-          final rawMessage = data['message'] ?? data;
+        // Backend/socket implementations commonly use either:
+        //   {action: new_message, message: {...}}
+        //   {type: new_message, message: {...}}
+        //   {type: message, message: {...}}
+        // Accept all of them. The old code did NOT accept type=new_message,
+        // which caused 1-to-1 messages to be saved but not displayed live.
+        if (action == 'new_message' ||
+            action == 'message' ||
+            type == 'new_message' ||
+            type == 'message') {
+          dynamic rawMessage = data['message'] ?? data['data'] ?? data;
+
+          // Some servers wrap the actual message one level deeper.
+          if (rawMessage is Map && rawMessage['message'] is Map) {
+            rawMessage = rawMessage['message'];
+          }
+
+          if (rawMessage is! Map) {
+            debugPrint('PRIVATE CHAT WS: invalid message payload: $rawMessage');
+            return;
+          }
+
+          rawMessage = Map<String, dynamic>.from(rawMessage);
 
           if (_isReactionPayload(rawMessage)) {
             _applyReactionPayload(
@@ -249,23 +282,95 @@ class ChatProvider extends ChangeNotifier {
             (m) => m.id == message.id,
           );
 
-          if (alreadyExists) return;
+          if (alreadyExists) {
+            // The global socket may have inserted the same server message first.
+            // Keep the conversation preview fresh and force listeners to rebuild.
+            _updateConversationPreviewFromMessage(conversationId, message);
+            return;
+          }
 
           _addLocalMessage(conversationId, message);
+
+          if (!message.isMe) {
+            final serverMessageId = int.tryParse(message.id);
+            if (serverMessageId != null && serverMessageId > 0) {
+              socket.send({
+                'action': 'read_message',
+                'message_id': serverMessageId,
+              });
+            }
+          }
+
           return;
         }
 
         if (action == 'typing' || type == 'typing') {
-          final senderId = data['sender_id']?.toString();
+          final rawUser = data['user'];
 
-          if (senderId != myIdString) {
+          final senderId = rawUser is Map
+              ? rawUser['id']?.toString()
+              : (data['user_id'] ?? data['sender_id'])?.toString();
+
+          if (senderId != null && senderId != myIdString) {
             isTyping = data['is_typing'] == true;
+
+            if (isTyping) {
+              final rawName = rawUser is Map
+                  ? (rawUser['full_name'] ??
+                      rawUser['name'] ??
+                      rawUser['phone'])
+                  : (data['full_name'] ??
+                      data['name'] ??
+                      data['phone']);
+
+              final name = rawName?.toString().trim() ?? '';
+              typingUserName = name.isEmpty ? null : name;
+            } else {
+              typingUserName = null;
+            }
+
             notifyListeners();
           }
           return;
         }
 
-        if (action == 'seen' || type == 'seen') {
+        // Your existing Django consumer broadcasts:
+        // {action: 'read_message', message_id: ..., user_id: ...}
+        if (action == 'read_message' ||
+            type == 'read_message' ||
+            action == 'seen' ||
+            type == 'seen') {
+          final messageId =
+              (data['message_id'] ?? data['id'])?.toString();
+          final readerId =
+              (data['user_id'] ?? data['reader_id'])?.toString();
+
+          debugPrint(
+            'READ RECEIPT RECEIVED '
+            'message=$messageId reader=$readerId me=$myIdString',
+          );
+
+          if (messageId != null &&
+              messageId.isNotEmpty &&
+              readerId != myIdString) {
+            final key = '$conversationId';
+            final list = conversationMessages[key];
+
+            if (list != null) {
+              final index =
+                  list.indexWhere((m) => m.id == messageId);
+
+              if (index != -1 && list[index].isMe) {
+                list[index] =
+                    list[index].copyWith(isSeen: true);
+
+                debugPrint(
+                  'MESSAGE MARKED SEEN LOCALLY id=$messageId',
+                );
+              }
+            }
+          }
+
           notifyListeners();
           return;
         }
@@ -276,6 +381,7 @@ class ChatProvider extends ChangeNotifier {
       },
       onDisconnected: () {
         isTyping = false;
+        typingUserName = null;
         notifyListeners();
       },
     );
@@ -285,6 +391,7 @@ class ChatProvider extends ChangeNotifier {
     socket.disconnect();
     connectedConversationId = null;
     isTyping = false;
+    typingUserName = null;
 
     Future.microtask(() {
       notifyListeners();
@@ -298,6 +405,63 @@ class ChatProvider extends ChangeNotifier {
       senderId: currentUserId!,
       isTyping: typing,
     );
+  }
+
+  /// Called by ChatDetailScreen after the private conversation socket connects.
+  ///
+  /// Uses the EXISTING Django ChatConsumer action:
+  ///   {"action": "read_message", "message_id": <id>}
+  ///
+  /// No backend change is required.
+  Future<void> markLoadedIncomingMessagesRead(
+    int conversationId,
+  ) async {
+    // ChatDetailScreen can call this immediately after connectSocket().
+    // The websocket handshake may still be finishing at that moment.
+    // Wait briefly instead of silently dropping the read receipts.
+    for (int attempt = 0; attempt < 20; attempt++) {
+      if (socket.isConnected &&
+          socket.conversationId == conversationId) {
+        break;
+      }
+
+      await Future.delayed(
+        const Duration(milliseconds: 150),
+      );
+    }
+
+    if (!socket.isConnected ||
+        socket.conversationId != conversationId) {
+      debugPrint(
+        'READ RECEIPT: socket not connected '
+        'conversation=$conversationId',
+      );
+      return;
+    }
+
+    final messages =
+        conversationMessages['$conversationId'] ??
+            const <ChatMessage>[];
+
+    for (final message in messages) {
+      if (message.isMe) continue;
+
+      final messageId = int.tryParse(message.id);
+      if (messageId == null || messageId <= 0) {
+        continue;
+      }
+
+      final sent = socket.send({
+        'action': 'read_message',
+        'message_id': messageId,
+      });
+
+      debugPrint(
+        'READ RECEIPT SENT '
+        'conversation=$conversationId '
+        'message=$messageId sent=$sent',
+      );
+    }
   }
 
   Future<void> loadConversations() async {
@@ -454,88 +618,73 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<void> sendText({
-  required int conversationId,
-  required String text,
-}) async {
-  if (text.trim().isEmpty) return;
+    required int conversationId,
+    required String text,
+  }) async {
+    final cleanText = text.trim();
+    if (cleanText.isEmpty) return;
 
-  final cleanText = text.trim();
+    // Always add the outgoing text immediately. This guarantees the sender sees
+    // the message even if the WebSocket echo is delayed or has a different event
+    // envelope. _addLocalMessage() will later merge the real server message with
+    // this temporary one when the echo arrives.
+    final temp = ChatMessage(
+      id: DateTime.now().microsecondsSinceEpoch.toString(),
+      type: MessageType.text,
+      text: cleanText,
+      isMe: true,
+      sentAt: DateTime.now(),
+      isSeen: false,
+    );
 
-  // Make sure this socket belongs to this conversation.
-  final canSendBySocket =
-      socket.isConnected &&
-      socket.conversationId == conversationId;
+    _addLocalMessage(conversationId, temp);
 
-  if (canSendBySocket) {
-    final sent = socket.send({
-      'action': 'send_message',
-      'type': 'send_message',
-      'message': cleanText,
-    });
+    final canSendBySocket =
+        socket.isConnected && socket.conversationId == conversationId;
 
-    if (sent) {
-      debugPrint(
-        'MESSAGE SENT THROUGH WEBSOCKET '
-        'conversation=$conversationId',
+    if (canSendBySocket) {
+      final sent = socket.send({
+        // Your existing Django ChatConsumer reads data['text'].
+        'action': 'send_message',
+        'text': cleanText,
+        'message_type': 'text',
+      });
+
+      if (sent) {
+        debugPrint(
+          'MESSAGE SENT THROUGH WEBSOCKET conversation=$conversationId',
+        );
+        return;
+      }
+    }
+
+    // WebSocket was unavailable, so persist through HTTP instead.
+    debugPrint('CHAT WS NOT AVAILABLE - USING HTTP FALLBACK');
+
+    _setSending(true);
+    error = null;
+
+    try {
+      final response = await ChatApi.sendText(
+        conversationId: conversationId,
+        text: cleanText,
       );
 
-      // Don't add an optimistic message here.
-      // ChatConsumer broadcasts the saved message back to this
-      // conversation, and connectSocket() will add that real
-      // server message.
-      return;
+      final realMessage = await _mapMessage(response.data);
+      _syncMessageMetaFromJson(
+        conversationId: conversationId,
+        messageId: realMessage.id,
+        json: response.data,
+      );
+      _replaceMessage(conversationId, temp.id, realMessage);
+    } catch (e) {
+      error = e.toString();
+      debugPrint('SEND TEXT ERROR: $e');
+      notifyListeners();
+    } finally {
+      _setSending(false);
     }
   }
-
-  // ----------------------------------------------------------
-  // FALLBACK
-  // ----------------------------------------------------------
-  // If the WebSocket isn't ready, use your existing HTTP API.
-  // This prevents the user from losing the message.
-  // ----------------------------------------------------------
-
-  debugPrint(
-    'CHAT WS NOT AVAILABLE - USING HTTP FALLBACK',
-  );
-
-  final temp = ChatMessage(
-    id: DateTime.now().microsecondsSinceEpoch.toString(),
-    type: MessageType.text,
-    text: cleanText,
-    isMe: true,
-    sentAt: DateTime.now(),
-    isSeen: false,
-  );
-
-  _addLocalMessage(
-    conversationId,
-    temp,
-  );
-
-  _setSending(true);
-  error = null;
-
-  try {
-    final response = await ChatApi.sendText(
-      conversationId: conversationId,
-      text: cleanText,
-    );
-
-    final realMessage =
-        await _mapMessage(response.data);
-
-    _replaceMessage(
-      conversationId,
-      temp.id,
-      realMessage,
-    );
-  } catch (e) {
-    error = e.toString();
-    notifyListeners();
-  }
-
-  _setSending(false);
-}
 
   Future<void> sendReply({
     required int conversationId,

@@ -142,6 +142,7 @@ class ChatApiService {
     required String messageType,
     String text = '',
     int? replyToId,
+    ProgressCallback? onSendProgress,
   }) async {
     if (files.isEmpty) {
       throw const ChatApiException(
@@ -193,6 +194,7 @@ class ChatApiService {
       final response = await dio.post(
         '/chat/conversations/$conversationId/send/',
         data: form,
+        onSendProgress: onSendProgress,
       );
 
       return _parseMessage(response.data);

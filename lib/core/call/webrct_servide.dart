@@ -59,11 +59,11 @@ class WebRTCService {
   /// Do not commit long-lived TURN passwords to the source repository.
   static List<String> turnUrls = _readEnvironmentTurnUrls();
   static String turnUsername = const String.fromEnvironment(
-    'TURN_USERNAME',
+    '000000002098111189',
     defaultValue: '',
   );
   static String turnCredential = const String.fromEnvironment(
-    'TURN_CREDENTIAL',
+    '3EIGJcpdpfaciEtyhtMm5h7jeU4=',
     defaultValue: '',
   );
 

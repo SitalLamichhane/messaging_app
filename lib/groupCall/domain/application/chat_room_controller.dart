@@ -28,6 +28,16 @@ class ChatRoomController extends ChangeNotifier {
 
   String? _error;
 
+  final Map<int, String> _typingUsers = <int, String>{};
+  final Map<int, Timer> _typingExpiryTimers = <int, Timer>{};
+  Timer? _outgoingTypingTimer;
+  bool _outgoingTyping = false;
+
+  // User directory learned from message sender data.
+  // This lets read receipts show real avatars without changing the backend.
+  final Map<int, String> _userAvatarById = <int, String>{};
+  final Map<int, String> _userNameById = <int, String>{};
+
   ChatRoomController({
     required this.conversationId,
     required this.currentUserId,
@@ -45,6 +55,150 @@ class ChatRoomController extends ChangeNotifier {
   bool get initialized => _initialized;
 
   String? get error => _error;
+
+  Map<int, String> get typingUsers =>
+      Map<int, String>.unmodifiable(_typingUsers);
+
+  bool get someoneTyping => _typingUsers.isNotEmpty;
+
+  String avatarForUser(int userId) => _userAvatarById[userId] ?? '';
+  String nameForUser(int userId) => _userNameById[userId] ?? 'User $userId';
+
+  void _rememberUser(ChatMessageDto message) {
+    if (message.senderId <= 0) return;
+    final name = message.senderName.trim();
+    final avatar = message.senderAvatar.trim();
+    if (name.isNotEmpty) _userNameById[message.senderId] = name;
+    if (avatar.isNotEmpty) _userAvatarById[message.senderId] = avatar;
+  }
+
+  String get typingLabel {
+    final names = _typingUsers.values
+        .where((name) => name.trim().isNotEmpty)
+        .toList(growable: false);
+
+    if (names.isEmpty) return '';
+    if (names.length == 1) return '${names.first} is typing…';
+    if (names.length == 2) return '${names[0]} and ${names[1]} are typing…';
+    return '${names[0]}, ${names[1]} and ${names.length - 2} others are typing…';
+  }
+
+  void setTypingFromText(String text) {
+    if (_disposed) return;
+
+    final typing = text.trim().isNotEmpty;
+    _outgoingTypingTimer?.cancel();
+    _outgoingTypingTimer = null;
+
+    if (!typing) {
+      unawaited(stopTyping());
+      return;
+    }
+
+    if (!_outgoingTyping) {
+      _outgoingTyping = true;
+      unawaited(_sendTyping(true));
+    }
+
+    _outgoingTypingTimer =
+        Timer(const Duration(milliseconds: 1400), () {
+      if (_disposed) return;
+      unawaited(stopTyping());
+    });
+  }
+
+  Future<void> stopTyping() async {
+    _outgoingTypingTimer?.cancel();
+    _outgoingTypingTimer = null;
+
+    if (!_outgoingTyping) return;
+    _outgoingTyping = false;
+    await _sendTyping(false);
+  }
+
+  Future<void> _sendTyping(bool typing) async {
+    if (_disposed ||
+        !realtime.connected ||
+        realtime.conversationId != conversationId) {
+      return;
+    }
+
+    try {
+      await realtime.sendJson({
+        'action': 'typing',
+        'is_typing': typing,
+      });
+
+      debugPrint(
+        '[CHAT ROOM] typing sent '
+        'conversation=$conversationId typing=$typing',
+      );
+    } catch (error) {
+      debugPrint('[CHAT ROOM] typing send failed: $error');
+    }
+  }
+
+  void _handleTyping(Map<String, dynamic> data) {
+    final rawUser = data['user'];
+    final user = rawUser is Map
+        ? Map<String, dynamic>.from(rawUser)
+        : <String, dynamic>{};
+
+    final userId = _intValue(
+      user['id'] ??
+          data['user_id'] ??
+          data['sender_id'] ??
+          (rawUser is! Map ? rawUser : null),
+    );
+
+    debugPrint(
+      '[CHAT ROOM] typing event userId=$userId '
+      'currentUserId=$currentUserId data=$data',
+    );
+
+    if (userId == null || userId == currentUserId) return;
+
+    final rawTyping = data['is_typing'] ?? data['typing'];
+    final isTyping = rawTyping == true ||
+        rawTyping == 1 ||
+        rawTyping?.toString().toLowerCase() == 'true';
+
+    _typingExpiryTimers[userId]?.cancel();
+    _typingExpiryTimers.remove(userId);
+
+    if (!isTyping) {
+      if (_typingUsers.remove(userId) != null) _safeNotify();
+      return;
+    }
+
+    String name = '';
+    for (final value in [
+      user['full_name'],
+      user['name'],
+      user['username'],
+      user['phone'],
+      data['full_name'],
+      data['name'],
+      data['phone'],
+    ]) {
+      final candidate = value?.toString().trim() ?? '';
+      if (candidate.isNotEmpty && candidate.toLowerCase() != 'null') {
+        name = candidate;
+        break;
+      }
+    }
+    if (name.isEmpty) name = 'Someone';
+
+    _typingUsers[userId] = name;
+    _typingExpiryTimers[userId] =
+        Timer(const Duration(seconds: 5), () {
+      if (_disposed) return;
+      _typingExpiryTimers.remove(userId);
+      if (_typingUsers.remove(userId) != null) _safeNotify();
+    });
+
+    _safeNotify();
+  }
 
   // ============================================================
   // NOTIFY
@@ -183,6 +337,7 @@ class ChatRoomController extends ChangeNotifier {
       }
 
       for (final message in loaded) {
+        _rememberUser(message);
         if (message.id <= 0) {
           continue;
         }
@@ -516,6 +671,10 @@ class ChatRoomController extends ChangeNotifier {
     );
 
     switch (type) {
+      case 'typing':
+        _handleTyping(event.data);
+        break;
+
       /*
        * New message.
        */
@@ -566,6 +725,7 @@ class ChatRoomController extends ChangeNotifier {
       /*
        * Read / seen receipt.
        */
+      case 'read_message':
       case 'message_read':
       case 'message_seen':
       case 'chat_message_read':
@@ -638,6 +798,8 @@ class ChatRoomController extends ChangeNotifier {
         json,
       );
 
+      _rememberUser(message);
+
       if (message.id <= 0) {
         return;
       }
@@ -671,44 +833,39 @@ class ChatRoomController extends ChangeNotifier {
   Future<void> _markIncomingRead(
     int messageId,
   ) async {
-    final success =
-        await api.markMessageRead(
-      messageId,
-    );
+    if (_disposed) return;
 
-    if (_disposed || !success) {
-      return;
+    bool sentThroughSocket = false;
+
+    if (realtime.connected &&
+        realtime.conversationId == conversationId) {
+      try {
+        await realtime.sendJson({
+          'action': 'read_message',
+          'message_id': messageId,
+        });
+        sentThroughSocket = true;
+      } catch (error) {
+        debugPrint('[CHAT ROOM] websocket read receipt failed: $error');
+      }
     }
 
-    /*
-     * This represents the state from THIS user's
-     * perspective. It also keeps the loaded incoming
-     * object consistent.
-     *
-     * The sender needs a backend websocket read
-     * receipt to turn its own ticks blue.
-     */
-    final index =
-        _indexOfMessage(messageId);
-
-    if (index == -1) {
-      return;
+    if (!sentThroughSocket) {
+      await api.markMessageRead(messageId);
     }
 
-    final message =
-        _messages[index];
+    if (_disposed) return;
 
-    if (message.senderId ==
-        currentUserId) {
-      return;
-    }
+    final index = _indexOfMessage(messageId);
+    if (index == -1) return;
 
-    _messages[index] =
-        message.copyWith(
+    final message = _messages[index];
+    if (message.senderId == currentUserId) return;
+
+    _messages[index] = message.copyWith(
       delivered: true,
       seen: true,
     );
-
     _safeNotify();
   }
 
@@ -815,46 +972,61 @@ class ChatRoomController extends ChangeNotifier {
   void _handleSeen(
     Map<String, dynamic> data,
   ) {
-    final ids =
-        _extractMessageIds(data);
+    final ids = _extractMessageIds(data);
+    if (ids.isEmpty) return;
 
-    if (ids.isEmpty) {
-      return;
+    final rawUser = data['user'];
+    final readerId = _intValue(
+      data['user_id'] ??
+          data['reader_id'] ??
+          (rawUser is Map ? rawUser['id'] : rawUser),
+    );
+
+    if (rawUser is Map && readerId != null && readerId > 0) {
+      final name = (rawUser['full_name'] ??
+              rawUser['name'] ??
+              rawUser['username'] ??
+              rawUser['phone'] ??
+              '')
+          .toString()
+          .trim();
+      final avatar = (rawUser['profile_picture'] ??
+              rawUser['avatar'] ??
+              rawUser['profile_image'] ??
+              '')
+          .toString()
+          .trim();
+      if (name.isNotEmpty) _userNameById[readerId] = name;
+      if (avatar.isNotEmpty) _userAvatarById[readerId] = avatar;
     }
 
     bool changed = false;
 
     for (final id in ids) {
-      final index =
-          _indexOfMessage(id);
+      final index = _indexOfMessage(id);
+      if (index == -1) continue;
 
-      if (index == -1) {
-        continue;
+      final current = _messages[index];
+
+      // Only the sender needs "seen by" avatars on their own message.
+      if (current.senderId != currentUserId) continue;
+
+      final readers = <int>{...current.readByUserIds};
+      if (readerId != null &&
+          readerId > 0 &&
+          readerId != currentUserId) {
+        readers.add(readerId);
       }
 
-      final current =
-          _messages[index];
-
-      if (current.senderId !=
-          currentUserId) {
-        continue;
-      }
-
-      if (!current.seen ||
-          !current.delivered) {
-        _messages[index] =
-            current.copyWith(
-          delivered: true,
-          seen: true,
-        );
-
-        changed = true;
-      }
+      _messages[index] = current.copyWith(
+        delivered: true,
+        seen: true,
+        readByUserIds: readers.toList(growable: false),
+      );
+      changed = true;
     }
 
-    if (changed) {
-      _safeNotify();
-    }
+    if (changed) _safeNotify();
   }
 
   // ============================================================
@@ -986,6 +1158,26 @@ class ChatRoomController extends ChangeNotifier {
   void _markIncomingMessagesSeenLocally() {
     bool changed = false;
 
+    if (realtime.connected &&
+        realtime.conversationId == conversationId) {
+      for (final message in _messages) {
+        if (message.id <= 0 ||
+            message.senderId == 0 ||
+            message.senderId == currentUserId) {
+          continue;
+        }
+
+        unawaited(
+          realtime.sendJson({
+            'action': 'read_message',
+            'message_id': message.id,
+          }).catchError((Object error) {
+            debugPrint('[CHAT ROOM] history read receipt failed: $error');
+          }),
+        );
+      }
+    }
+
     for (int i = 0;
         i < _messages.length;
         i++) {
@@ -1063,7 +1255,16 @@ class ChatRoomController extends ChangeNotifier {
      * Once true, an older websocket or REST response
      * should not accidentally turn them false again.
      */
+    final mergedReaders = <int>{
+      ...oldMessage.readByUserIds,
+      ...newMessage.readByUserIds,
+    };
+
+    _rememberUser(newMessage);
+
     return newMessage.copyWith(
+      readByUserIds: mergedReaders.toList(growable: false),
+
       delivered:
           oldMessage.delivered ||
           newMessage.delivered,

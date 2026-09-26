@@ -1,8 +1,10 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:hiddenly/groupChat/domain/chat_message_model.dart';
 import 'package:just_audio/just_audio.dart';
+import 'package:video_player/video_player.dart';
 
 import 'image_viewer.dart';
 
@@ -10,12 +12,16 @@ class MessageBubble extends StatelessWidget {
   final ChatMessageDto message;
   final bool isMine;
   final VoidCallback? onDelete;
+  final String Function(int userId)? readerAvatarResolver;
+  final String Function(int userId)? readerNameResolver;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.isMine,
     this.onDelete,
+    this.readerAvatarResolver,
+    this.readerNameResolver,
   });
 
   @override
@@ -39,10 +45,19 @@ class MessageBubble extends StatelessWidget {
         ? const Color(0xFF8696A0)
         : const Color(0xFF667781);
 
-    return Align(
-      alignment:
-          isMine ? Alignment.centerRight : Alignment.centerLeft,
-      child: GestureDetector(
+    final visibleReaderIds = message.readByUserIds
+        .where((id) => id > 0 && id != message.senderId)
+        .toList(growable: false);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment:
+          isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      children: [
+        Align(
+          alignment:
+              isMine ? Alignment.centerRight : Alignment.centerLeft,
+          child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onLongPress: isMine && !message.isDeleted
             ? () => _showDeleteSheet(context)
@@ -96,6 +111,17 @@ class MessageBubble extends StatelessWidget {
           ),
         ),
       ),
+        ),
+        if (isMine && visibleReaderIds.isNotEmpty && !message.isDeleted)
+          Padding(
+            padding: const EdgeInsets.only(right: 10, top: 2, bottom: 2),
+            child: _SeenByAvatars(
+              userIds: visibleReaderIds,
+              avatarResolver: readerAvatarResolver,
+              nameResolver: readerNameResolver,
+            ),
+          ),
+      ],
     );
   }
 
@@ -139,6 +165,9 @@ class MessageBubble extends StatelessWidget {
         if (message.attachments.isNotEmpty)
           AttachmentGrid(
             attachments: message.attachments,
+            isUploading: message.isUploading,
+            uploadProgress: message.uploadProgress,
+            uploadFailed: message.uploadFailed,
           ),
 
         if (message.text.trim().isNotEmpty)
@@ -245,6 +274,122 @@ class MessageBubble extends StatelessWidget {
     }
 
     return colors[name.hashCode.abs() % colors.length];
+  }
+}
+
+
+class _SeenByAvatars extends StatelessWidget {
+  final List<int> userIds;
+  final String Function(int userId)? avatarResolver;
+  final String Function(int userId)? nameResolver;
+
+  const _SeenByAvatars({
+    required this.userIds,
+    this.avatarResolver,
+    this.nameResolver,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final unique = userIds.toSet().toList(growable: false);
+    final shown = unique.take(3).toList(growable: false);
+    final extra = unique.length - shown.length;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 22,
+          width: shown.isEmpty ? 0 : 18.0 + ((shown.length - 1) * 13.0),
+          child: Stack(
+            clipBehavior: Clip.none,
+            children: [
+              for (int i = 0; i < shown.length; i++)
+                Positioned(
+                  right: i * 13.0,
+                  child: _SeenAvatar(
+                    userId: shown[i],
+                    avatarUrl: avatarResolver?.call(shown[i]) ?? '',
+                    name: nameResolver?.call(shown[i]) ?? 'User ${shown[i]}',
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (extra > 0) ...[
+          const SizedBox(width: 4),
+          Text(
+            '+$extra',
+            style: const TextStyle(
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+              color: Color(0xFF667781),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _SeenAvatar extends StatelessWidget {
+  final int userId;
+  final String avatarUrl;
+  final String name;
+
+  const _SeenAvatar({
+    required this.userId,
+    required this.avatarUrl,
+    required this.name,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final url = _profileUrl(avatarUrl);
+    final initial = name.trim().isEmpty
+        ? '?'
+        : name.trim().characters.first.toUpperCase();
+
+    return Tooltip(
+      message: 'Seen by $name',
+      child: Container(
+        width: 22,
+        height: 22,
+        padding: const EdgeInsets.all(1.5),
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: Theme.of(context).scaffoldBackgroundColor,
+        ),
+        child: CircleAvatar(
+          radius: 9.5,
+          backgroundColor: const Color(0xFFDDE3E7),
+          foregroundImage: url.isNotEmpty ? NetworkImage(url) : null,
+          onForegroundImageError: url.isNotEmpty ? (_, __) {} : null,
+          child: url.isEmpty
+              ? Text(
+                  initial,
+                  style: const TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF44515A),
+                  ),
+                )
+              : null,
+        ),
+      ),
+    );
+  }
+
+  String _profileUrl(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty || value.toLowerCase() == 'null') return '';
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return value;
+    }
+    if (value.startsWith('/')) {
+      return 'https://hiddenly.org$value';
+    }
+    return 'https://hiddenly.org/$value';
   }
 }
 
@@ -419,113 +564,88 @@ class _MessageTicks extends StatelessWidget {
 
 class AttachmentGrid extends StatelessWidget {
   final List<ChatAttachmentDto> attachments;
+  final bool isUploading;
+  final double uploadProgress;
+  final bool uploadFailed;
 
   const AttachmentGrid({
     super.key,
     required this.attachments,
+    this.isUploading = false,
+    this.uploadProgress = 0,
+    this.uploadFailed = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (attachments.isEmpty) {
-      return const SizedBox.shrink();
-    }
+    if (attachments.isEmpty) return const SizedBox.shrink();
 
-    final images = attachments
-        .where(_isImage)
-        .toList();
-
-    final audios = attachments
-        .where(_isAudio)
-        .toList();
-
-    final files = attachments
-        .where(
-          (attachment) =>
-              !_isImage(attachment) &&
-              !_isAudio(attachment),
-        )
-        .toList();
+    final images = attachments.where(_isImage).toList();
+    final videos = attachments.where(_isVideo).toList();
+    final audios = attachments.where(_isAudio).toList();
+    final files = attachments.where((a) =>
+        !_isImage(a) && !_isVideo(a) && !_isAudio(a)).toList();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // =========================
-        // IMAGES
-        // =========================
-
-        if (images.isNotEmpty)
-          _ImageGrid(
-            images: images,
-          ),
+        if (images.isNotEmpty) _ImageGrid(images: images),
 
         if (images.isNotEmpty &&
-            (audios.isNotEmpty ||
-                files.isNotEmpty))
+            (videos.isNotEmpty || audios.isNotEmpty || files.isNotEmpty))
           const SizedBox(height: 4),
 
-        // =========================
-        // AUDIO / VOICE
-        // =========================
-
-        for (int i = 0;
-            i < audios.length;
-            i++) ...[
-          _AudioAttachmentTile(
-            attachment: audios[i],
+        for (int i = 0; i < videos.length; i++) ...[
+          _VideoAttachmentTile(
+            attachment: videos[i],
+            isUploading: isUploading,
+            uploadProgress: uploadProgress,
+            uploadFailed: uploadFailed,
           ),
-
-          if (i != audios.length - 1)
-            const SizedBox(height: 4),
+          if (i != videos.length - 1) const SizedBox(height: 4),
         ],
 
-        if (audios.isNotEmpty &&
-            files.isNotEmpty)
+        if (videos.isNotEmpty && (audios.isNotEmpty || files.isNotEmpty))
           const SizedBox(height: 4),
 
-        // =========================
-        // OTHER FILES
-        // =========================
+        for (int i = 0; i < audios.length; i++) ...[
+          _AudioAttachmentTile(attachment: audios[i]),
+          if (i != audios.length - 1) const SizedBox(height: 4),
+        ],
 
-        for (int i = 0;
-            i < files.length;
-            i++) ...[
-          _FileAttachmentTile(
-            attachment: files[i],
-          ),
+        if (audios.isNotEmpty && files.isNotEmpty)
+          const SizedBox(height: 4),
 
-          if (i != files.length - 1)
-            const SizedBox(height: 4),
+        for (int i = 0; i < files.length; i++) ...[
+          _FileAttachmentTile(attachment: files[i]),
+          if (i != files.length - 1) const SizedBox(height: 4),
         ],
       ],
     );
   }
 
-  static bool _isImage(
-    ChatAttachmentDto attachment,
-  ) {
-    return attachment.type ==
-            ChatMessageType.image ||
-        attachment.mimeType
-            .toLowerCase()
-            .startsWith('image/');
+  static bool _isImage(ChatAttachmentDto attachment) {
+    return attachment.type == ChatMessageType.image ||
+        attachment.mimeType.toLowerCase().startsWith('image/');
   }
 
-  static bool _isAudio(
-    ChatAttachmentDto attachment,
-  ) {
-    final mime =
-        attachment.mimeType
-            .toLowerCase()
-            .trim();
+  static bool _isVideo(ChatAttachmentDto attachment) {
+    final mime = attachment.mimeType.toLowerCase().trim();
+    final name = attachment.fileName.toLowerCase().trim();
+    return attachment.type == ChatMessageType.video ||
+        mime.startsWith('video/') ||
+        name.endsWith('.mp4') ||
+        name.endsWith('.mov') ||
+        name.endsWith('.m4v') ||
+        name.endsWith('.webm') ||
+        name.endsWith('.mkv') ||
+        name.endsWith('.avi');
+  }
 
-    final name =
-        attachment.fileName
-            .toLowerCase()
-            .trim();
-
-    return attachment.type ==
-            ChatMessageType.audio ||
+  static bool _isAudio(ChatAttachmentDto attachment) {
+    final mime = attachment.mimeType.toLowerCase().trim();
+    final name = attachment.fileName.toLowerCase().trim();
+    return attachment.type == ChatMessageType.audio ||
         mime.startsWith('audio/') ||
         name.endsWith('.m4a') ||
         name.endsWith('.mp3') ||
@@ -780,6 +900,443 @@ class _BrokenImage extends StatelessWidget {
     );
   }
 }
+class _VideoAttachmentTile extends StatefulWidget {
+  final ChatAttachmentDto attachment;
+  final bool isUploading;
+  final double uploadProgress;
+  final bool uploadFailed;
+
+  const _VideoAttachmentTile({
+    required this.attachment,
+    required this.isUploading,
+    required this.uploadProgress,
+    required this.uploadFailed,
+  });
+
+  @override
+  State<_VideoAttachmentTile> createState() => _VideoAttachmentTileState();
+}
+
+class _VideoAttachmentTileState extends State<_VideoAttachmentTile> {
+  VideoPlayerController? _controller;
+  bool _initializing = false;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initialize();
+  }
+
+  @override
+  void didUpdateWidget(covariant _VideoAttachmentTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.isUploading && !widget.isUploading && !widget.uploadFailed) {
+      _initialize();
+    }
+  }
+
+  Future<void> _initialize() async {
+    if (_controller != null || _initializing || widget.uploadFailed) return;
+
+    final local = widget.attachment.localPath.trim();
+    final remote = _mediaUrl(widget.attachment.url);
+
+    if (local.isEmpty && remote.isEmpty) return;
+
+    _initializing = true;
+    _failed = false;
+    if (mounted) setState(() {});
+
+    try {
+      final controller = local.isNotEmpty
+          ? VideoPlayerController.file(File(local))
+          : VideoPlayerController.networkUrl(Uri.parse(remote));
+
+      await controller.initialize();
+      controller.setLooping(false);
+      controller.addListener(_videoListener);
+
+      if (!mounted) {
+        controller.dispose();
+        return;
+      }
+
+      _controller = controller;
+    } catch (e) {
+      debugPrint('Video initialize error: $e');
+      _failed = true;
+    } finally {
+      _initializing = false;
+      if (mounted) setState(() {});
+    }
+  }
+
+  void _videoListener() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _toggle() async {
+    if (_controller == null) {
+      await _initialize();
+    }
+    final c = _controller;
+    if (c == null || !c.value.isInitialized) return;
+
+    if (c.value.position >= c.value.duration && c.value.duration > Duration.zero) {
+      await c.seekTo(Duration.zero);
+    }
+
+    c.value.isPlaying ? await c.pause() : await c.play();
+  }
+
+  Future<void> _openFullscreen() async {
+    if (_controller == null) await _initialize();
+    final c = _controller;
+    if (c == null || !c.value.isInitialized || !mounted) return;
+
+    final wasPlaying = c.value.isPlaying;
+    await c.pause();
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => _FullscreenVideoPage(
+          localPath: widget.attachment.localPath,
+          url: widget.attachment.url,
+          startAt: c.value.position,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    if (wasPlaying) await c.play();
+  }
+
+  String _time(Duration d) {
+    final total = d.inSeconds;
+    final h = total ~/ 3600;
+    final m = (total % 3600) ~/ 60;
+    final s = total % 60;
+    if (h > 0) {
+      return '$h:${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+    }
+    return '$m:${s.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_videoListener);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _controller;
+    final initialized = c?.value.isInitialized == true;
+    final playing = c?.value.isPlaying == true;
+    final progress = widget.uploadProgress.clamp(0.0, 1.0);
+    final percent = (progress * 100).round();
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(9),
+      child: Container(
+        width: 300,
+        color: Colors.black,
+        child: AspectRatio(
+          aspectRatio: initialized && c!.value.aspectRatio > 0
+              ? c.value.aspectRatio.clamp(0.65, 1.8).toDouble()
+              : 16 / 10,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              if (initialized)
+                VideoPlayer(c!)
+              else
+                const ColoredBox(
+                  color: Color(0xFF111111),
+                  child: Center(
+                    child: Icon(
+                      Icons.videocam_rounded,
+                      color: Colors.white38,
+                      size: 52,
+                    ),
+                  ),
+                ),
+
+              if (widget.isUploading)
+                Container(
+                  color: Colors.black54,
+                  alignment: Alignment.center,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 64,
+                        height: 64,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            CircularProgressIndicator(
+                              value: progress,
+                              strokeWidth: 5,
+                              backgroundColor: Colors.white24,
+                              color: Colors.white,
+                            ),
+                            Text(
+                              '$percent%',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      const Text(
+                        'Uploading video...',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else if (widget.uploadFailed)
+                Container(
+                  color: Colors.black54,
+                  alignment: Alignment.center,
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 42),
+                      SizedBox(height: 8),
+                      Text('Upload failed', style: TextStyle(color: Colors.white)),
+                    ],
+                  ),
+                )
+              else if (_initializing)
+                const Center(
+                  child: CircularProgressIndicator(color: Colors.white),
+                )
+              else if (_failed)
+                const Center(
+                  child: Text(
+                    'Unable to play video',
+                    style: TextStyle(color: Colors.white),
+                  ),
+                )
+              else if (initialized) ...[
+                Center(
+                  child: AnimatedOpacity(
+                    opacity: playing ? 0.0 : 1.0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Material(
+                      color: Colors.black54,
+                      shape: const CircleBorder(),
+                      child: InkWell(
+                        customBorder: const CircleBorder(),
+                        onTap: _toggle,
+                        child: const Padding(
+                          padding: EdgeInsets.all(13),
+                          child: Icon(
+                            Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 40,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 8,
+                  right: 8,
+                  bottom: 6,
+                  child: Container(
+                    padding: const EdgeInsets.fromLTRB(8, 4, 4, 4),
+                    decoration: BoxDecoration(
+                      color: Colors.black54,
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Row(
+                      children: [
+                        InkWell(
+                          onTap: _toggle,
+                          child: Icon(
+                            playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                            color: Colors.white,
+                            size: 25,
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Text(
+                          _time(c!.value.position),
+                          style: const TextStyle(color: Colors.white, fontSize: 10.5),
+                        ),
+                        Expanded(
+                          child: VideoProgressIndicator(
+                            c,
+                            allowScrubbing: true,
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
+                            colors: const VideoProgressColors(
+                              playedColor: Color(0xFF25D366),
+                              bufferedColor: Colors.white38,
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          _time(c.value.duration),
+                          style: const TextStyle(color: Colors.white, fontSize: 10.5),
+                        ),
+                        IconButton(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.all(4),
+                          constraints: const BoxConstraints(),
+                          onPressed: _openFullscreen,
+                          icon: const Icon(
+                            Icons.fullscreen_rounded,
+                            color: Colors.white,
+                            size: 25,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _FullscreenVideoPage extends StatefulWidget {
+  final String localPath;
+  final String url;
+  final Duration startAt;
+
+  const _FullscreenVideoPage({
+    required this.localPath,
+    required this.url,
+    required this.startAt,
+  });
+
+  @override
+  State<_FullscreenVideoPage> createState() => _FullscreenVideoPageState();
+}
+
+class _FullscreenVideoPageState extends State<_FullscreenVideoPage> {
+  VideoPlayerController? _controller;
+  bool _failed = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final local = widget.localPath.trim();
+      final remote = _mediaUrl(widget.url);
+      final c = local.isNotEmpty
+          ? VideoPlayerController.file(File(local))
+          : VideoPlayerController.networkUrl(Uri.parse(remote));
+
+      await c.initialize();
+      await c.seekTo(widget.startAt);
+      c.addListener(_refresh);
+      await c.play();
+
+      if (!mounted) {
+        c.dispose();
+        return;
+      }
+      setState(() => _controller = c);
+    } catch (_) {
+      if (mounted) setState(() => _failed = true);
+    }
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _controller?.removeListener(_refresh);
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = _controller;
+    return Scaffold(
+      backgroundColor: Colors.black,
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        foregroundColor: Colors.white,
+        title: const Text('Video'),
+      ),
+      body: Center(
+        child: _failed
+            ? const Text('Unable to play video', style: TextStyle(color: Colors.white))
+            : c == null || !c.value.isInitialized
+                ? const CircularProgressIndicator(color: Colors.white)
+                : GestureDetector(
+                    onTap: () async {
+                      c.value.isPlaying ? await c.pause() : await c.play();
+                    },
+                    child: Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        AspectRatio(
+                          aspectRatio: c.value.aspectRatio,
+                          child: VideoPlayer(c),
+                        ),
+                        if (!c.value.isPlaying)
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: const BoxDecoration(
+                              color: Colors.black54,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.play_arrow_rounded,
+                              color: Colors.white,
+                              size: 48,
+                            ),
+                          ),
+                        Positioned(
+                          left: 16,
+                          right: 16,
+                          bottom: 20,
+                          child: VideoProgressIndicator(
+                            c,
+                            allowScrubbing: true,
+                            colors: const VideoProgressColors(
+                              playedColor: Color(0xFF25D366),
+                              bufferedColor: Colors.white38,
+                              backgroundColor: Colors.white24,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+      ),
+    );
+  }
+}
+
 class _AudioAttachmentTile extends StatefulWidget {
   final ChatAttachmentDto attachment;
 
