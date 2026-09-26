@@ -10,6 +10,7 @@ import 'package:flutter/foundation.dart' as foundation;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:hiddenly/app_haptics.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/config/app_config.dart';
 import 'package:hiddenly/widgets/smooth_media_zoom.dart';
@@ -1368,7 +1369,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final conversationId = int.tryParse(widget.chat.id);
     final messageId = int.tryParse(message.id);
 
-    HapticFeedback.heavyImpact();
+    AppHaptics.heavy();
 
     final previousReaction = _messageReactions[message.id];
     final nextReaction = previousReaction == emoji ? '' : emoji;
@@ -1416,7 +1417,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   void _openDeleteMessageDialog(ChatMessage message) {
-    HapticFeedback.mediumImpact();
+    AppHaptics.medium();
 
     showModalBottomSheet<void>(
       context: context,
@@ -1546,7 +1547,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final conversationId = int.tryParse(widget.chat.id);
     final messageId = int.tryParse(message.id);
 
-    HapticFeedback.mediumImpact();
+    AppHaptics.medium();
 
     if (conversationId == null || messageId == null) {
       setState(() {
@@ -1615,7 +1616,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       return;
     }
 
-    HapticFeedback.heavyImpact();
+    AppHaptics.heavy();
 
     setState(() {
       _deletingMessageIds.add(message.id);
@@ -1838,7 +1839,7 @@ void _openReactionPicker(
   ChatMessage message,
   BuildContext bubbleContext,
 ) {
-  HapticFeedback.mediumImpact();
+  AppHaptics.medium();
 
   final renderObject = bubbleContext.findRenderObject();
   final overlayObject = Overlay.of(context).context.findRenderObject();
@@ -1957,14 +1958,14 @@ void _openReactionPicker(
           void updateHover(Offset globalPosition) {
             final next = hitTestReaction(globalPosition);
             if (next != hoveredReactionIndex) {
-              HapticFeedback.selectionClick();
+              AppHaptics.selection();
               dialogSetState(() => hoveredReactionIndex = next);
             }
           }
 
           void selectReactionIndex(int index) {
             final emoji = _messengerReactions[index];
-            HapticFeedback.selectionClick();
+            AppHaptics.selection();
             _applyReaction(message, emoji, reactionCenterFor(index));
             Navigator.pop(context);
           }
@@ -2069,7 +2070,7 @@ void _openReactionPicker(
                                 return GestureDetector(
                                   onTap: () => selectReactionIndex(index),
                                   onTapDown: (_) {
-                                    HapticFeedback.selectionClick();
+                                    AppHaptics.selection();
                                     dialogSetState(() => hoveredReactionIndex = index);
                                   },
                                   child: AnimatedContainer(
@@ -2376,7 +2377,7 @@ void _openReactionPicker(
 
 
   void _openMoreMessageActions(ChatMessage message) {
-    HapticFeedback.mediumImpact();
+    AppHaptics.medium();
 
     showGeneralDialog(
       context: context,
@@ -2607,7 +2608,7 @@ void _openReactionPicker(
 
     if (selectedEmoji == null || selectedEmoji.trim().isEmpty) return;
 
-    HapticFeedback.selectionClick();
+    AppHaptics.selection();
 
     final screenSize = MediaQuery.of(context).size;
     _applyReaction(
@@ -3926,7 +3927,7 @@ Future<void> _startCall(bool isVideo) async {
     durationText: _recordText(_recordDuration),
     onCancel: _cancelRecording,
     onSend: () {
-      HapticFeedback.mediumImpact();
+      AppHaptics.medium();
       _stopAndSendRecording();
     },
   )
@@ -3936,28 +3937,28 @@ Future<void> _startCall(bool isVideo) async {
                 children: [
                   _MessengerCameraButton(
                     onTap: () {
-                      HapticFeedback.lightImpact();
+                      AppHaptics.light();
                       _pickImage(ImageSource.camera);
                     },
                   ),
                   _MessengerPlainIcon(
                     icon: Icons.photo_library_rounded,
                     onTap: () {
-                      HapticFeedback.lightImpact();
+                      AppHaptics.light();
                       unawaited(_pickMessengerGalleryMedia());
                     },
                   ),
                   _MessengerPlainIcon(
                     icon: Icons.attach_file_rounded,
                     onTap: () {
-                      HapticFeedback.lightImpact();
+                      AppHaptics.light();
                       _pickMultipleFiles();
                     },
                   ),
                   _MessengerPlainIcon(
                     icon: Icons.mic_rounded,
                     onTap: () {
-                      HapticFeedback.lightImpact();
+                      AppHaptics.light();
                       _startRecording();
                     },
                   ),
@@ -4011,7 +4012,7 @@ Future<void> _startCall(bool isVideo) async {
                           InkWell(
                             borderRadius: BorderRadius.circular(999),
                             onTap: () {
-                              HapticFeedback.lightImpact();
+                              AppHaptics.light();
                               FocusScope.of(context).unfocus();
 
                               setState(() {
@@ -4046,7 +4047,7 @@ Future<void> _startCall(bool isVideo) async {
                   _MessengerSendLikeButton(
                     hasText: hasText,
                     onTap: () {
-                      HapticFeedback.lightImpact();
+                      AppHaptics.light();
                       hasText ? _sendText() : _sendLike();
                     },
                   ),
@@ -4271,7 +4272,7 @@ Future<void> _startCall(bool isVideo) async {
               isMe: message.isMe,
               enabled: true,
               onReply: () {
-                HapticFeedback.lightImpact();
+                AppHaptics.light();
                 _replyTo(message);
               },
               onTapMessage: null,
@@ -6346,7 +6347,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
   }
 
   Future<void> _toggle() async {
-    HapticFeedback.lightImpact();
+    AppHaptics.light();
 
     if (_loading) return;
 
@@ -6903,7 +6904,7 @@ class _SwipeToReplyState extends State<_SwipeToReply>
 
       if (reached && !_triggered) {
         _triggered = true;
-        HapticFeedback.mediumImpact();
+        AppHaptics.medium();
       }
     });
   }
