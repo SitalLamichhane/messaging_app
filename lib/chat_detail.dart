@@ -313,17 +313,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       return latestChat;
     }
 
-    /*
-      IMPORTANT:
-      After app restart the chat passed into ChatDetailScreen can be stale.
-      So we refresh from the same conversations API that already returns:
-      members[].is_blocked
-      members[].blocked_by
-      members[].blocked_by_name
+    
+    //   IMPORTANT:
+    //   After app restart the chat passed into ChatDetailScreen can be stale.
+    //   So we refresh from the same conversations API that already returns:
+    //   members[].is_blocked
+    //   members[].blocked_by
+    //   members[].blocked_by_name
 
-      This is NOT a separate block status API.
-      It is the same /chat/conversations/ list API.
-    */
+    //   This is NOT a separate block status API.
+    //   It is the same /chat/conversations/ list API.
+    
     try {
       debugPrint('BLOCK REFRESH: fetching /chat/conversations/ for latest block state');
 

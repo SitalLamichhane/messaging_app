@@ -151,13 +151,6 @@ class CallPushRouter {
       _activeBundle = bundle;
       _displayedCallId =
           payload.callId;
-
-      /*
-       * Connect the conversation websocket so
-       * this controller receives status changes
-       * even though ConversationChatScreen
-       * isn't currently open.
-       */
       await bundle.realtime.connect(
         payload.conversationId,
       );

@@ -1,4 +1,3 @@
-// lib/chat_models.dart
 
 import 'package:flutter/foundation.dart';
 

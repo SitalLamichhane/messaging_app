@@ -1,14 +1,3 @@
-// lib/core/services/app_haptics.dart
-//
-// Hiddenly haptic diagnostic build.
-// Replace your current AppHaptics file with this one temporarily.
-//
-// Required dependency:
-//   vibration: ^3.2.1
-//
-// Required AndroidManifest.xml permission:
-//   <uses-permission android:name="android.permission.VIBRATE"/>
-
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:vibration/vibration.dart';

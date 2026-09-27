@@ -408,12 +408,12 @@ Future<void> _handleCallKitAcceptFromMain(
       return;
     }
 
-    /*
-      IMPORTANT:
-      Do NOT call FlutterCallkitIncoming.endCall(callId) here.
-      ANSWER means user accepted the call. endCall() can trigger ended/cancel flow
-      and prevent Flutter call screen from opening/connecting.
-    */
+    
+      // IMPORTANT:
+      // Do NOT call FlutterCallkitIncoming.endCall(callId) here.
+      // ANSWER means user accepted the call. endCall() can trigger ended/cancel flow
+      // and prevent Flutter call screen from opening/connecting.
+      
     debugPrint('');
     debugPrint('################################################');
     debugPrint('### CALLKIT ANSWER CLICKED: OPEN DIRECT CALL SCREEN');

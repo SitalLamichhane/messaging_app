@@ -3,16 +3,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:hiddenly/app_haptics.dart';
-
-
-
 import 'package:hiddenly/groupCall/domain/application/group_call_controller.dart';
 
-
-
 import 'package:hiddenly/groupCall/domain/presentation/screens/groupWidgets/call_controls.dart';
-
-
 
 import 'package:hiddenly/groupCall/domain/presentation/screens/groupWidgets/participant_tile.dart';
 
@@ -25,10 +18,6 @@ class GroupCallScreen
 
 
   final GroupCallController controller;
-
-
-
-
 
 
 

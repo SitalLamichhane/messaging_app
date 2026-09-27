@@ -22,17 +22,6 @@ class ConversationRealtimeEvent {
     return 'ConversationRealtimeEvent($type, $data)';
   }
 }
-
-/// Owns ONE websocket for one open conversation.
-///
-/// Both:
-/// - ChatRoomController
-/// - GroupCallController
-///
-/// listen to the same broadcast event stream.
-///
-/// This service should be owned/disposed by ConversationChatScreen,
-/// NOT by the individual controllers.
 class ConversationRealtimeService {
   final ConversationSocketUriBuilder uriBuilder;
 
