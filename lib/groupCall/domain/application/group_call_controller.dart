@@ -209,8 +209,17 @@ class GroupCallController extends ChangeNotifier {
         return;
       }
 
-      // Existing active group call.
-      if (e.statusCode == 409) {
+      // USER_BUSY is not a call in this conversation. Never auto-join it.
+      if (e.isUserBusy) {
+        _phase = GroupCallPhase.error;
+        _error = e.message;
+        _safeNotify();
+        rethrow;
+      }
+
+      // Only the explicitly identified same-conversation conflict can
+      // be resolved by looking up an existing group call.
+      if (e.isExistingConversationCall) {
         final active =
             await api.getActiveGroupCall(
           conversationId,
@@ -332,6 +341,10 @@ class GroupCallController extends ChangeNotifier {
       if (_disposed) {
         await liveKit.disconnect();
         return;
+      }
+
+      if (!liveKit.connected) {
+        throw StateError('LiveKit did not establish a connection.');
       }
 
       _call = selectedCall.copyWith(

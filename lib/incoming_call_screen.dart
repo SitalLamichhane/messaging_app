@@ -1,7 +1,4 @@
-// lib/incoming_call_screen.dart
-
 import 'package:flutter/material.dart';
-
 import 'package:hiddenly/call_screen.dart';
 import 'package:hiddenly/chat_data.dart';
 import 'package:hiddenly/chat_models.dart';
@@ -162,13 +159,68 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     return '';
   }
 
-  bool _isValidWebRtcOffer(Map<String, dynamic>? value) {
-    if (value == null) return false;
+  /// Accepts every offer shape used by foreground WS, FCM/CallKit,
+  /// and cached incoming-call payloads.
+  ///
+  /// Supported shapes:
+  /// 1. {type: offer, sdp: ...}
+  /// 2. {offer: {type: offer, sdp: ...}}
+  /// 3. {payload: {type: offer, sdp: ...}}
+  /// 4. {payload: {offer: {type: offer, sdp: ...}}}
+  Map<String, dynamic>? _normalizeWebRtcOffer(
+    Map<String, dynamic>? source,
+  ) {
+    if (source == null) {
+      debugPrint('INCOMING OFFER: source is null');
+      return null;
+    }
 
-    final type = value['type']?.toString() ?? '';
-    final sdp = value['sdp']?.toString() ?? '';
+    Map<String, dynamic> data = Map<String, dynamic>.from(source);
 
-    return type.trim().isNotEmpty && sdp.trim().isNotEmpty;
+    debugPrint('INCOMING OFFER RAW KEYS: ${data.keys.toList()}');
+
+    final rawPayload = data['payload'];
+    if (rawPayload is Map) {
+      data = Map<String, dynamic>.from(rawPayload);
+      debugPrint('INCOMING OFFER: extracted payload');
+    }
+
+    final rawOffer = data['offer'];
+    if (rawOffer is Map) {
+      data = Map<String, dynamic>.from(rawOffer);
+      debugPrint('INCOMING OFFER: extracted nested offer');
+    }
+
+    final rawSdp = data['sdp'];
+    if (rawSdp is! String || rawSdp.trim().isEmpty) {
+      debugPrint('INCOMING OFFER INVALID: SDP missing');
+      return null;
+    }
+
+    var type = data['type']?.toString().trim().toLowerCase() ?? '';
+
+    // Some outer signaling payloads use call_offer/incoming_call as type.
+    // If valid SDP exists, normalize that to a native WebRTC offer.
+    if (type.isEmpty || type == 'call_offer' || type == 'incoming_call') {
+      type = 'offer';
+    }
+
+    if (type != 'offer') {
+      debugPrint('INCOMING OFFER INVALID TYPE: $type');
+      return null;
+    }
+
+    // IMPORTANT: preserve SDP exactly. Do not trim/reformat it.
+    final normalized = <String, dynamic>{
+      'type': 'offer',
+      'sdp': rawSdp,
+    };
+
+    debugPrint(
+      'INCOMING WEBRTC OFFER NORMALIZED: sdpLength=${rawSdp.length}',
+    );
+
+    return normalized;
   }
 
   Future<bool> _ensureCallSocketConnected() async {
@@ -351,6 +403,15 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     final convId = _effectiveConversationId;
 
     try {
+      debugPrint('');
+      debugPrint('========================================');
+      debugPrint('INCOMING PRIVATE CALL ACCEPT PRESSED');
+      debugPrint('conversationId: $convId');
+      debugPrint('callId: $_callId');
+      debugPrint('callerId: ${widget.callerId}');
+      debugPrint('isVideoCall: ${widget.isVideoCall}');
+      debugPrint('========================================');
+
       if (convId.isEmpty) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -369,9 +430,18 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
         return;
       }
 
-      // No socket/API work here. CallNotifier owns the receiver transaction:
-      // API accept -> connect signaling -> create WebRTC -> answer/call_ready.
-      final finalOffer = _isValidWebRtcOffer(widget.offer) ? widget.offer : null;
+      // Normalize the already received SDP offer if it exists.
+      // If it is absent, CallNotifier will use call_ready as fallback and
+      // caller's SocketService will resend the cached offer.
+      final finalOffer = _normalizeWebRtcOffer(widget.offer);
+
+      if (finalOffer != null) {
+        debugPrint('ACCEPT CALL WITH EXISTING WEBRTC OFFER');
+      } else {
+        debugPrint(
+          'ACCEPT CALL WITHOUT OFFER: CALL_READY FALLBACK WILL BE USED',
+        );
+      }
 
       if (callKitId.isNotEmpty) {
         await NotificationService.endCall(callKitId);
@@ -399,6 +469,15 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
           ),
         ),
       );
+    } catch (e, stack) {
+      debugPrint('INCOMING CALL ACCEPT ERROR: $e');
+      debugPrint(stack.toString());
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not accept call: $e')),
+        );
+      }
     } finally {
       _accepting = false;
     }
@@ -490,7 +569,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
                       icon: widget.isVideoCall
                           ? Icons.videocam_rounded
                           : Icons.call_rounded,
-                      label: 'Accept',
+                      label: _accepting ? 'Connecting...' : 'Accept',
                       color: const Color(0xFF22C55E),
                       onTap: () => _accept(context),
                     ),

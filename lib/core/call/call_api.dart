@@ -34,6 +34,13 @@ class CallStartResult {
   });
 
   /// True only when Django successfully created a new call.
+  /// Backend 409 for a user occupied by another conversation.
+  bool get isUserBusy => conflict && data['code'] == 'USER_BUSY';
+
+  /// 409 indicating a pre-existing call in the requested conversation.
+  bool get isExistingConversationCall =>
+      conflict && !isUserBusy && (callId?.isNotEmpty ?? false);
+
   bool get canStart {
     return created && (callId?.trim().isNotEmpty ?? false);
   }

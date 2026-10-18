@@ -19,11 +19,13 @@ class CallStartConflictException implements Exception {
   final String message;
   final String? existingCallId;
   final String? existingStatus;
+  final bool isUserBusy;
 
   const CallStartConflictException(
     this.message, {
     this.existingCallId,
     this.existingStatus,
+    this.isUserBusy = false,
   });
 
   @override
@@ -255,7 +257,9 @@ class CallNotifier extends StateNotifier<CallState> {
     if (result.conflict) {
       final message = result.error?.trim().isNotEmpty == true
           ? result.error!.trim()
-          : 'A call is already active in this conversation';
+          : result.isUserBusy
+              ? 'User is on another call.'
+              : 'A call is already active in this conversation';
 
       final existingCallId = result.callId?.trim() ?? '';
       final existingCallUuid = result.callUuid?.trim() ?? '';
@@ -283,6 +287,7 @@ class CallNotifier extends StateNotifier<CallState> {
         message,
         existingCallId: existingCallId.isEmpty ? null : existingCallId,
         existingStatus: existingStatus.isEmpty ? null : existingStatus,
+        isUserBusy: result.isUserBusy,
       );
     }
 
