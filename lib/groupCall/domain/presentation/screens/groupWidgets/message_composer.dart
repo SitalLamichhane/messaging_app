@@ -873,79 +873,14 @@ class _MessageComposerState extends State<MessageComposer> {
 
 
 
-      final result = await FilePicker.platform.pickFiles(
+      final selectedFiles = await FilePicker.pickFiles();
 
+      if (selectedFiles.isEmpty) return;
 
+      // FilePicker 13 supplies XFile objects directly, including files
+      // whose Android document URI does not have a local filesystem path.
+      final files = selectedFiles.map((item) => item.xFile).toList();
 
-        allowMultiple: true,
-
-
-
-        withData: false,
-
-
-
-      );
-
-
-
-
-
-
-
-      if (result == null || result.files.isEmpty) return;
-
-
-
-
-
-
-
-      final files = result.files
-
-
-
-          .where((item) => item.path != null && item.path!.trim().isNotEmpty)
-
-
-
-          .map(
-
-
-
-            (item) => XFile(
-
-
-
-              item.path!,
-
-
-
-              name: item.name,
-
-
-
-              mimeType: item.extension,
-
-
-
-            ),
-
-
-
-          )
-
-
-
-          .toList();
-
-
-
-
-
-
-
-      if (files.isEmpty) return;
 
 
 

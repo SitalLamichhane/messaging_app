@@ -1,11 +1,6 @@
 import 'package:dio/dio.dart';
 import 'package:hiddenly/core/api_client.dart';
-
 class AuthApi {
-  // ============================================================
-  // SEND OTP
-  // ============================================================
-
   static Future<Response> sendOtp(String phone) async {
     try {
       return await ApiClient.dio.post(

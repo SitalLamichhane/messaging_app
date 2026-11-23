@@ -3014,15 +3014,13 @@ void _openReactionPicker(
       return;
     }
 
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
+    final pickedFiles = await FilePicker.pickFiles(
       type: FileType.media,
-      withData: false,
     );
 
-    if (result == null || result.files.isEmpty) return;
+    if (pickedFiles.isEmpty) return;
 
-    final selectedFiles = result.files
+    final selectedFiles = pickedFiles
         .where((file) => file.path != null && file.path!.trim().isNotEmpty)
         .map((file) => File(file.path!))
         .toList();
@@ -3166,14 +3164,13 @@ void _openReactionPicker(
       return;
     }
 
-    final result = await FilePicker.platform.pickFiles(
-      allowMultiple: true,
-      withData: false,
+    final pickedFiles = await FilePicker.pickFiles(
+      type: FileType.any,
     );
 
-    if (result == null || result.files.isEmpty) return;
+    if (pickedFiles.isEmpty) return;
 
-    final selectedFiles = result.files
+    final selectedFiles = pickedFiles
         .where((file) => file.path != null && file.path!.trim().isNotEmpty)
         .toList();
 

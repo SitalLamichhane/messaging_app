@@ -1,5 +1,7 @@
+
 import java.util.Properties
 import java.io.FileInputStream
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
@@ -14,29 +16,28 @@ val keystorePropertiesFile = rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 } else {
-    throw GradleException("Missing key.properties file. Create it at android/key.properties")
+    throw GradleException(
+        "Missing key.properties file. Create it at android/key.properties"
+    )
 }
 
 fun requireKeystoreProperty(name: String): String {
     return keystoreProperties.getProperty(name)
-        ?: throw GradleException("Missing $name in android/key.properties")
+        ?: throw GradleException(
+            "Missing $name in android/key.properties"
+        )
 }
 
 android {
     namespace = "com.johnworkspace.hiddenly"
 
     compileSdk = 36
-
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
         isCoreLibraryDesugaringEnabled = true
-    }
-
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
     defaultConfig {
@@ -74,12 +75,21 @@ android {
     }
 }
 
+// Kotlin compiler configuration
+kotlin {
+    compilerOptions {
+        jvmTarget.set(JvmTarget.JVM_17)
+    }
+}
+
 flutter {
     source = "../.."
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    coreLibraryDesugaring(
+        "com.android.tools:desugar_jdk_libs:2.1.4"
+    )
 
     implementation("androidx.multidex:multidex:2.0.1")
 
