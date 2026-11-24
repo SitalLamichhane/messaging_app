@@ -177,9 +177,7 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('SEND OTP ERROR: $e');
 
-      throw Exception(
-        e.toString().replaceAll('Exception: ', ''),
-      );
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
     } finally {
       isLoading = false;
       notifyListeners();
@@ -198,10 +196,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final response = await AuthApi.verifyOtp(
-        phone: phone,
-        code: code,
-      );
+      final response = await AuthApi.verifyOtp(phone: phone, code: code);
 
       final rawData = response.data;
 
@@ -234,10 +229,7 @@ class AuthProvider extends ChangeNotifier {
           throw Exception('Signup token missing');
         }
 
-        await ApiClient.storage.write(
-          key: 'signup_token',
-          value: signupToken!,
-        );
+        await ApiClient.storage.write(key: 'signup_token', value: signupToken!);
 
         return 'signup';
       }
@@ -248,9 +240,7 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('VERIFY OTP ERROR: $e');
 
-      throw Exception(
-        e.toString().replaceAll('Exception: ', ''),
-      );
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
     } finally {
       isLoading = false;
       notifyListeners();
@@ -267,9 +257,7 @@ class AuthProvider extends ChangeNotifier {
   }) async {
     String? token = signupToken;
 
-    token ??= await ApiClient.storage.read(
-      key: 'signup_token',
-    );
+    token ??= await ApiClient.storage.read(key: 'signup_token');
 
     final cleanToken = _clean(token);
 
@@ -297,9 +285,7 @@ class AuthProvider extends ChangeNotifier {
 
       await _saveLoginData(data);
 
-      await ApiClient.storage.delete(
-        key: 'signup_token',
-      );
+      await ApiClient.storage.delete(key: 'signup_token');
 
       signupToken = null;
 
@@ -307,9 +293,7 @@ class AuthProvider extends ChangeNotifier {
     } catch (e) {
       debugPrint('COMPLETE SIGNUP ERROR: $e');
 
-      throw Exception(
-        e.toString().replaceAll('Exception: ', ''),
-      );
+      throw Exception(e.toString().replaceAll('Exception: ', ''));
     } finally {
       isLoading = false;
       notifyListeners();
@@ -337,9 +321,7 @@ class AuthProvider extends ChangeNotifier {
   //   -> FCM token registered immediately
   // ============================================================
 
-  Future<void> _saveLoginData(
-    Map<String, dynamic> data,
-  ) async {
+  Future<void> _saveLoginData(Map<String, dynamic> data) async {
     debugPrint('');
     debugPrint('========================================');
     debugPrint('AUTH: SAVE LOGIN DATA');
@@ -366,30 +348,18 @@ class AuthProvider extends ChangeNotifier {
 
     accessToken = newAccessToken;
 
-    refreshToken = newRefreshToken.isEmpty
-        ? null
-        : newRefreshToken;
+    refreshToken = newRefreshToken.isEmpty ? null : newRefreshToken;
 
-    await ApiClient.storage.write(
-      key: 'access',
-      value: newAccessToken,
-    );
+    await ApiClient.storage.write(key: 'access', value: newAccessToken);
 
     if (newRefreshToken.isNotEmpty) {
-      await ApiClient.storage.write(
-        key: 'refresh',
-        value: newRefreshToken,
-      );
+      await ApiClient.storage.write(key: 'refresh', value: newRefreshToken);
     } else {
-      await ApiClient.storage.delete(
-        key: 'refresh',
-      );
+      await ApiClient.storage.delete(key: 'refresh');
     }
 
     debugPrint('AUTH: access token saved');
-    debugPrint(
-      'AUTH: refresh token exists=${newRefreshToken.isNotEmpty}',
-    );
+    debugPrint('AUTH: refresh token exists=${newRefreshToken.isNotEmpty}');
 
     // --------------------------------------------------------
     // User
@@ -412,9 +382,7 @@ class AuthProvider extends ChangeNotifier {
 
       user = null;
 
-      debugPrint(
-        'AUTH WARNING: login response does not contain user object',
-      );
+      debugPrint('AUTH WARNING: login response does not contain user object');
     }
 
     // --------------------------------------------------------
@@ -449,13 +417,8 @@ class AuthProvider extends ChangeNotifier {
   // SAVE USER IDENTITY
   // ============================================================
 
-  Future<void> _persistUserIdentity(
-    Map<String, dynamic> rawUser,
-  ) async {
-    final userId = _firstNotEmpty([
-      rawUser['id'],
-      rawUser['user_id'],
-    ]);
+  Future<void> _persistUserIdentity(Map<String, dynamic> rawUser) async {
+    final userId = _firstNotEmpty([rawUser['id'], rawUser['user_id']]);
 
     final fullName = _firstNotEmpty([
       rawUser['full_name'],
@@ -481,15 +444,9 @@ class AuthProvider extends ChangeNotifier {
         currently check both user_id and id.
       */
 
-      await ApiClient.storage.write(
-        key: 'user_id',
-        value: userId,
-      );
+      await ApiClient.storage.write(key: 'user_id', value: userId);
 
-      await ApiClient.storage.write(
-        key: 'id',
-        value: userId,
-      );
+      await ApiClient.storage.write(key: 'id', value: userId);
 
       // Normalize in-memory user too.
       user?['id'] = userId;
@@ -497,9 +454,7 @@ class AuthProvider extends ChangeNotifier {
 
       debugPrint('AUTH: user_id saved=$userId');
     } else {
-      debugPrint(
-        'AUTH WARNING: login response user has no id/user_id',
-      );
+      debugPrint('AUTH WARNING: login response user has no id/user_id');
     }
 
     // --------------------------------------------------------
@@ -507,15 +462,9 @@ class AuthProvider extends ChangeNotifier {
     // --------------------------------------------------------
 
     if (fullName.isNotEmpty) {
-      await ApiClient.storage.write(
-        key: 'full_name',
-        value: fullName,
-      );
+      await ApiClient.storage.write(key: 'full_name', value: fullName);
 
-      await ApiClient.storage.write(
-        key: 'name',
-        value: fullName,
-      );
+      await ApiClient.storage.write(key: 'name', value: fullName);
 
       user?['full_name'] = fullName;
 
@@ -527,15 +476,9 @@ class AuthProvider extends ChangeNotifier {
     // --------------------------------------------------------
 
     if (avatar.isNotEmpty) {
-      await ApiClient.storage.write(
-        key: 'avatar_url',
-        value: avatar,
-      );
+      await ApiClient.storage.write(key: 'avatar_url', value: avatar);
 
-      await ApiClient.storage.write(
-        key: 'image_url',
-        value: avatar,
-      );
+      await ApiClient.storage.write(key: 'image_url', value: avatar);
 
       user?['avatar_url'] = avatar;
 
@@ -549,27 +492,19 @@ class AuthProvider extends ChangeNotifier {
 
   Future<void> _syncFcmTokenAfterAuthentication() async {
     try {
-      final access = _clean(
-        await ApiClient.storage.read(key: 'access'),
-      );
+      final access = _clean(await ApiClient.storage.read(key: 'access'));
 
       if (access.isEmpty) {
-        debugPrint(
-          'AUTH FCM SYNC SKIPPED: access token missing',
-        );
+        debugPrint('AUTH FCM SYNC SKIPPED: access token missing');
 
         return;
       }
 
-      debugPrint(
-        'AUTH: syncing FCM token after authentication...',
-      );
+      debugPrint('AUTH: syncing FCM token after authentication...');
 
       await NotificationService.saveCurrentToken();
 
-      debugPrint(
-        'AUTH: FCM token sync completed',
-      );
+      debugPrint('AUTH: FCM token sync completed');
     } catch (e, st) {
       /*
         Important:
@@ -579,9 +514,7 @@ class AuthProvider extends ChangeNotifier {
         FCM can retry on the next app start/token refresh.
       */
 
-      debugPrint(
-        'AUTH FCM SYNC ERROR: $e',
-      );
+      debugPrint('AUTH FCM SYNC ERROR: $e');
 
       debugPrint(st.toString());
     }
@@ -601,9 +534,7 @@ class AuthProvider extends ChangeNotifier {
       // Close any native incoming-call UI before clearing identity.
       await NotificationService.endAllNativeCalls();
     } catch (e) {
-      debugPrint(
-        'AUTH LOGOUT END CALLKIT ERROR: $e',
-      );
+      debugPrint('AUTH LOGOUT END CALLKIT ERROR: $e');
     }
 
     // --------------------------------------------------------

@@ -4,24 +4,20 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-typedef ConversationSocketUriBuilder = Future<Uri> Function(
-  int conversationId,
-);
+typedef ConversationSocketUriBuilder = Future<Uri> Function(int conversationId);
 
 class ConversationRealtimeEvent {
   final String type;
   final Map<String, dynamic> data;
 
-  const ConversationRealtimeEvent({
-    required this.type,
-    required this.data,
-  });
+  const ConversationRealtimeEvent({required this.type, required this.data});
 
   @override
   String toString() {
     return 'ConversationRealtimeEvent($type, $data)';
   }
 }
+
 class ConversationRealtimeService {
   final ConversationSocketUriBuilder uriBuilder;
 
@@ -42,16 +38,11 @@ class ConversationRealtimeService {
   bool _socketReady = false;
   bool _disposed = false;
 
-  ConversationRealtimeService({
-    required this.uriBuilder,
-  });
+  ConversationRealtimeService({required this.uriBuilder});
 
   Stream<ConversationRealtimeEvent> get events => _events.stream;
 
-  bool get connected =>
-      !_disposed &&
-      _socketReady &&
-      _channel != null;
+  bool get connected => !_disposed && _socketReady && _channel != null;
 
   bool get connecting => _connecting;
 
@@ -59,19 +50,14 @@ class ConversationRealtimeService {
 
   Future<void> connect(int conversationId) async {
     if (_disposed) {
-      throw StateError(
-        'ConversationRealtimeService has been disposed.',
-      );
+      throw StateError('ConversationRealtimeService has been disposed.');
     }
 
-    if (_conversationId == conversationId &&
-        (connected || _connecting)) {
+    if (_conversationId == conversationId && (connected || _connecting)) {
       return;
     }
 
-    await _closeCurrentConnection(
-      clearConversation: true,
-    );
+    await _closeCurrentConnection(clearConversation: true);
 
     if (_disposed) return;
 
@@ -81,14 +67,10 @@ class ConversationRealtimeService {
 
     _connectionGeneration++;
 
-    await _open(
-      generation: _connectionGeneration,
-    );
+    await _open(generation: _connectionGeneration);
   }
 
-  Future<void> _open({
-    required int generation,
-  }) async {
+  Future<void> _open({required int generation}) async {
     final conversationId = _conversationId;
 
     if (_disposed ||
@@ -104,8 +86,7 @@ class ConversationRealtimeService {
     WebSocketChannel? newChannel;
 
     try {
-      final uri =
-          await uriBuilder(conversationId);
+      final uri = await uriBuilder(conversationId);
 
       if (_disposed ||
           _manualClose ||
@@ -114,12 +95,9 @@ class ConversationRealtimeService {
         return;
       }
 
-      debugPrint(
-        'CHAT WS CONNECT => $uri',
-      );
+      debugPrint('CHAT WS CONNECT => $uri');
 
-      newChannel =
-          WebSocketChannel.connect(uri);
+      newChannel = WebSocketChannel.connect(uri);
 
       await newChannel.ready;
 
@@ -146,56 +124,34 @@ class ConversationRealtimeService {
       _reconnectTimer?.cancel();
       _reconnectTimer = null;
 
-      _subscription =
-          activeChannel.stream.listen(
+      _subscription = activeChannel.stream.listen(
         _onRawMessage,
-        onError: (
-          Object error,
-          StackTrace stackTrace,
-        ) {
-          debugPrint(
-            'CHAT WS ERROR => $error',
-          );
+        onError: (Object error, StackTrace stackTrace) {
+          debugPrint('CHAT WS ERROR => $error');
 
-          _handleSocketClosed(
-            channel: activeChannel,
-            generation: generation,
-          );
+          _handleSocketClosed(channel: activeChannel, generation: generation);
         },
         onDone: () {
-          debugPrint(
-            'CHAT WS CLOSED',
-          );
+          debugPrint('CHAT WS CLOSED');
 
-          _handleSocketClosed(
-            channel: activeChannel,
-            generation: generation,
-          );
+          _handleSocketClosed(channel: activeChannel, generation: generation);
         },
         cancelOnError: false,
       );
 
-      debugPrint(
-        'CHAT WS CONNECTED => conversation=$conversationId',
-      );
+      debugPrint('CHAT WS CONNECTED => conversation=$conversationId');
     } catch (e) {
-      debugPrint(
-        'CHAT WS CONNECT ERROR => $e',
-      );
+      debugPrint('CHAT WS CONNECT ERROR => $e');
 
-      if (newChannel != null &&
-          newChannel != _channel) {
+      if (newChannel != null && newChannel != _channel) {
         try {
           await newChannel.sink.close();
         } catch (_) {}
       }
 
-      _scheduleReconnect(
-        generation: generation,
-      );
+      _scheduleReconnect(generation: generation);
     } finally {
-      if (generation ==
-          _connectionGeneration) {
+      if (generation == _connectionGeneration) {
         _connecting = false;
       }
     }
@@ -205,8 +161,7 @@ class ConversationRealtimeService {
     required WebSocketChannel channel,
     required int generation,
   }) {
-    if (_disposed ||
-        generation != _connectionGeneration) {
+    if (_disposed || generation != _connectionGeneration) {
       return;
     }
 
@@ -220,14 +175,10 @@ class ConversationRealtimeService {
 
     _subscription = null;
 
-    _scheduleReconnect(
-      generation: generation,
-    );
+    _scheduleReconnect(generation: generation);
   }
 
-  void _scheduleReconnect({
-    required int generation,
-  }) {
+  void _scheduleReconnect({required int generation}) {
     if (_disposed ||
         _manualClose ||
         _conversationId == null ||
@@ -243,63 +194,42 @@ class ConversationRealtimeService {
     _socketReady = false;
     _channel = null;
 
-    final seconds =
-        _retryAttempt < 5
-            ? (1 << _retryAttempt)
-            : 30;
+    final seconds = _retryAttempt < 5 ? (1 << _retryAttempt) : 30;
 
     if (_retryAttempt < 5) {
       _retryAttempt++;
     }
 
-    debugPrint(
-      'CHAT WS RECONNECT IN ${seconds}s',
-    );
+    debugPrint('CHAT WS RECONNECT IN ${seconds}s');
 
-    _reconnectTimer = Timer(
-      Duration(seconds: seconds),
-      () {
-        _reconnectTimer = null;
+    _reconnectTimer = Timer(Duration(seconds: seconds), () {
+      _reconnectTimer = null;
 
-        if (_disposed ||
-            _manualClose ||
-            generation !=
-                _connectionGeneration) {
-          return;
-        }
+      if (_disposed || _manualClose || generation != _connectionGeneration) {
+        return;
+      }
 
-        unawaited(
-          _open(
-            generation: generation,
-          ),
-        );
-      },
-    );
+      unawaited(_open(generation: generation));
+    });
   }
 
- void _onRawMessage(dynamic raw) {
-  if (_disposed || _events.isClosed) {
-    return;
-  }
-
-  try {
-    debugPrint(
-      'CHAT WS RAW <= $raw',
-    );
-
-    final decoded =
-        jsonDecode(raw.toString());
-
-    if (decoded is! Map) {
+  void _onRawMessage(dynamic raw) {
+    if (_disposed || _events.isClosed) {
       return;
     }
 
-    final root =
-        Map<String, dynamic>.from(
-      decoded,
-    );
+    try {
+      debugPrint('CHAT WS RAW <= $raw');
 
-    /*
+      final decoded = jsonDecode(raw.toString());
+
+      if (decoded is! Map) {
+        return;
+      }
+
+      final root = Map<String, dynamic>.from(decoded);
+
+      /*
      * CALL EVENT
      *
      * Backend:
@@ -313,34 +243,21 @@ class ConversationRealtimeService {
      *   }
      * }
      */
-    if (root['type']?.toString() ==
-            'call_event' &&
-        root['data'] is Map) {
-      final data =
-          Map<String, dynamic>.from(
-        root['data'] as Map,
-      );
+      if (root['type']?.toString() == 'call_event' && root['data'] is Map) {
+        final data = Map<String, dynamic>.from(root['data'] as Map);
 
-      final nestedType =
-          (data['type'] ?? 'call_event')
-              .toString()
-              .trim();
+        final nestedType = (data['type'] ?? 'call_event').toString().trim();
 
-      if (nestedType.isEmpty) {
+        if (nestedType.isEmpty) {
+          return;
+        }
+
+        _addEvent(ConversationRealtimeEvent(type: nestedType, data: data));
+
         return;
       }
 
-      _addEvent(
-        ConversationRealtimeEvent(
-          type: nestedType,
-          data: data,
-        ),
-      );
-
-      return;
-    }
-
-    /*
+      /*
      * NORMAL CHAT EVENTS
      *
      * Your Django ChatConsumer sends:
@@ -359,70 +276,43 @@ class ConversationRealtimeService {
      * Therefore we must support BOTH:
      * type and action.
      */
-    final type =
-        (root['type'] ??
-                root['action'] ??
-                root['event'] ??
-                '')
-            .toString()
-            .trim();
+      final type = (root['type'] ?? root['action'] ?? root['event'] ?? '')
+          .toString()
+          .trim();
 
-    if (type.isEmpty) {
-      debugPrint(
-        'CHAT WS IGNORED => no type/action/event: $root',
-      );
-      return;
+      if (type.isEmpty) {
+        debugPrint('CHAT WS IGNORED => no type/action/event: $root');
+        return;
+      }
+
+      debugPrint('CHAT WS EVENT => type=$type data=$root');
+
+      _addEvent(ConversationRealtimeEvent(type: type, data: root));
+    } catch (e) {
+      debugPrint('CHAT WS PARSE ERROR => $e');
     }
-
-    debugPrint(
-      'CHAT WS EVENT => type=$type data=$root',
-    );
-
-    _addEvent(
-      ConversationRealtimeEvent(
-        type: type,
-        data: root,
-      ),
-    );
-  } catch (e) {
-    debugPrint(
-      'CHAT WS PARSE ERROR => $e',
-    );
   }
-}
 
-  void _addEvent(
-    ConversationRealtimeEvent event,
-  ) {
-    if (_disposed ||
-        _events.isClosed) {
+  void _addEvent(ConversationRealtimeEvent event) {
+    if (_disposed || _events.isClosed) {
       return;
     }
 
     _events.add(event);
   }
 
-  Future<void> sendJson(
-    Map<String, dynamic> payload,
-  ) async {
+  Future<void> sendJson(Map<String, dynamic> payload) async {
     if (_disposed) {
-      throw StateError(
-        'ConversationRealtimeService has been disposed.',
-      );
+      throw StateError('ConversationRealtimeService has been disposed.');
     }
 
     final channel = _channel;
 
-    if (!connected ||
-        channel == null) {
-      throw StateError(
-        'Conversation websocket is not connected.',
-      );
+    if (!connected || channel == null) {
+      throw StateError('Conversation websocket is not connected.');
     }
 
-    channel.sink.add(
-      jsonEncode(payload),
-    );
+    channel.sink.add(jsonEncode(payload));
   }
 
   Future<void> disconnect() async {
@@ -433,9 +323,7 @@ class ConversationRealtimeService {
     _manualClose = true;
     _connectionGeneration++;
 
-    await _closeCurrentConnection(
-      clearConversation: true,
-    );
+    await _closeCurrentConnection(clearConversation: true);
   }
 
   Future<void> _closeCurrentConnection({
@@ -444,8 +332,7 @@ class ConversationRealtimeService {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
 
-    final subscription =
-        _subscription;
+    final subscription = _subscription;
     _subscription = null;
 
     if (subscription != null) {
@@ -482,9 +369,7 @@ class ConversationRealtimeService {
     _manualClose = true;
     _connectionGeneration++;
 
-    await _closeCurrentConnection(
-      clearConversation: true,
-    );
+    await _closeCurrentConnection(clearConversation: true);
 
     if (!_events.isClosed) {
       await _events.close();

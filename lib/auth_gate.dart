@@ -1,5 +1,3 @@
-
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -217,9 +215,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     };
   }
 
-  Future<void> _resolveUserOnly({
-    required Map<String, dynamic> user,
-  }) async {
+  Future<void> _resolveUserOnly({required Map<String, dynamic> user}) async {
     final rawUserId = _firstNotEmpty([
       user['id']?.toString(),
       user['user_id']?.toString(),
@@ -278,7 +274,8 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     if (cleanUserId.isEmpty) return;
 
     final now = DateTime.now();
-    final recentlySynced = _lastFcmSyncedUserId == cleanUserId &&
+    final recentlySynced =
+        _lastFcmSyncedUserId == cleanUserId &&
         _lastFcmSyncAt != null &&
         now.difference(_lastFcmSyncAt!).inMinutes < 2;
 
@@ -316,27 +313,25 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     final socket = GlobalCallSocketService.instance;
 
     if (!force &&
-    _globalCallSocketStarted &&
-    _globalCallSocketUserId == currentUserId &&
-    socket.isConnected &&
-    socket.isHealthy) {
-   debugPrint(
-    'AUTH GATE GLOBAL CALL: already connected and healthy for $currentUserId',
-  );
-  return;
-}
+        _globalCallSocketStarted &&
+        _globalCallSocketUserId == currentUserId &&
+        socket.isConnected &&
+        socket.isHealthy) {
+      debugPrint(
+        'AUTH GATE GLOBAL CALL: already connected and healthy for $currentUserId',
+      );
+      return;
+    }
 
     if (socket.isConnected &&
         socket.isHealthy &&
         _globalCallSocketUserId == currentUserId) {
-     _globalCallSocketStarted = true;
+      _globalCallSocketStarted = true;
 
-  debugPrint(
-    'AUTH GATE GLOBAL CALL: socket already connected and healthy',
-  );
+      debugPrint('AUTH GATE GLOBAL CALL: socket already connected and healthy');
 
-   return;
- }
+      return;
+    }
 
     _globalCallSocketStarting = true;
 
@@ -380,9 +375,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       _globalCallSocketStarted = connected;
       _globalCallSocketUserId = connected ? currentUserId : null;
 
-      debugPrint(
-        'AUTH GATE GLOBAL CALL SOCKET READY: connected=$connected',
-      );
+      debugPrint('AUTH GATE GLOBAL CALL SOCKET READY: connected=$connected');
     } catch (e, st) {
       debugPrint('AUTH GATE GLOBAL CALL SOCKET ERROR: $e');
       debugPrint(st.toString());
@@ -423,16 +416,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     final auth = context.watch<AuthProvider>();
 
     if (_checking || auth.isLoading) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     if (!auth.isLoggedIn) {
       return const WelcomeScreen();
-    } 
+    }
 
     _loggedOutCleanupDone = false;
 
@@ -485,10 +474,7 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       });
     }
 
-    final currentUserId = _firstNotEmpty([
-      _resolvedUserId,
-      fallbackUserId,
-    ]);
+    final currentUserId = _firstNotEmpty([_resolvedUserId, fallbackUserId]);
 
     final currentUserName = _firstNotEmpty([
       _resolvedUserName,
@@ -501,16 +487,12 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
     ]);
 
     if (!_resolvedUserLoaded && currentUserId.isEmpty) {
-      return const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(),
-        ),
-      );
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
 
     final globalSocketHealthy =
-       GlobalCallSocketService.instance.isConnected &&
-       GlobalCallSocketService.instance.isHealthy;
+        GlobalCallSocketService.instance.isConnected &&
+        GlobalCallSocketService.instance.isHealthy;
 
     if (currentUserId.isNotEmpty &&
         !_globalCallSocketStarting &&
@@ -534,4 +516,4 @@ class _AuthGateState extends State<AuthGate> with WidgetsBindingObserver {
       currentUserAvatar: currentUserAvatar,
     );
   }
-} 
+}

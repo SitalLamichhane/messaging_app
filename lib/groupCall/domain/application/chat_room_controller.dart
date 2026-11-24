@@ -14,11 +14,9 @@ class ChatRoomController extends ChangeNotifier {
   final ChatApiService api;
   final ConversationRealtimeService realtime;
 
-  final List<ChatMessageDto> _messages =
-      <ChatMessageDto>[];
+  final List<ChatMessageDto> _messages = <ChatMessageDto>[];
 
-  StreamSubscription<ConversationRealtimeEvent>?
-      _realtimeSubscription;
+  StreamSubscription<ConversationRealtimeEvent>? _realtimeSubscription;
 
   bool _loading = false;
   bool _sending = false;
@@ -45,8 +43,7 @@ class ChatRoomController extends ChangeNotifier {
     required this.realtime,
   });
 
-  List<ChatMessageDto> get messages =>
-      List.unmodifiable(_messages);
+  List<ChatMessageDto> get messages => List.unmodifiable(_messages);
 
   bool get loading => _loading;
 
@@ -100,8 +97,7 @@ class ChatRoomController extends ChangeNotifier {
       unawaited(_sendTyping(true));
     }
 
-    _outgoingTypingTimer =
-        Timer(const Duration(milliseconds: 1400), () {
+    _outgoingTypingTimer = Timer(const Duration(milliseconds: 1400), () {
       if (_disposed) return;
       unawaited(stopTyping());
     });
@@ -124,10 +120,7 @@ class ChatRoomController extends ChangeNotifier {
     }
 
     try {
-      await realtime.sendJson({
-        'action': 'typing',
-        'is_typing': typing,
-      });
+      await realtime.sendJson({'action': 'typing', 'is_typing': typing});
 
       debugPrint(
         '[CHAT ROOM] typing sent '
@@ -159,7 +152,8 @@ class ChatRoomController extends ChangeNotifier {
     if (userId == null || userId == currentUserId) return;
 
     final rawTyping = data['is_typing'] ?? data['typing'];
-    final isTyping = rawTyping == true ||
+    final isTyping =
+        rawTyping == true ||
         rawTyping == 1 ||
         rawTyping?.toString().toLowerCase() == 'true';
 
@@ -190,8 +184,7 @@ class ChatRoomController extends ChangeNotifier {
     if (name.isEmpty) name = 'Someone';
 
     _typingUsers[userId] = name;
-    _typingExpiryTimers[userId] =
-        Timer(const Duration(seconds: 5), () {
+    _typingExpiryTimers[userId] = Timer(const Duration(seconds: 5), () {
       if (_disposed) return;
       _typingExpiryTimers.remove(userId);
       if (_typingUsers.remove(userId) != null) _safeNotify();
@@ -215,9 +208,7 @@ class ChatRoomController extends ChangeNotifier {
   // ============================================================
 
   Future<void> initialize() async {
-    if (_disposed ||
-        _initializing ||
-        _initialized) {
+    if (_disposed || _initializing || _initialized) {
       return;
     }
 
@@ -235,19 +226,14 @@ class ChatRoomController extends ChangeNotifier {
        * This avoids losing websocket messages while
        * the REST message history is loading.
        */
-      _realtimeSubscription =
-          realtime.events.listen(
+      _realtimeSubscription = realtime.events.listen(
         _onRealtimeEvent,
         onError: (Object error) {
-          debugPrint(
-            '[CHAT ROOM] realtime error: $error',
-          );
+          debugPrint('[CHAT ROOM] realtime error: $error');
         },
       );
 
-      await realtime.connect(
-        conversationId,
-      );
+      await realtime.connect(conversationId);
 
       if (_disposed) return;
 
@@ -259,9 +245,7 @@ class ChatRoomController extends ChangeNotifier {
        * Mark the conversation as read after the
        * history has been loaded.
        */
-      await api.markConversationRead(
-        conversationId,
-      );
+      await api.markConversationRead(conversationId);
 
       if (_disposed) return;
 
@@ -280,9 +264,7 @@ class ChatRoomController extends ChangeNotifier {
 
       _error = error.toString();
 
-      debugPrint(
-        '[CHAT ROOM] initialize failed: $error',
-      );
+      debugPrint('[CHAT ROOM] initialize failed: $error');
 
       _safeNotify();
     } finally {
@@ -303,10 +285,7 @@ class ChatRoomController extends ChangeNotifier {
     _safeNotify();
 
     try {
-      final loaded =
-          await api.loadMessages(
-        conversationId,
-      );
+      final loaded = await api.loadMessages(conversationId);
 
       if (_disposed) return;
 
@@ -326,13 +305,11 @@ class ChatRoomController extends ChangeNotifier {
        *
        * is not overwritten by an older local object.
        */
-      final combined =
-          <int, ChatMessageDto>{};
+      final combined = <int, ChatMessageDto>{};
 
       for (final message in _messages) {
         if (message.id > 0) {
-          combined[message.id] =
-              message;
+          combined[message.id] = message;
         }
       }
 
@@ -342,16 +319,11 @@ class ChatRoomController extends ChangeNotifier {
           continue;
         }
 
-        final existing =
-            combined[message.id];
+        final existing = combined[message.id];
 
-        combined[message.id] =
-            existing == null
-                ? message
-                : _mergeMessages(
-                    existing,
-                    message,
-                  );
+        combined[message.id] = existing == null
+            ? message
+            : _mergeMessages(existing, message);
       }
 
       _messages
@@ -375,60 +347,49 @@ class ChatRoomController extends ChangeNotifier {
   // SEND TEXT
   // ============================================================
 
-  Future<void> sendText(
-  String text,
-) async {
-  final value = text.trim();
+  Future<void> sendText(String text) async {
+    final value = text.trim();
 
-  if (_disposed ||
-      value.isEmpty ||
-      _sending) {
-    return;
-  }
-
-  _sending = true;
-  _error = null;
-  _safeNotify();
-
-  try {
-    // initialize() already connects this realtime socket.
-    if (!realtime.connected ||
-        realtime.conversationId != conversationId) {
-      throw StateError(
-        'Conversation websocket is not connected.',
-      );
+    if (_disposed || value.isEmpty || _sending) {
+      return;
     }
 
-    await realtime.sendJson({
-      'action': 'send_message',
-      'text': value,
-      'message_type': 'text',
-    });
+    _sending = true;
+    _error = null;
+    _safeNotify();
 
-    debugPrint(
-      '[CHAT ROOM] text sent through websocket: $value',
-    );
+    try {
+      // initialize() already connects this realtime socket.
+      if (!realtime.connected || realtime.conversationId != conversationId) {
+        throw StateError('Conversation websocket is not connected.');
+      }
 
-    // Don't insert locally.
-    // Django saves it and broadcasts the real message
-    // back with its database ID.
-  } catch (error) {
-    if (!_disposed) {
-      _error = error.toString();
-    }
+      await realtime.sendJson({
+        'action': 'send_message',
+        'text': value,
+        'message_type': 'text',
+      });
 
-    debugPrint(
-      '[CHAT ROOM] websocket text send failed: $error',
-    );
+      debugPrint('[CHAT ROOM] text sent through websocket: $value');
 
-    rethrow;
-  } finally {
-    if (!_disposed) {
-      _sending = false;
-      _safeNotify();
+      // Don't insert locally.
+      // Django saves it and broadcasts the real message
+      // back with its database ID.
+    } catch (error) {
+      if (!_disposed) {
+        _error = error.toString();
+      }
+
+      debugPrint('[CHAT ROOM] websocket text send failed: $error');
+
+      rethrow;
+    } finally {
+      if (!_disposed) {
+        _sending = false;
+        _safeNotify();
+      }
     }
   }
-}
 
   Future<void> sendLike() {
     return sendText('👍');
@@ -438,15 +399,8 @@ class ChatRoomController extends ChangeNotifier {
   // IMAGES
   // ============================================================
 
-  Future<void> sendImages(
-    List<XFile> files, {
-    String text = '',
-  }) {
-    return sendMedia(
-      files,
-      text: text,
-      type: 'image',
-    );
+  Future<void> sendImages(List<XFile> files, {String text = ''}) {
+    return sendMedia(files, text: text, type: 'image');
   }
 
   // ============================================================
@@ -458,16 +412,13 @@ class ChatRoomController extends ChangeNotifier {
     String text = '',
     required String type,
   }) async {
-    if (_disposed ||
-        files.isEmpty ||
-        _sending) {
+    if (_disposed || files.isEmpty || _sending) {
       return;
     }
 
     await _runSend(
       () => api.sendMedia(
-        conversationId:
-            conversationId,
+        conversationId: conversationId,
         files: files,
         messageType: type,
         text: text.trim(),
@@ -479,53 +430,31 @@ class ChatRoomController extends ChangeNotifier {
   // AUDIO
   // ============================================================
 
-  Future<void> sendAudio(
-    XFile file,
-  ) {
-    return sendMedia(
-      [file],
-      type: 'audio',
-    );
+  Future<void> sendAudio(XFile file) {
+    return sendMedia([file], type: 'audio');
   }
 
   // ============================================================
   // VIDEO
   // ============================================================
 
-  Future<void> sendVideo(
-    XFile file, {
-    String text = '',
-  }) {
-    return sendMedia(
-      [file],
-      text: text,
-      type: 'video',
-    );
+  Future<void> sendVideo(XFile file, {String text = ''}) {
+    return sendMedia([file], text: text, type: 'video');
   }
 
   // ============================================================
   // FILES
   // ============================================================
 
-  Future<void> sendFiles(
-    List<XFile> files, {
-    String text = '',
-  }) {
-    return sendMedia(
-      files,
-      text: text,
-      type: 'file',
-    );
+  Future<void> sendFiles(List<XFile> files, {String text = ''}) {
+    return sendMedia(files, text: text, type: 'file');
   }
 
   // ============================================================
   // COMMON SEND
   // ============================================================
 
-  Future<void> _runSend(
-    Future<ChatMessageDto> Function()
-        operation,
-  ) async {
+  Future<void> _runSend(Future<ChatMessageDto> Function() operation) async {
     if (_disposed || _sending) {
       return;
     }
@@ -536,8 +465,7 @@ class ChatRoomController extends ChangeNotifier {
     _safeNotify();
 
     try {
-      final message =
-          await operation();
+      final message = await operation();
 
       if (_disposed) return;
 
@@ -546,10 +474,7 @@ class ChatRoomController extends ChangeNotifier {
        * Later websocket delivery of the same message
        * will merge instead of duplicate it.
        */
-      _upsertMessage(
-        message,
-        merge: true,
-      );
+      _upsertMessage(message, merge: true);
     } catch (error) {
       if (!_disposed) {
         _error = error.toString();
@@ -583,18 +508,11 @@ class ChatRoomController extends ChangeNotifier {
     _error = null;
 
     try {
-      final updated =
-          await api.editMessage(
-        messageId: messageId,
-        text: value,
-      );
+      final updated = await api.editMessage(messageId: messageId, text: value);
 
       if (_disposed) return;
 
-      _upsertMessage(
-        updated,
-        merge: true,
-      );
+      _upsertMessage(updated, merge: true);
     } catch (error) {
       if (!_disposed) {
         _error = error.toString();
@@ -609,13 +527,10 @@ class ChatRoomController extends ChangeNotifier {
   // DELETE
   // ============================================================
 
-  Future<void> deleteMessage(
-    int messageId,
-  ) async {
+  Future<void> deleteMessage(int messageId) async {
     if (_disposed) return;
 
-    final index =
-        _indexOfMessage(messageId);
+    final index = _indexOfMessage(messageId);
 
     if (index == -1) {
       return;
@@ -625,24 +540,18 @@ class ChatRoomController extends ChangeNotifier {
      * Only allow local user to delete their own
      * message from this controller.
      */
-    if (_messages[index].senderId !=
-        currentUserId) {
+    if (_messages[index].senderId != currentUserId) {
       return;
     }
 
     _error = null;
 
     try {
-      await api.deleteMessage(
-        messageId,
-      );
+      await api.deleteMessage(messageId);
 
       if (_disposed) return;
 
-      _applyDeleted(
-        messageId,
-        notify: true,
-      );
+      _applyDeleted(messageId, notify: true);
     } catch (error) {
       if (!_disposed) {
         _error = error.toString();
@@ -657,18 +566,12 @@ class ChatRoomController extends ChangeNotifier {
   // REALTIME
   // ============================================================
 
-  void _onRealtimeEvent(
-    ConversationRealtimeEvent event,
-  ) {
+  void _onRealtimeEvent(ConversationRealtimeEvent event) {
     if (_disposed) return;
 
-    final type = event.type
-        .trim()
-        .toLowerCase();
+    final type = event.type.trim().toLowerCase();
 
-    debugPrint(
-      '[CHAT ROOM] realtime event: $type',
-    );
+    debugPrint('[CHAT ROOM] realtime event: $type');
 
     switch (type) {
       case 'typing':
@@ -682,9 +585,7 @@ class ChatRoomController extends ChangeNotifier {
       case 'message':
       case 'message_created':
       case 'new_message':
-        _handleRealtimeMessage(
-          event.data,
-        );
+        _handleRealtimeMessage(event.data);
         break;
 
       /*
@@ -694,9 +595,7 @@ class ChatRoomController extends ChangeNotifier {
       case 'chat_message_edited':
       case 'message_updated':
       case 'chat_message_updated':
-        _handleRealtimeMessage(
-          event.data,
-        );
+        _handleRealtimeMessage(event.data);
         break;
 
       /*
@@ -705,9 +604,7 @@ class ChatRoomController extends ChangeNotifier {
       case 'message_deleted':
       case 'chat_message_deleted':
       case 'delete_message':
-        _handleRealtimeDelete(
-          event.data,
-        );
+        _handleRealtimeDelete(event.data);
         break;
 
       /*
@@ -717,9 +614,7 @@ class ChatRoomController extends ChangeNotifier {
       case 'chat_message_delivered':
       case 'delivered':
       case 'delivery_receipt':
-        _handleDelivered(
-          event.data,
-        );
+        _handleDelivered(event.data);
         break;
 
       /*
@@ -732,9 +627,7 @@ class ChatRoomController extends ChangeNotifier {
       case 'chat_message_seen':
       case 'read_receipt':
       case 'seen':
-        _handleSeen(
-          event.data,
-        );
+        _handleSeen(event.data);
         break;
 
       /*
@@ -745,9 +638,7 @@ class ChatRoomController extends ChangeNotifier {
        */
       case 'conversation_read':
       case 'conversation_seen':
-        _handleConversationSeen(
-          event.data,
-        );
+        _handleConversationSeen(event.data);
         break;
 
       default:
@@ -766,21 +657,15 @@ class ChatRoomController extends ChangeNotifier {
   // REALTIME MESSAGE
   // ============================================================
 
-  void _handleRealtimeMessage(
-    Map<String, dynamic> data,
-  ) {
-    final raw =
-        data['message'] ??
-        data['data'];
+  void _handleRealtimeMessage(Map<String, dynamic> data) {
+    final raw = data['message'] ?? data['data'];
 
     Map<String, dynamic>? json;
 
     if (raw is Map) {
-      json =
-          Map<String, dynamic>.from(raw);
+      json = Map<String, dynamic>.from(raw);
     } else if (_looksLikeMessage(data)) {
-      json =
-          Map<String, dynamic>.from(data);
+      json = Map<String, dynamic>.from(data);
     }
 
     if (json == null) {
@@ -793,10 +678,7 @@ class ChatRoomController extends ChangeNotifier {
     }
 
     try {
-      final message =
-          ChatMessageDto.fromJson(
-        json,
-      );
+      final message = ChatMessageDto.fromJson(json);
 
       _rememberUser(message);
 
@@ -804,23 +686,14 @@ class ChatRoomController extends ChangeNotifier {
         return;
       }
 
-      _upsertMessage(
-        message,
-        merge: true,
-      );
+      _upsertMessage(message, merge: true);
 
       /*
        * Message belongs to another user:
        * this chat is currently open, so mark it read.
        */
-      if (message.senderId !=
-              currentUserId &&
-          message.senderId != 0) {
-        unawaited(
-          _markIncomingRead(
-            message.id,
-          ),
-        );
+      if (message.senderId != currentUserId && message.senderId != 0) {
+        unawaited(_markIncomingRead(message.id));
       }
     } catch (error) {
       debugPrint(
@@ -830,15 +703,12 @@ class ChatRoomController extends ChangeNotifier {
     }
   }
 
-  Future<void> _markIncomingRead(
-    int messageId,
-  ) async {
+  Future<void> _markIncomingRead(int messageId) async {
     if (_disposed) return;
 
     bool sentThroughSocket = false;
 
-    if (realtime.connected &&
-        realtime.conversationId == conversationId) {
+    if (realtime.connected && realtime.conversationId == conversationId) {
       try {
         await realtime.sendJson({
           'action': 'read_message',
@@ -862,10 +732,7 @@ class ChatRoomController extends ChangeNotifier {
     final message = _messages[index];
     if (message.senderId == currentUserId) return;
 
-    _messages[index] = message.copyWith(
-      delivered: true,
-      seen: true,
-    );
+    _messages[index] = message.copyWith(delivered: true, seen: true);
     _safeNotify();
   }
 
@@ -873,41 +740,26 @@ class ChatRoomController extends ChangeNotifier {
   // REALTIME DELETE
   // ============================================================
 
-  void _handleRealtimeDelete(
-    Map<String, dynamic> data,
-  ) {
-    final id =
-        _extractMessageId(data);
+  void _handleRealtimeDelete(Map<String, dynamic> data) {
+    final id = _extractMessageId(data);
 
     if (id == null) {
       return;
     }
 
-    _applyDeleted(
-      id,
-      notify: true,
-    );
+    _applyDeleted(id, notify: true);
   }
 
-  void _applyDeleted(
-    int messageId, {
-    required bool notify,
-  }) {
-    final index =
-        _indexOfMessage(messageId);
+  void _applyDeleted(int messageId, {required bool notify}) {
+    final index = _indexOfMessage(messageId);
 
     if (index == -1) {
       return;
     }
 
-    final current =
-        _messages[index];
+    final current = _messages[index];
 
-    _messages[index] =
-        current.copyWith(
-      text: '',
-      isDeleted: true,
-    );
+    _messages[index] = current.copyWith(text: '', isDeleted: true);
 
     if (notify) {
       _safeNotify();
@@ -918,11 +770,8 @@ class ChatRoomController extends ChangeNotifier {
   // DELIVERED
   // ============================================================
 
-  void _handleDelivered(
-    Map<String, dynamic> data,
-  ) {
-    final ids =
-        _extractMessageIds(data);
+  void _handleDelivered(Map<String, dynamic> data) {
+    final ids = _extractMessageIds(data);
 
     if (ids.isEmpty) {
       return;
@@ -931,30 +780,24 @@ class ChatRoomController extends ChangeNotifier {
     bool changed = false;
 
     for (final id in ids) {
-      final index =
-          _indexOfMessage(id);
+      final index = _indexOfMessage(id);
 
       if (index == -1) {
         continue;
       }
 
-      final current =
-          _messages[index];
+      final current = _messages[index];
 
       /*
        * Receipt ticks only matter for messages
        * sent by the current user.
        */
-      if (current.senderId !=
-          currentUserId) {
+      if (current.senderId != currentUserId) {
         continue;
       }
 
       if (!current.delivered) {
-        _messages[index] =
-            current.copyWith(
-          delivered: true,
-        );
+        _messages[index] = current.copyWith(delivered: true);
 
         changed = true;
       }
@@ -969,9 +812,7 @@ class ChatRoomController extends ChangeNotifier {
   // SEEN
   // ============================================================
 
-  void _handleSeen(
-    Map<String, dynamic> data,
-  ) {
+  void _handleSeen(Map<String, dynamic> data) {
     final ids = _extractMessageIds(data);
     if (ids.isEmpty) return;
 
@@ -983,19 +824,21 @@ class ChatRoomController extends ChangeNotifier {
     );
 
     if (rawUser is Map && readerId != null && readerId > 0) {
-      final name = (rawUser['full_name'] ??
-              rawUser['name'] ??
-              rawUser['username'] ??
-              rawUser['phone'] ??
-              '')
-          .toString()
-          .trim();
-      final avatar = (rawUser['profile_picture'] ??
-              rawUser['avatar'] ??
-              rawUser['profile_image'] ??
-              '')
-          .toString()
-          .trim();
+      final name =
+          (rawUser['full_name'] ??
+                  rawUser['name'] ??
+                  rawUser['username'] ??
+                  rawUser['phone'] ??
+                  '')
+              .toString()
+              .trim();
+      final avatar =
+          (rawUser['profile_picture'] ??
+                  rawUser['avatar'] ??
+                  rawUser['profile_image'] ??
+                  '')
+              .toString()
+              .trim();
       if (name.isNotEmpty) _userNameById[readerId] = name;
       if (avatar.isNotEmpty) _userAvatarById[readerId] = avatar;
     }
@@ -1012,9 +855,7 @@ class ChatRoomController extends ChangeNotifier {
       if (current.senderId != currentUserId) continue;
 
       final readers = <int>{...current.readByUserIds};
-      if (readerId != null &&
-          readerId > 0 &&
-          readerId != currentUserId) {
+      if (readerId != null && readerId > 0 && readerId != currentUserId) {
         readers.add(readerId);
       }
 
@@ -1033,9 +874,7 @@ class ChatRoomController extends ChangeNotifier {
   // CONVERSATION SEEN
   // ============================================================
 
-  void _handleConversationSeen(
-    Map<String, dynamic> data,
-  ) {
+  void _handleConversationSeen(Map<String, dynamic> data) {
     /*
      * Backend may send:
      *
@@ -1050,19 +889,15 @@ class ChatRoomController extends ChangeNotifier {
      * message_id: 12
      */
 
-    final explicitIds =
-        _extractMessageIds(data);
+    final explicitIds = _extractMessageIds(data);
 
     if (explicitIds.length > 1) {
-      _markOwnMessagesSeen(
-        explicitIds.toSet(),
-      );
+      _markOwnMessagesSeen(explicitIds.toSet());
 
       return;
     }
 
-    final lastReadId =
-        _intValue(
+    final lastReadId = _intValue(
       data['last_read_message_id'] ??
           data['last_seen_message_id'] ??
           data['up_to_message_id'] ??
@@ -1071,9 +906,7 @@ class ChatRoomController extends ChangeNotifier {
 
     if (lastReadId == null) {
       if (explicitIds.isNotEmpty) {
-        _markOwnMessagesSeen(
-          explicitIds.toSet(),
-        );
+        _markOwnMessagesSeen(explicitIds.toSet());
       }
 
       return;
@@ -1081,29 +914,19 @@ class ChatRoomController extends ChangeNotifier {
 
     bool changed = false;
 
-    for (int i = 0;
-        i < _messages.length;
-        i++) {
-      final message =
-          _messages[i];
+    for (int i = 0; i < _messages.length; i++) {
+      final message = _messages[i];
 
-      if (message.senderId !=
-          currentUserId) {
+      if (message.senderId != currentUserId) {
         continue;
       }
 
-      if (message.id >
-          lastReadId) {
+      if (message.id > lastReadId) {
         continue;
       }
 
-      if (!message.seen ||
-          !message.delivered) {
-        _messages[i] =
-            message.copyWith(
-          delivered: true,
-          seen: true,
-        );
+      if (!message.seen || !message.delivered) {
+        _messages[i] = message.copyWith(delivered: true, seen: true);
 
         changed = true;
       }
@@ -1114,33 +937,22 @@ class ChatRoomController extends ChangeNotifier {
     }
   }
 
-  void _markOwnMessagesSeen(
-    Set<int> ids,
-  ) {
+  void _markOwnMessagesSeen(Set<int> ids) {
     bool changed = false;
 
-    for (int i = 0;
-        i < _messages.length;
-        i++) {
-      final message =
-          _messages[i];
+    for (int i = 0; i < _messages.length; i++) {
+      final message = _messages[i];
 
       if (!ids.contains(message.id)) {
         continue;
       }
 
-      if (message.senderId !=
-          currentUserId) {
+      if (message.senderId != currentUserId) {
         continue;
       }
 
-      if (!message.seen ||
-          !message.delivered) {
-        _messages[i] =
-            message.copyWith(
-          delivered: true,
-          seen: true,
-        );
+      if (!message.seen || !message.delivered) {
+        _messages[i] = message.copyWith(delivered: true, seen: true);
 
         changed = true;
       }
@@ -1158,8 +970,7 @@ class ChatRoomController extends ChangeNotifier {
   void _markIncomingMessagesSeenLocally() {
     bool changed = false;
 
-    if (realtime.connected &&
-        realtime.conversationId == conversationId) {
+    if (realtime.connected && realtime.conversationId == conversationId) {
       for (final message in _messages) {
         if (message.id <= 0 ||
             message.senderId == 0 ||
@@ -1168,35 +979,24 @@ class ChatRoomController extends ChangeNotifier {
         }
 
         unawaited(
-          realtime.sendJson({
-            'action': 'read_message',
-            'message_id': message.id,
-          }).catchError((Object error) {
-            debugPrint('[CHAT ROOM] history read receipt failed: $error');
-          }),
+          realtime
+              .sendJson({'action': 'read_message', 'message_id': message.id})
+              .catchError((Object error) {
+                debugPrint('[CHAT ROOM] history read receipt failed: $error');
+              }),
         );
       }
     }
 
-    for (int i = 0;
-        i < _messages.length;
-        i++) {
-      final message =
-          _messages[i];
+    for (int i = 0; i < _messages.length; i++) {
+      final message = _messages[i];
 
-      if (message.senderId == 0 ||
-          message.senderId ==
-              currentUserId) {
+      if (message.senderId == 0 || message.senderId == currentUserId) {
         continue;
       }
 
-      if (!message.seen ||
-          !message.delivered) {
-        _messages[i] =
-            message.copyWith(
-          delivered: true,
-          seen: true,
-        );
+      if (!message.seen || !message.delivered) {
+        _messages[i] = message.copyWith(delivered: true, seen: true);
 
         changed = true;
       }
@@ -1211,30 +1011,19 @@ class ChatRoomController extends ChangeNotifier {
   // UPSERT
   // ============================================================
 
-  void _upsertMessage(
-    ChatMessageDto message, {
-    bool merge = true,
-  }) {
-    if (_disposed ||
-        message.id <= 0) {
+  void _upsertMessage(ChatMessageDto message, {bool merge = true}) {
+    if (_disposed || message.id <= 0) {
       return;
     }
 
-    final index =
-        _indexOfMessage(
-      message.id,
-    );
+    final index = _indexOfMessage(message.id);
 
     if (index == -1) {
       _messages.add(message);
     } else {
-      _messages[index] =
-          merge
-              ? _mergeMessages(
-                  _messages[index],
-                  message,
-                )
-              : message;
+      _messages[index] = merge
+          ? _mergeMessages(_messages[index], message)
+          : message;
     }
 
     _sortMessages();
@@ -1265,31 +1054,19 @@ class ChatRoomController extends ChangeNotifier {
     return newMessage.copyWith(
       readByUserIds: mergedReaders.toList(growable: false),
 
-      delivered:
-          oldMessage.delivered ||
-          newMessage.delivered,
+      delivered: oldMessage.delivered || newMessage.delivered,
 
-      seen:
-          oldMessage.seen ||
-          newMessage.seen,
+      seen: oldMessage.seen || newMessage.seen,
 
-      isDeleted:
-          oldMessage.isDeleted ||
-          newMessage.isDeleted,
+      isDeleted: oldMessage.isDeleted || newMessage.isDeleted,
 
-      isEdited:
-          oldMessage.isEdited ||
-          newMessage.isEdited,
+      isEdited: oldMessage.isEdited || newMessage.isEdited,
 
       /*
        * If deletion was already received but an older
        * message event arrives later, keep text empty.
        */
-      text:
-          oldMessage.isDeleted ||
-                  newMessage.isDeleted
-              ? ''
-              : newMessage.text,
+      text: oldMessage.isDeleted || newMessage.isDeleted ? '' : newMessage.text,
     );
   }
 
@@ -1297,70 +1074,44 @@ class ChatRoomController extends ChangeNotifier {
   // MESSAGE ID HELPERS
   // ============================================================
 
-  int _indexOfMessage(
-    int messageId,
-  ) {
-    return _messages.indexWhere(
-      (message) =>
-          message.id == messageId,
-    );
+  int _indexOfMessage(int messageId) {
+    return _messages.indexWhere((message) => message.id == messageId);
   }
 
-  int? _extractMessageId(
-    Map<String, dynamic> data,
-  ) {
-    final direct =
-        _intValue(
-      data['message_id'] ??
-          data['id'],
-    );
+  int? _extractMessageId(Map<String, dynamic> data) {
+    final direct = _intValue(data['message_id'] ?? data['id']);
 
     if (direct != null) {
       return direct;
     }
 
-    final message =
-        data['message'];
+    final message = data['message'];
 
     if (message is Map) {
-      return _intValue(
-        message['id'] ??
-            message['message_id'],
-      );
+      return _intValue(message['id'] ?? message['message_id']);
     }
 
-    final nested =
-        data['data'];
+    final nested = data['data'];
 
     if (nested is Map) {
-      return _intValue(
-        nested['message_id'] ??
-            nested['id'],
-      );
+      return _intValue(nested['message_id'] ?? nested['id']);
     }
 
     return null;
   }
 
-  List<int> _extractMessageIds(
-    Map<String, dynamic> data,
-  ) {
-    final result =
-        <int>{};
+  List<int> _extractMessageIds(Map<String, dynamic> data) {
+    final result = <int>{};
 
     void addValue(dynamic value) {
-      final id =
-          _intValue(value);
+      final id = _intValue(value);
 
-      if (id != null &&
-          id > 0) {
+      if (id != null && id > 0) {
         result.add(id);
       }
     }
 
-    final ids =
-        data['message_ids'] ??
-        data['ids'];
+    final ids = data['message_ids'] ?? data['ids'];
 
     if (ids is List) {
       for (final value in ids) {
@@ -1368,56 +1119,40 @@ class ChatRoomController extends ChangeNotifier {
       }
     }
 
-    addValue(
-      data['message_id'],
-    );
+    addValue(data['message_id']);
 
     /*
      * Only treat "id" as message ID when no
      * explicit message ID was supplied.
      */
     if (result.isEmpty) {
-      addValue(
-        data['id'],
-      );
+      addValue(data['id']);
     }
 
-    final message =
-        data['message'];
+    final message = data['message'];
 
     if (message is Map) {
-      addValue(
-        message['id'] ??
-            message['message_id'],
-      );
+      addValue(message['id'] ?? message['message_id']);
     }
 
-    final nested =
-        data['data'];
+    final nested = data['data'];
 
     if (nested is Map) {
-      final nestedIds =
-          nested['message_ids'];
+      final nestedIds = nested['message_ids'];
 
       if (nestedIds is List) {
-        for (final value
-            in nestedIds) {
+        for (final value in nestedIds) {
           addValue(value);
         }
       }
 
-      addValue(
-        nested['message_id'] ??
-            nested['id'],
-      );
+      addValue(nested['message_id'] ?? nested['id']);
     }
 
     return result.toList();
   }
 
-  int? _intValue(
-    dynamic value,
-  ) {
+  int? _intValue(dynamic value) {
     if (value == null) {
       return null;
     }
@@ -1430,22 +1165,16 @@ class ChatRoomController extends ChangeNotifier {
       return value.toInt();
     }
 
-    return int.tryParse(
-      value.toString(),
-    );
+    return int.tryParse(value.toString());
   }
 
-  bool _looksLikeMessage(
-    Map<String, dynamic> data,
-  ) {
+  bool _looksLikeMessage(Map<String, dynamic> data) {
     return data.containsKey('id') &&
-        (
-          data.containsKey('sender') ||
-          data.containsKey('sender_id') ||
-          data.containsKey('text') ||
-          data.containsKey('attachments') ||
-          data.containsKey('message_type')
-        );
+        (data.containsKey('sender') ||
+            data.containsKey('sender_id') ||
+            data.containsKey('text') ||
+            data.containsKey('attachments') ||
+            data.containsKey('message_type'));
   }
 
   // ============================================================
@@ -1453,34 +1182,19 @@ class ChatRoomController extends ChangeNotifier {
   // ============================================================
 
   void _sortMessages() {
-    _messages.sort(
-      (a, b) {
-        final aDate =
-            a.createdAt ??
-            DateTime.fromMillisecondsSinceEpoch(
-              0,
-            );
+    _messages.sort((a, b) {
+      final aDate = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
 
-        final bDate =
-            b.createdAt ??
-            DateTime.fromMillisecondsSinceEpoch(
-              0,
-            );
+      final bDate = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
 
-        final dateCompare =
-            aDate.compareTo(
-          bDate,
-        );
+      final dateCompare = aDate.compareTo(bDate);
 
-        if (dateCompare != 0) {
-          return dateCompare;
-        }
+      if (dateCompare != 0) {
+        return dateCompare;
+      }
 
-        return a.id.compareTo(
-          b.id,
-        );
-      },
-    );
+      return a.id.compareTo(b.id);
+    });
   }
 
   // ============================================================
@@ -1495,15 +1209,12 @@ class ChatRoomController extends ChangeNotifier {
 
     _disposed = true;
 
-    final subscription =
-        _realtimeSubscription;
+    final subscription = _realtimeSubscription;
 
     _realtimeSubscription = null;
 
     if (subscription != null) {
-      unawaited(
-        subscription.cancel(),
-      );
+      unawaited(subscription.cancel());
     }
 
     /*

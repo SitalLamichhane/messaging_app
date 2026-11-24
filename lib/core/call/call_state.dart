@@ -127,20 +127,25 @@ class CallState {
       currentUserId: clearUserInfo ? null : currentUserId ?? this.currentUserId,
       receiverId: clearUserInfo ? null : receiverId ?? this.receiverId,
       callId: clearCallIdentity ? null : callId ?? this.callId,
-      conversationId:
-          clearCallIdentity ? null : conversationId ?? this.conversationId,
+      conversationId: clearCallIdentity
+          ? null
+          : conversationId ?? this.conversationId,
       errorMessage: clearError ? null : errorMessage ?? this.errorMessage,
       name: clearUserInfo ? null : name ?? this.name,
       avatarUrl: clearUserInfo ? null : avatarUrl ?? this.avatarUrl,
-      incomingOffer:
-          clearIncomingOffer ? null : incomingOffer ?? this.incomingOffer,
+      incomingOffer: clearIncomingOffer
+          ? null
+          : incomingOffer ?? this.incomingOffer,
       pendingVideoOffer: clearPendingVideoOffer
           ? null
           : pendingVideoOffer ?? this.pendingVideoOffer,
       duration: duration ?? this.duration,
-      localRenderer: clearRenderers ? null : localRenderer ?? this.localRenderer,
-      remoteRenderer:
-          clearRenderers ? null : remoteRenderer ?? this.remoteRenderer,
+      localRenderer: clearRenderers
+          ? null
+          : localRenderer ?? this.localRenderer,
+      remoteRenderer: clearRenderers
+          ? null
+          : remoteRenderer ?? this.remoteRenderer,
     );
   }
 

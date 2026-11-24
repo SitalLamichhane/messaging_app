@@ -5,10 +5,11 @@ import 'package:hiddenly/groupCall/domain/presentation/screens/group_call_screen
 import 'package:hiddenly/groupChat/domain/create_group_chat_screen.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:dio/dio.dart';
+
 import 'dart:io';
+
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:flutter/material.dart';
-import 'package:characters/characters.dart';
 import 'package:hiddenly/profile_data/block_page.dart';
 import 'package:provider/provider.dart';
 import 'package:hiddenly/call_screen.dart';
@@ -19,7 +20,6 @@ import 'package:hiddenly/core/block/block_provider.dart';
 import 'package:hiddenly/profile_data/conversation_search_page.dart';
 import 'package:hiddenly/profile_data/photos_media_page.dart';
 import 'package:hiddenly/theme_controller.dart';
-
 
 String _safeInitial(String? value, {String fallback = '?'}) {
   final text = value?.trim() ?? '';
@@ -77,7 +77,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
   bool get isDark => Theme.of(context).brightness == Brightness.dark;
 
-  Color get bgColor => isDark ? const Color(0xFF0F172A) : const Color(0xFFF4F5F7);
+  Color get bgColor =>
+      isDark ? const Color(0xFF0F172A) : const Color(0xFFF4F5F7);
 
   Color get cardColor => isDark ? const Color(0xFF1E293B) : Colors.white;
 
@@ -113,7 +114,9 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
   List<ChatMessage> get _mediaMessages {
     return widget.chat.messages
-        .where((m) => m.type == MessageType.image || m.type == MessageType.video)
+        .where(
+          (m) => m.type == MessageType.image || m.type == MessageType.video,
+        )
         .toList();
   }
 
@@ -214,7 +217,6 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
     return '';
   }
-
 
   ChatUser? _memberByUserId(String userId) {
     final cleanUserId = userId.trim();
@@ -328,9 +330,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     try {
       final response = await ApiClient.dio.patch(
         '/chat/conversations/$conversationId/members/$userId/nickname/',
-        data: {
-          'nickname': nickname.trim(),
-        },
+        data: {'nickname': nickname.trim()},
       );
 
       debugPrint('NICKNAME UPDATE STATUS: ${response.statusCode}');
@@ -381,10 +381,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
         if (conversationId != widget.chat.id.toString()) continue;
 
-        final freshChat = ChatItem.fromJson(
-          map,
-          currentUserId: currentUserId,
-        );
+        final freshChat = ChatItem.fromJson(map, currentUserId: currentUserId);
 
         final index = AppChatData.chats.indexWhere(
           (chat) => chat.id.toString() == freshChat.id.toString(),
@@ -440,8 +437,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
       if (memberId == currentUserId) {
         myMember = member;
-      } else if (targetMember == null) {
-        targetMember = member;
+      } else {
+        targetMember ??= member;
       }
     }
 
@@ -460,6 +457,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         myMember.isBlocked == true &&
         myMember.blockedBy?.toString() == targetUserId;
 
+    if (!mounted) return;
     final blockProvider = context.read<BlockProvider>();
 
     blockProvider.setLocalBlocked(
@@ -570,10 +568,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        SnackBar(
-          content: Text(text),
-          behavior: SnackBarBehavior.floating,
-        ),
+        SnackBar(content: Text(text), behavior: SnackBarBehavior.floating),
       );
   }
 
@@ -681,9 +676,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         _updatedGroupImageUrl = cleanUploadedUrl;
       });
 
-      final updatedChat = widget.chat.copyWith(
-        avatarUrl: cleanUploadedUrl,
-      );
+      final updatedChat = widget.chat.copyWith(avatarUrl: cleanUploadedUrl);
 
       final index = AppChatData.chats.indexWhere((c) => c.id == widget.chat.id);
 
@@ -713,9 +706,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       final response = await ApiClient.dio.patch(
         '/chat/groups/$conversationId/update/',
         data: formData,
-        options: Options(
-          contentType: 'multipart/form-data',
-        ),
+        options: Options(contentType: 'multipart/form-data'),
       );
 
       debugPrint('GROUP IMAGE UPDATE STATUS: ${response.statusCode}');
@@ -727,7 +718,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         final conversation = data['conversation'];
 
         if (conversation is Map) {
-          final imageUrl = conversation['image'] ??
+          final imageUrl =
+              conversation['image'] ??
               conversation['group_image'] ??
               conversation['avatar'] ??
               conversation['avatar_url'];
@@ -737,7 +729,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
           }
         }
 
-        final imageUrl = data['image'] ??
+        final imageUrl =
+            data['image'] ??
             data['group_image'] ??
             data['avatar'] ??
             data['avatar_url'];
@@ -749,7 +742,9 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
       return '';
     } on DioException catch (e) {
-      debugPrint('UPDATE GROUP IMAGE DIO ERROR STATUS: ${e.response?.statusCode}');
+      debugPrint(
+        'UPDATE GROUP IMAGE DIO ERROR STATUS: ${e.response?.statusCode}',
+      );
       debugPrint('UPDATE GROUP IMAGE DIO ERROR DATA: ${e.response?.data}');
       debugPrint('UPDATE GROUP IMAGE DIO ERROR MESSAGE: ${e.message}');
       return null;
@@ -774,7 +769,6 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       ),
     );
   }
-
 
   Future<void> _openAddGroupMemberSheet() async {
     if (!isGroupChat) return;
@@ -853,10 +847,12 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 setModalState(() {
                   foundUser = ChatUser(
                     id: id,
-                    name: data['name']?.toString() ??
+                    name:
+                        data['name']?.toString() ??
                         data['full_name']?.toString() ??
                         'User',
-                    phone: data['phone_number']?.toString() ??
+                    phone:
+                        data['phone_number']?.toString() ??
                         data['phone']?.toString() ??
                         phone,
                     avatarUrl: _cleanImageUrl(
@@ -872,7 +868,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 setModalState(() {
                   errorText = e.response?.data is Map
                       ? ((e.response?.data as Map)['error']?.toString() ??
-                          'User not found')
+                            'User not found')
                       : 'User not found';
                   foundUser = null;
                 });
@@ -905,7 +901,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                   data: {'user_id': user.id},
                 );
 
-                final ok = response.statusCode == 200 ||
+                final ok =
+                    response.statusCode == 200 ||
                     response.statusCode == 201 ||
                     response.data is Map &&
                         (response.data['success'] == true ||
@@ -932,8 +929,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
                 if (index >= 0) {
                   final existsInGlobal = AppChatData.chats[index].members.any(
-                    (member) =>
-                        member.id.toString().trim() == user.id.trim(),
+                    (member) => member.id.toString().trim() == user.id.trim(),
                   );
 
                   if (!existsInGlobal) {
@@ -961,7 +957,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 setModalState(() {
                   errorText = e.response?.data is Map
                       ? ((e.response?.data as Map)['error']?.toString() ??
-                          'Could not add member')
+                            'Could not add member')
                       : 'Could not add member';
                 });
               } catch (e) {
@@ -1088,7 +1084,10 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                               child: foundUser!.avatarUrl.isEmpty
                                   ? Text(
                                       foundUser!.name.isNotEmpty
-                                          ? _safeInitial(foundUser!.name, fallback: 'U')
+                                          ? _safeInitial(
+                                              foundUser!.name,
+                                              fallback: 'U',
+                                            )
                                           : 'U',
                                     )
                                   : null,
@@ -1145,7 +1144,6 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     // Once this method returns there are no retained references, so it can be GC'd safely.
   }
 
-
   Future<void> _refreshActiveGroupCall() async {
     if (!isGroupChat || !mounted) return;
 
@@ -1178,9 +1176,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => GroupCallScreen(
-            controller: controller,
-          ),
+          builder: (_) => GroupCallScreen(controller: controller),
         ),
       );
 
@@ -1192,9 +1188,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       debugPrint('GROUP CALL JOIN ERROR: $e');
 
       if (mounted) {
-        _showSnackBar(
-          controller.error ?? 'Could not join the group call.',
-        );
+        _showSnackBar(controller.error ?? 'Could not join the group call.');
       }
     }
   }
@@ -1215,9 +1209,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       // This is important because pressing Audio/Video while an existing
       // group call is running should JOIN that room rather than create
       // another CallSession.
-      final existing = await controller.checkActiveCall(
-        conversationId,
-      );
+      final existing = await controller.checkActiveCall(conversationId);
 
       if (existing != null && existing.isActive) {
         await _joinOngoingGroupCall(existing);
@@ -1226,9 +1218,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
       AppChatData.addCallLog(
         chat: widget.chat,
-        type: isVideo
-            ? CallEntryType.video
-            : CallEntryType.voice,
+        type: isVideo ? CallEntryType.video : CallEntryType.voice,
         status: CallEntryStatus.outgoing,
         duration: const Duration(seconds: 0),
         answered: true,
@@ -1244,9 +1234,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (_) => GroupCallScreen(
-            controller: controller,
-          ),
+          builder: (_) => GroupCallScreen(controller: controller),
         ),
       );
 
@@ -1258,9 +1246,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
       debugPrint('START GROUP CALL ERROR: $e');
 
       if (mounted) {
-        _showSnackBar(
-          controller.error ?? 'Could not start the group call.',
-        );
+        _showSnackBar(controller.error ?? 'Could not start the group call.');
       }
     }
   }
@@ -1343,9 +1329,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         return Padding(
           padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
           child: Material(
-            color: isDark
-                ? const Color(0xFF123C35)
-                : const Color(0xFFE7F8F2),
+            color: isDark ? const Color(0xFF123C35) : const Color(0xFFE7F8F2),
             borderRadius: BorderRadius.circular(20),
             child: InkWell(
               borderRadius: BorderRadius.circular(20),
@@ -1404,9 +1388,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                       const SizedBox(
                         width: 22,
                         height: 22,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                        ),
+                        child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     else
                       const Icon(
@@ -1562,10 +1544,12 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                           title: blockProvider.isLoading
                               ? 'Please wait...'
                               : isBlocked
-                                  ? 'Unblock'
-                                  : 'Block',
+                              ? 'Unblock'
+                              : 'Block',
                           showDivider: false,
-                          onTap: blockProvider.isLoading ? () {} : _openBlockOptions,
+                          onTap: blockProvider.isLoading
+                              ? () {}
+                              : _openBlockOptions,
                         );
                       },
                     ),
@@ -1604,11 +1588,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
           ),
           PopupMenuButton<String>(
             color: sheetColor,
-            icon: Icon(
-              Icons.more_vert_rounded,
-              color: mainTextColor,
-              size: 28,
-            ),
+            icon: Icon(Icons.more_vert_rounded, color: mainTextColor, size: 28),
             onSelected: (value) {
               if (value == 'mute') {
                 _openMuteSheet();
@@ -1644,20 +1624,21 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 children: [
                   CircleAvatar(
                     radius: 59,
-                    backgroundColor:
-                        isDark ? const Color(0xFF334155) : const Color(0xFFE5E7EB),
+                    backgroundColor: isDark
+                        ? const Color(0xFF334155)
+                        : const Color(0xFFE5E7EB),
                     backgroundImage: _resolvedChatAvatarUrl().isNotEmpty
                         ? (_resolvedChatAvatarUrl().startsWith('http://') ||
-                                _resolvedChatAvatarUrl().startsWith('https://')
-                            ? NetworkImage(_resolvedChatAvatarUrl())
-                            : FileImage(File(_resolvedChatAvatarUrl()))
-                                as ImageProvider)
+                                  _resolvedChatAvatarUrl().startsWith(
+                                    'https://',
+                                  )
+                              ? NetworkImage(_resolvedChatAvatarUrl())
+                              : FileImage(File(_resolvedChatAvatarUrl()))
+                                    as ImageProvider)
                         : null,
                     onBackgroundImageError: _resolvedChatAvatarUrl().isNotEmpty
                         ? (Object error, StackTrace? stackTrace) {
-                            debugPrint(
-                              'SETTINGS PROFILE AVATAR ERROR: $error',
-                            );
+                            debugPrint('SETTINGS PROFILE AVATAR ERROR: $error');
                           }
                         : null,
                     child: _resolvedChatAvatarUrl().isEmpty
@@ -1726,10 +1707,10 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
             _blockedMe
                 ? 'Unavailable'
                 : isBlocked
-                    ? 'Blocked'
-                    : widget.chat.isOnline
-                        ? 'Active now'
-                        : 'Offline',
+                ? 'Blocked'
+                : widget.chat.isOnline
+                ? 'Active now'
+                : 'Offline',
             style: TextStyle(
               fontSize: 14,
               color: secondaryTextColor,
@@ -1741,41 +1722,41 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     );
   }
 
- Widget _buildQuickCallActions() {
-  final actions = <Widget>[
-    _CircleActionButton(
-      icon: Icons.call_rounded,
-      iconColor: themeColor,
-      label: 'Audio call',
-      onTap: () => _startCall(false),
-    ),
-    _CircleActionButton(
-      icon: Icons.videocam_rounded,
-      iconColor: themeColor,
-      label: 'Video call',
-      onTap: () => _startCall(true),
-    ),
-  ];
-
-  if (isGroupChat) {
-    actions.add(
+  Widget _buildQuickCallActions() {
+    final actions = <Widget>[
       _CircleActionButton(
-        icon: Icons.person_add_alt_1_rounded,
+        icon: Icons.call_rounded,
         iconColor: themeColor,
-        label: 'Add member',
-        onTap: _openAddGroupMemberSheet,
+        label: 'Audio call',
+        onTap: () => _startCall(false),
+      ),
+      _CircleActionButton(
+        icon: Icons.videocam_rounded,
+        iconColor: themeColor,
+        label: 'Video call',
+        onTap: () => _startCall(true),
+      ),
+    ];
+
+    if (isGroupChat) {
+      actions.add(
+        _CircleActionButton(
+          icon: Icons.person_add_alt_1_rounded,
+          iconColor: themeColor,
+          label: 'Add member',
+          onTap: _openAddGroupMemberSheet,
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 18),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: actions,
       ),
     );
   }
-
-  return Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 18),
-    child: Row(
-      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-      children: actions,
-    ),
-  );
-}
 
   Widget _buildSectionTitle(String title) {
     return Padding(
@@ -1858,10 +1839,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                   alignment: Alignment.centerLeft,
                   child: Text(
                     'Choose how long you want to mute this chat.',
-                    style: TextStyle(
-                      fontSize: 14,
-                      color: secondaryTextColor,
-                    ),
+                    style: TextStyle(fontSize: 14, color: secondaryTextColor),
                   ),
                 ),
                 const SizedBox(height: 18),
@@ -2131,8 +2109,12 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                 fallbackRealName: latestMyName,
               );
 
-              final actualOtherNickname = _initialNicknameForEditor(targetUserId);
-              final actualMyNickname = _initialNicknameForEditor(widget.currentUserId);
+              final actualOtherNickname = _initialNicknameForEditor(
+                targetUserId,
+              );
+              final actualMyNickname = _initialNicknameForEditor(
+                widget.currentUserId,
+              );
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 18),
@@ -2209,8 +2191,9 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                                 userId: memberId,
                                 fallbackRealName: member.name,
                               );
-                              final actualNickname =
-                                  _initialNicknameForEditor(memberId);
+                              final actualNickname = _initialNicknameForEditor(
+                                memberId,
+                              );
 
                               return _NicknameRowTile(
                                 avatarUrl: member.avatarUrl,
@@ -2229,11 +2212,13 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
 
                                   final cleanedValue = value.trim();
 
-                                  final success = await _updateMemberNicknameApi(
-                                    conversationId: widget.chat.id.toString(),
-                                    userId: memberId,
-                                    nickname: cleanedValue,
-                                  );
+                                  final success =
+                                      await _updateMemberNicknameApi(
+                                        conversationId: widget.chat.id
+                                            .toString(),
+                                        userId: memberId,
+                                        nickname: cleanedValue,
+                                      );
 
                                   if (!success) {
                                     _showSnackBar('Could not update nickname');
@@ -2488,10 +2473,7 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
                   ),
                   child: const Text(
                     'Save',
-                    style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
                   ),
                 ),
               ),
@@ -2524,15 +2506,14 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     final result = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (_) => MessengerBlockPage(
-          name: widget.chat.name,
-          isBlocked: isBlocked,
-        ),
+        builder: (_) =>
+            MessengerBlockPage(name: widget.chat.name, isBlocked: isBlocked),
       ),
     );
 
     if (result == null) return;
 
+    if (!mounted) return;
     final blockProvider = context.read<BlockProvider>();
 
     final success = await blockProvider.setBlockStatus(
@@ -2549,8 +2530,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
         blockProvider.error.isNotEmpty
             ? blockProvider.error
             : result
-                ? 'Could not block ${widget.chat.name}'
-                : 'Could not unblock ${widget.chat.name}',
+            ? 'Could not block ${widget.chat.name}'
+            : 'Could not unblock ${widget.chat.name}',
       );
       return;
     }
@@ -2605,10 +2586,8 @@ class _ChatSettingsScreenState extends State<ChatSettingsScreen>
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) => PhotosMediaPage(
-          chatId: widget.chat.id,
-          chatName: _displayChatName,
-        ),
+        builder: (_) =>
+            PhotosMediaPage(chatId: widget.chat.id, chatName: _displayChatName),
       ),
     );
   }
@@ -2721,21 +2700,26 @@ class _SettingsTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black;
-    final subTextColor =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280);
-    final dividerColor =
-        isDark ? const Color(0xFF243041) : const Color(0xFFF1F5F9);
+    final subTextColor = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF6B7280);
+    final dividerColor = isDark
+        ? const Color(0xFF243041)
+        : const Color(0xFFF1F5F9);
 
     return Column(
       children: [
         ListTile(
           onTap: onTap,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 2,
+          ),
           leading: Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.12),
+              color: iconColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(icon, color: iconColor, size: 22),
@@ -2754,16 +2738,10 @@ class _SettingsTile extends StatelessWidget {
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
                     subtitle!,
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: subTextColor,
-                    ),
+                    style: TextStyle(fontSize: 13, color: subTextColor),
                   ),
                 ),
-          trailing: Icon(
-            Icons.chevron_right_rounded,
-            color: subTextColor,
-          ),
+          trailing: Icon(Icons.chevron_right_rounded, color: subTextColor),
         ),
         if (showDivider)
           Padding(
@@ -2796,18 +2774,22 @@ class _SettingsSwitchTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final textColor = isDark ? Colors.white : Colors.black;
-    final dividerColor =
-        isDark ? const Color(0xFF243041) : const Color(0xFFF1F5F9);
+    final dividerColor = isDark
+        ? const Color(0xFF243041)
+        : const Color(0xFFF1F5F9);
 
     return Column(
       children: [
         ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 2,
+          ),
           leading: Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.12),
+              color: iconColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(14),
             ),
             child: Icon(icon, color: iconColor, size: 22),
@@ -2822,7 +2804,7 @@ class _SettingsSwitchTile extends StatelessWidget {
           ),
           trailing: Switch(
             value: value,
-            activeColor: const Color(0xFF1877F2),
+            activeThumbColor: const Color(0xFF1877F2),
             onChanged: onChanged,
           ),
         ),
@@ -2859,19 +2841,18 @@ class _DangerTile extends StatelessWidget {
       children: [
         ListTile(
           onTap: onTap,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 2),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: 18,
+            vertical: 2,
+          ),
           leading: Container(
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: const Color(0xFFEF4444).withOpacity(0.12),
+              color: const Color(0xFFEF4444).withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(
-              icon,
-              color: const Color(0xFFEF4444),
-              size: 22,
-            ),
+            child: Icon(icon, color: const Color(0xFFEF4444), size: 22),
           ),
           title: Text(
             title,
@@ -2947,12 +2928,14 @@ class _NicknameRowTile extends StatelessWidget {
 
               return CircleAvatar(
                 radius: 28,
-                backgroundColor: avatarBackgroundColor ??
+                backgroundColor:
+                    avatarBackgroundColor ??
                     (isDark
                         ? const Color(0xFF334155)
                         : const Color(0xFFE4E6EB)),
-                backgroundImage:
-                    cleanAvatarUrl.isNotEmpty ? NetworkImage(cleanAvatarUrl) : null,
+                backgroundImage: cleanAvatarUrl.isNotEmpty
+                    ? NetworkImage(cleanAvatarUrl)
+                    : null,
                 onBackgroundImageError: cleanAvatarUrl.isNotEmpty
                     ? (Object error, StackTrace? stackTrace) {
                         debugPrint('NICKNAME AVATAR ERROR: $error');
@@ -3006,11 +2989,7 @@ class _NicknameRowTile extends StatelessWidget {
             borderRadius: BorderRadius.circular(18),
             child: Padding(
               padding: const EdgeInsets.all(8),
-              child: Icon(
-                Icons.edit,
-                size: 25,
-                color: textColor,
-              ),
+              child: Icon(Icons.edit, size: 25, color: textColor),
             ),
           ),
         ],

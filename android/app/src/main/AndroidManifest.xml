@@ -65,9 +65,9 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:label="Hiddenly"
-        android:usesCleartextTraffic="true"
-        android:enableOnBackInvokedCallback="true"
-        android:requestLegacyExternalStorage="true">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false"
+        android:enableOnBackInvokedCallback="true">
 
         <!-- Firebase default notification channel -->
         <meta-data

@@ -1,5 +1,3 @@
-
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -9,7 +7,6 @@ import 'package:hiddenly/call_screen.dart';
 import 'package:hiddenly/chat_models.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/call/call_socket_service.dart';
-import 'package:hiddenly/core/call/system_ringtone_service.dart';
 import 'package:hiddenly/core/config/app_config.dart';
 
 class CallWaitingScreen extends StatefulWidget {
@@ -103,7 +100,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
     debugPrint('sentReady: $_sentReady');
     debugPrint('connectingSocket: $_connectingSocket');
     debugPrint('navigatingToCall: $_navigatingToCall');
-    debugPrint('SocketService.isConnected: ${SocketService.instance.isConnected}');
+    debugPrint(
+      'SocketService.isConnected: ${SocketService.instance.isConnected}',
+    );
     debugPrint('widget.currentUserId: ${widget.currentUserId}');
     debugPrint('resolvedCurrentUserId: $_resolvedCurrentUserId');
     debugPrint('callerId: ${widget.callerId}');
@@ -152,9 +151,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
         return;
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Call connection timeout')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Call connection timeout')));
 
       _cancel(reason: 'timeout_while_connecting');
     });
@@ -179,19 +178,13 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
     _logSmall('Removing socket handlers');
 
     if (_callOfferHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.callOffer,
-        _callOfferHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.callOffer, _callOfferHandler);
       _callOfferHandler = null;
       _logSmall('Removed handler: ${CallSocketEvents.callOffer}');
     }
 
     if (_callEndHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.callEnd,
-        _callEndHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.callEnd, _callEndHandler);
       _callEndHandler = null;
       _logSmall('Removed handler: ${CallSocketEvents.callEnd}');
     }
@@ -206,10 +199,7 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
     }
 
     if (_callBusyHandler != null) {
-      SocketService.instance.off(
-        CallSocketEvents.callBusy,
-        _callBusyHandler,
-      );
+      SocketService.instance.off(CallSocketEvents.callBusy, _callBusyHandler);
       _callBusyHandler = null;
       _logSmall('Removed handler: ${CallSocketEvents.callBusy}');
     }
@@ -258,17 +248,23 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
 
       debugPrint('========== CALL WAITING TOKEN DEBUG ==========');
       debugPrint('access exists: ${accessToken != null}');
-      debugPrint('access empty: ${accessToken == null || accessToken.trim().isEmpty}');
+      debugPrint(
+        'access empty: ${accessToken == null || accessToken.trim().isEmpty}',
+      );
       debugPrint('access length: ${accessToken?.length ?? 0}');
       debugPrint('==============================================');
 
       if (accessToken == null || accessToken.trim().isEmpty) {
-        _logSmall('Access token empty. Trying ApiClient.refreshAccessToken()...');
+        _logSmall(
+          'Access token empty. Trying ApiClient.refreshAccessToken()...',
+        );
         accessToken = await ApiClient.refreshAccessToken();
 
         debugPrint('========== CALL WAITING REFRESH TOKEN RESULT ==========');
         debugPrint('new access exists: ${accessToken != null}');
-        debugPrint('new access empty: ${accessToken == null || accessToken.trim().isEmpty}');
+        debugPrint(
+          'new access empty: ${accessToken == null || accessToken.trim().isEmpty}',
+        );
         debugPrint('new access length: ${accessToken?.length ?? 0}');
         debugPrint('=======================================================');
       }
@@ -287,8 +283,8 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
 
       final storedUserAvatar =
           (await ApiClient.storage.read(key: 'avatar_url'))?.trim() ??
-              (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
-              '';
+          (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
+          '';
 
       debugPrint('========== CALL WAITING STORED USER DEBUG ==========');
       debugPrint('storedUserId: $storedUserId');
@@ -336,7 +332,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       debugPrint('isVideoCall: ${widget.isVideoCall}');
       debugPrint('AppConfig.wsBaseUrl: ${AppConfig.wsBaseUrl}');
       debugPrint('CALL WAITING SOCKET URL: $url');
-      debugPrint('SocketService.isConnected BEFORE connect: ${SocketService.instance.isConnected}');
+      debugPrint(
+        'SocketService.isConnected BEFORE connect: ${SocketService.instance.isConnected}',
+      );
       debugPrint('======================================================');
       debugPrint('');
 
@@ -354,11 +352,15 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       await Future.delayed(const Duration(milliseconds: 300));
 
       debugPrint('========== CALL WAITING SOCKET CONNECT RESULT ==========');
-      debugPrint('SocketService.isConnected AFTER connect: ${SocketService.instance.isConnected}');
+      debugPrint(
+        'SocketService.isConnected AFTER connect: ${SocketService.instance.isConnected}',
+      );
       debugPrint('=======================================================');
 
       if (!SocketService.instance.isConnected) {
-        _log('CALL WAITING SOCKET ERROR: SocketService.isConnected false after connect');
+        _log(
+          'CALL WAITING SOCKET ERROR: SocketService.isConnected false after connect',
+        );
         return false;
       }
 
@@ -424,7 +426,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
     debugPrint('targetUser: ${widget.callerId}');
     debugPrint('conversationId: $_conversationId');
     debugPrint('queueIfDisconnected: true');
-    debugPrint('SocketService.isConnected before emit: ${SocketService.instance.isConnected}');
+    debugPrint(
+      'SocketService.isConnected before emit: ${SocketService.instance.isConnected}',
+    );
     debugPrint('=================================================');
     debugPrint('');
 
@@ -479,7 +483,8 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
 
       final payload = Map<String, dynamic>.from(rawPayload);
 
-      final from = payload['from']?.toString() ??
+      final from =
+          payload['from']?.toString() ??
           payload['from_user']?.toString() ??
           payload['caller_id']?.toString() ??
           payload['callerId']?.toString() ??
@@ -496,7 +501,8 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
         return;
       }
 
-      final payloadConversationId = payload['conversation_id']?.toString() ??
+      final payloadConversationId =
+          payload['conversation_id']?.toString() ??
           payload['conversationId']?.toString() ??
           '';
 
@@ -523,7 +529,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       debugPrint('rawOffer: $rawOffer');
       debugPrint('payload direct type: ${payload['type']}');
       debugPrint('payload direct sdp exists: ${payload['sdp'] != null}');
-      debugPrint('payload direct sdp length: ${payload['sdp']?.toString().length ?? 0}');
+      debugPrint(
+        'payload direct sdp length: ${payload['sdp']?.toString().length ?? 0}',
+      );
       debugPrint('=================================================');
 
       if (rawOffer is Map<String, dynamic>) {
@@ -535,10 +543,7 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
         final directSdp = payload['sdp']?.toString() ?? '';
 
         if (directType.trim().isNotEmpty && directSdp.trim().isNotEmpty) {
-          offer = {
-            'type': directType,
-            'sdp': directSdp,
-          };
+          offer = {'type': directType, 'sdp': directSdp};
         }
       }
 
@@ -567,23 +572,28 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
 
       _logSmall('Valid offer received. Preparing to open CallScreen...');
 
-      final callId = payload['call_id']?.toString() ??
+      final callId =
+          payload['call_id']?.toString() ??
           payload['callId']?.toString() ??
           widget.callId;
 
-      final conversationId = payload['conversation_id']?.toString() ??
+      final conversationId =
+          payload['conversation_id']?.toString() ??
           payload['conversationId']?.toString() ??
           widget.conversationId;
 
-      final callerName = payload['callerName']?.toString() ??
+      final callerName =
+          payload['callerName']?.toString() ??
           payload['caller_name']?.toString() ??
           widget.callerName;
 
-      final callerAvatar = payload['callerAvatar']?.toString() ??
+      final callerAvatar =
+          payload['callerAvatar']?.toString() ??
           payload['caller_avatar']?.toString() ??
           widget.callerAvatar;
 
-      final isVideoCall = payload['isVideoCall'] == true ||
+      final isVideoCall =
+          payload['isVideoCall'] == true ||
           payload['is_video_call'] == true ||
           payload['isVideoCall']?.toString() == 'true' ||
           payload['is_video_call']?.toString() == 'true' ||
@@ -595,16 +605,22 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       debugPrint('callerName: $callerName');
       debugPrint('callerAvatar: $callerAvatar');
       debugPrint('isVideoCall: $isVideoCall');
-      debugPrint('currentUserId: ${_resolvedCurrentUserId.isNotEmpty ? _resolvedCurrentUserId : widget.currentUserId}');
-      debugPrint('currentUserName: ${_resolvedCurrentUserName.isNotEmpty ? _resolvedCurrentUserName : widget.currentUserName}');
-      debugPrint('currentUserAvatar: ${_resolvedCurrentUserAvatar.isNotEmpty ? _resolvedCurrentUserAvatar : widget.currentUserAvatar}');
+      debugPrint(
+        'currentUserId: ${_resolvedCurrentUserId.isNotEmpty ? _resolvedCurrentUserId : widget.currentUserId}',
+      );
+      debugPrint(
+        'currentUserName: ${_resolvedCurrentUserName.isNotEmpty ? _resolvedCurrentUserName : widget.currentUserName}',
+      );
+      debugPrint(
+        'currentUserAvatar: ${_resolvedCurrentUserAvatar.isNotEmpty ? _resolvedCurrentUserAvatar : widget.currentUserAvatar}',
+      );
       debugPrint('receiverId/callerId: ${widget.callerId}');
       debugPrint('=================================================');
 
       if ((callId ?? '').trim().isNotEmpty) {
         try {
           _logSmall('Ending CallKit call with id: ${callId!.trim()}');
-    
+
           _logSmall('CallKit endCall success');
         } catch (e, st) {
           debugPrint('!!!!!!!!!! CALL WAITING END CALLKIT ERROR !!!!!!!!!!');
@@ -617,9 +633,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       }
 
       if (!mounted) {
-    _logSmall('Not opening CallScreen because widget unmounted');
-   return;
-   }
+        _logSmall('Not opening CallScreen because widget unmounted');
+        return;
+      }
 
       /*
         Remove waiting handlers before opening CallScreen.
@@ -686,9 +702,8 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
 
       _timeoutTimer?.cancel();
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('User is busy')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('User is busy')));
 
       Navigator.of(context).maybePop();
     };
@@ -704,28 +719,16 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
       Navigator.of(context).maybePop();
     };
 
-    SocketService.instance.on(
-      CallSocketEvents.callOffer,
-      _callOfferHandler!,
-    );
+    SocketService.instance.on(CallSocketEvents.callOffer, _callOfferHandler!);
     _logSmall('Registered handler: ${CallSocketEvents.callOffer}');
 
-    SocketService.instance.on(
-      CallSocketEvents.callEnd,
-      _callEndHandler!,
-    );
+    SocketService.instance.on(CallSocketEvents.callEnd, _callEndHandler!);
     _logSmall('Registered handler: ${CallSocketEvents.callEnd}');
 
-    SocketService.instance.on(
-      CallSocketEvents.callReject,
-      _callRejectHandler!,
-    );
+    SocketService.instance.on(CallSocketEvents.callReject, _callRejectHandler!);
     _logSmall('Registered handler: ${CallSocketEvents.callReject}');
 
-    SocketService.instance.on(
-      CallSocketEvents.callBusy,
-      _callBusyHandler!,
-    );
+    SocketService.instance.on(CallSocketEvents.callBusy, _callBusyHandler!);
     _logSmall('Registered handler: ${CallSocketEvents.callBusy}');
 
     SocketService.instance.on(
@@ -771,7 +774,9 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
     debugPrint('targetUser: ${widget.callerId}');
     debugPrint('conversationId: $_conversationId');
     debugPrint('queueIfDisconnected: true');
-    debugPrint('SocketService.isConnected before emit: ${SocketService.instance.isConnected}');
+    debugPrint(
+      'SocketService.isConnected before emit: ${SocketService.instance.isConnected}',
+    );
     debugPrint('==================================================');
 
     SocketService.instance.emit(
@@ -788,10 +793,14 @@ class _CallWaitingScreenState extends State<CallWaitingScreen> {
         await FlutterCallkitIncoming.endCall(_callId);
         _logSmall('CallKit endCall from cancel success');
       } catch (e, st) {
-        debugPrint('!!!!!!!!!! CALL WAITING CANCEL END CALLKIT ERROR !!!!!!!!!!');
+        debugPrint(
+          '!!!!!!!!!! CALL WAITING CANCEL END CALLKIT ERROR !!!!!!!!!!',
+        );
         debugPrint('error: $e');
         debugPrint('stack: $st');
-        debugPrint('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!');
+        debugPrint(
+          '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!',
+        );
       }
     } else {
       _logSmall('Skipping CallKit endCall from cancel because callId empty');

@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:characters/characters.dart';
 import 'package:hiddenly/calls.dart';
 import 'package:hiddenly/chat_detail.dart';
 import 'package:hiddenly/chat_models.dart';
@@ -35,8 +34,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   int _selectedBottomIndex = 0;
 
-  final TextEditingController _searchController =
-      TextEditingController();
+  final TextEditingController _searchController = TextEditingController();
 
   String _search = '';
   String _currentUserId = '';
@@ -63,7 +61,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
       // Initial conversation load.
       await provider.loadConversations();
-      
+
       await provider.connectGlobalSocket();
       if (!mounted) return;
 
@@ -102,8 +100,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       final preview = _buildPreview(chat).toLowerCase();
       final displayName = _chatDisplayName(chat).toLowerCase();
 
-      return displayName.contains(q) ||
-          preview.contains(q);
+      return displayName.contains(q) || preview.contains(q);
     }).toList();
   }
 
@@ -111,11 +108,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // GROUP SOCKET URI
   // ===============================================================
 
-  Future<Uri> _groupConversationSocketUri(
-    int conversationId,
-  ) async {
-    final token =
-        (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
+  Future<Uri> _groupConversationSocketUri(int conversationId) async {
+    final token = (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
 
     if (token.isEmpty) {
       throw StateError('Access token missing');
@@ -124,10 +118,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final rawBase = AppConfig.wsBaseUrl.trim();
 
     final wsBase = rawBase.endsWith('/')
-        ? rawBase.substring(
-            0,
-            rawBase.length - 1,
-          )
+        ? rawBase.substring(0, rawBase.length - 1)
         : rawBase;
 
     return Uri.parse(
@@ -141,16 +132,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ===============================================================
 
   Future<int?> _resolvedCurrentUserId() async {
-    final activeId = int.tryParse(
-      _activeCurrentUserId(),
-    );
+    final activeId = int.tryParse(_activeCurrentUserId());
 
     if (activeId != null) {
       return activeId;
     }
 
-    final stored =
-        (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
+    final stored = (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
 
     return int.tryParse(stored);
   }
@@ -162,8 +150,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return fromState;
     }
 
-    final fromWidget =
-        widget.currentUserId.trim();
+    final fromWidget = widget.currentUserId.trim();
 
     if (fromWidget.isNotEmpty) {
       return fromWidget;
@@ -176,28 +163,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // OPEN GROUP CHAT
   // ===============================================================
 
-  Future<void> _openGroupChat(
-    ChatItem chat,
-  ) async {
-    final conversationId =
-        int.tryParse(chat.id.toString().trim());
+  Future<void> _openGroupChat(ChatItem chat) async {
+    final conversationId = int.tryParse(chat.id.toString().trim());
 
     if (conversationId == null) {
-      _showError(
-        'Group conversation is not ready',
-      );
+      _showError('Group conversation is not ready');
       return;
     }
 
-    final currentUserId =
-        await _resolvedCurrentUserId();
+    final currentUserId = await _resolvedCurrentUserId();
 
     if (!mounted) return;
 
     if (currentUserId == null) {
-      _showError(
-        'Current user ID is missing',
-      );
+      _showError('Current user ID is missing');
       return;
     }
 
@@ -210,42 +189,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
     await Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (_) =>
-            ConversationChatScreen(
-          conversationId:
-              conversationId,
+        builder: (_) => ConversationChatScreen(
+          conversationId: conversationId,
           isGroup: true,
-          title:
-              _chatDisplayName(chat),
-           members: '',
-          currentUserId:
-              currentUserId,
-          socketUriBuilder:
-              _groupConversationSocketUri,
+          title: _chatDisplayName(chat),
+          members: '',
+          currentUserId: currentUserId,
+          socketUriBuilder: _groupConversationSocketUri,
 
           // Private call is not handled
           // inside group chat.
           onPrivateCall: null,
 
-          settingsBuilder: (
-            BuildContext context,
-            groupCallController,
-          ) {
+          settingsBuilder: (BuildContext context, groupCallController) {
             return ChatSettingsScreen(
               chat: chat,
-              themeColor:
-                  const Color(
-                0xFF1877F2,
-              ),
-              currentUserId:
-                  currentUserId
-                      .toString(),
-              currentUserName:
-                  widget
-                      .currentUserName,
-              currentUserAvatar:
-                  widget
-                      .currentUserAvatar,
+              themeColor: const Color(0xFF1877F2),
+              currentUserId: currentUserId.toString(),
+              currentUserName: widget.currentUserName,
+              currentUserAvatar: widget.currentUserAvatar,
             );
           },
         ),
@@ -254,26 +216,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     if (!mounted) return;
 
-    debugPrint(
-      'Returned from group chat',
-    );
+    debugPrint('Returned from group chat');
   }
 
   // ===============================================================
   // OPEN PRIVATE CHAT
   // ===============================================================
 
-  void _openPrivateChat(
-    ChatItem chat,
-  ) {
+  void _openPrivateChat(ChatItem chat) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            ChatDetailScreen(
-          chat: chat,
-        ),
-      ),
+      MaterialPageRoute(builder: (_) => ChatDetailScreen(chat: chat)),
     );
   }
 
@@ -281,9 +234,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // OPEN CHAT
   // ===============================================================
 
-  void _openChat(
-    ChatItem chat,
-  ) {
+  void _openChat(ChatItem chat) {
     if (chat.isGroup) {
       _openGroupChat(chat);
       return;
@@ -296,18 +247,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ERROR
   // ===============================================================
 
-  void _showError(
-    String message,
-  ) {
+  void _showError(String message) {
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
-      SnackBar(
-        content: Text(message),
-        behavior:
-            SnackBarBehavior.floating,
-      ),
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
     );
   }
 
@@ -335,35 +279,20 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Future<void> _openCreateGroup() async {
     try {
-      final result =
-          await Navigator.push<dynamic>(
+      final result = await Navigator.push<dynamic>(
         context,
-        MaterialPageRoute(
-          builder: (_) =>
-              const CreateGroupChatScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const CreateGroupChatScreen()),
       );
 
       if (!mounted) return;
 
-      final provider =
-          context.read<ChatProvider>();
+      final provider = context.read<ChatProvider>();
 
-      debugPrint(
-        '====================================',
-      );
-      debugPrint(
-        'CREATE GROUP RESULT',
-      );
-      debugPrint(
-        'TYPE: ${result.runtimeType}',
-      );
-      debugPrint(
-        'VALUE: $result',
-      );
-      debugPrint(
-        '====================================',
-      );
+      debugPrint('====================================');
+      debugPrint('CREATE GROUP RESULT');
+      debugPrint('TYPE: ${result.runtimeType}');
+      debugPrint('VALUE: $result');
+      debugPrint('====================================');
 
       // ---------------------------------------------------------
       // NEW FLOW
@@ -393,9 +322,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
         // Safety check.
         if (!result.isGroup) {
-          _showError(
-            'Created conversation is not marked as a group.',
-          );
+          _showError('Created conversation is not marked as a group.');
           return;
         }
 
@@ -407,25 +334,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
         // _upsertConversation(chat)
         // -------------------------------------------------------
 
-        final existingIndex =
-            provider.conversations
-                .indexWhere(
-          (item) =>
-              item.id
-                  .toString()
-                  .trim() ==
-              result.id
-                  .toString()
-                  .trim(),
+        final existingIndex = provider.conversations.indexWhere(
+          (item) => item.id.toString().trim() == result.id.toString().trim(),
         );
 
-        ChatItem createdGroup =
-            result;
+        ChatItem createdGroup = result;
 
         if (existingIndex != -1) {
-          createdGroup =
-              provider.conversations[
-                  existingIndex];
+          createdGroup = provider.conversations[existingIndex];
 
           debugPrint(
             'Group already exists '
@@ -437,9 +353,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
             '$existingIndex',
           );
         } else {
-          debugPrint(
-            'WARNING:',
-          );
+          debugPrint('WARNING:');
 
           debugPrint(
             'Created group is not '
@@ -459,8 +373,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           '${provider.conversations.length}',
         );
 
-        for (final conversation
-            in provider.conversations) {
+        for (final conversation in provider.conversations) {
           debugPrint(
             'CHAT => '
             'id=${conversation.id}, '
@@ -482,15 +395,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
         // inside the provider.
         // -------------------------------------------------------
 
-        await _openGroupChat(
-          createdGroup,
-        );
+        await _openGroupChat(createdGroup);
 
         if (!mounted) return;
 
-        debugPrint(
-          'Returned to ChatListScreen.',
-        );
+        debugPrint('Returned to ChatListScreen.');
 
         debugPrint(
           'Conversation count: '
@@ -523,8 +432,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
           'from backend...',
         );
 
-        await provider
-            .loadConversations();
+        await provider.loadConversations();
 
         if (!mounted) return;
 
@@ -541,9 +449,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       // ---------------------------------------------------------
 
       if (result == null) {
-        debugPrint(
-          'Group creation cancelled.',
-        );
+        debugPrint('Group creation cancelled.');
         return;
       }
 
@@ -551,34 +457,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
       // UNEXPECTED RESULT
       // ---------------------------------------------------------
 
-      debugPrint(
-        'Unexpected create-group result.',
-      );
+      debugPrint('Unexpected create-group result.');
 
-      debugPrint(
-        'Type: ${result.runtimeType}',
-      );
+      debugPrint('Type: ${result.runtimeType}');
 
-      debugPrint(
-        'Value: $result',
-      );
-    } catch (
-      error,
-      stackTrace
-    ) {
-      debugPrint(
-        'CREATE GROUP ERROR: $error',
-      );
+      debugPrint('Value: $result');
+    } catch (error, stackTrace) {
+      debugPrint('CREATE GROUP ERROR: $error');
 
-      debugPrint(
-        '$stackTrace',
-      );
+      debugPrint('$stackTrace');
 
       if (!mounted) return;
 
-      _showError(
-        'Unable to create/open group.',
-      );
+      _showError('Unable to create/open group.');
     }
   }
 
@@ -586,11 +477,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // BOTTOM NAVIGATION
   // ===============================================================
 
-  void _handleBottomTap(
-    int index,
-  ) {
-    if (index ==
-        _selectedBottomIndex) {
+  void _handleBottomTap(int index) {
+    if (index == _selectedBottomIndex) {
       return;
     }
 
@@ -598,40 +486,31 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     if (index == 1) {
       page = CallHistoryScreen(
-        currentUserId:
-            _activeCurrentUserId(),
-        currentUserName:
-            widget.currentUserName,
-        currentUserAvatar:
-            widget.currentUserAvatar,
+        currentUserId: _activeCurrentUserId(),
+        currentUserName: widget.currentUserName,
+        currentUserAvatar: widget.currentUserAvatar,
       );
     } else if (index == 2) {
       page = ProfileScreen(
         chatId: '',
         chatName: '',
-        currentUserId:
-            _activeCurrentUserId(),
-        currentUserName:
-            widget.currentUserName,
-        currentUserAvatar:
-            widget.currentUserAvatar,
+        currentUserId: _activeCurrentUserId(),
+        currentUserName: widget.currentUserName,
+        currentUserAvatar: widget.currentUserAvatar,
       );
     }
 
     if (page != null) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (_) => page!,
-        ),
+        MaterialPageRoute(builder: (_) => page!),
       );
 
       return;
     }
 
     setState(() {
-      _selectedBottomIndex =
-          index;
+      _selectedBottomIndex = index;
     });
   }
 
@@ -639,17 +518,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // CHAT PREVIEW
   // ===============================================================
 
-  String _listTime(
-    ChatItem chat,
-  ) {
+  String _listTime(ChatItem chat) {
     return chat.time;
   }
 
-  String _buildPreview(
-    ChatItem chat,
-  ) {
-    final preview =
-        chat.message.trim();
+  String _buildPreview(ChatItem chat) {
+    final preview = chat.message.trim();
 
     if (preview.isNotEmpty) {
       return preview;
@@ -659,26 +533,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return 'Start chatting';
     }
 
-    final latest =
-        chat.messages.last;
+    final latest = chat.messages.last;
 
     switch (latest.type) {
       case MessageType.text:
-        return latest.text.isEmpty
-            ? 'Message'
-            : latest.text;
+        return latest.text.isEmpty ? 'Message' : latest.text;
 
       case MessageType.image:
         return '📷 Photo';
 
       case MessageType.mediaAlbum:
-        final count =
-            latest.mediaUrls?.length ??
-                0;
+        final count = latest.mediaUrls?.length ?? 0;
 
-        return count <= 1
-            ? '📷 Photo'
-            : '📷 $count Photos';
+        return count <= 1 ? '📷 Photo' : '📷 $count Photos';
 
       case MessageType.video:
         return '🎥 Video';
@@ -687,8 +554,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         return '📎 ${latest.fileName ?? "File"}';
 
       case MessageType.call:
-        return latest.callType ==
-                CallEntryType.video
+        return latest.callType == CallEntryType.video
             ? '📹 Video call'
             : '📞 Voice call';
 
@@ -701,9 +567,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // USER HELPERS
   // ===============================================================
 
-  String _safeString(
-    dynamic value,
-  ) {
+  String _safeString(dynamic value) {
     if (value == null) {
       return '';
     }
@@ -711,9 +575,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     return value.toString();
   }
 
-  String _userAvatarUrl(
-    dynamic user,
-  ) {
+  String _userAvatarUrl(dynamic user) {
     if (user is! Map) {
       return '';
     }
@@ -728,9 +590,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  String _userName(
-    dynamic user,
-  ) {
+  String _userName(dynamic user) {
     if (user is! Map) {
       return 'Unknown';
     }
@@ -743,73 +603,48 @@ class _ChatListScreenState extends State<ChatListScreen> {
           '',
     ).trim();
 
-    return name.isEmpty
-        ? 'Unknown'
-        : name;
+    return name.isEmpty ? 'Unknown' : name;
   }
 
-  String _userPhone(
-    dynamic user,
-  ) {
+  String _userPhone(dynamic user) {
     if (user is! Map) {
       return '';
     }
 
-    return _safeString(
-      user['phone_number'] ??
-          user['phone'] ??
-          '',
-    );
+    return _safeString(user['phone_number'] ?? user['phone'] ?? '');
   }
 
   // ===============================================================
   // MEMBER NICKNAME
   // ===============================================================
 
-  String _memberNickname(
-    ChatItem chat,
-    String memberId,
-  ) {
-    return chat
-            .memberNicknames[
-                memberId]
-            ?.trim() ??
-        '';
+  String _memberNickname(ChatItem chat, String memberId) {
+    return chat.memberNicknames[memberId]?.trim() ?? '';
   }
 
   // ===============================================================
   // CHAT AVATAR
   // ===============================================================
 
-  String _chatAvatarUrl(
-    ChatItem chat,
-  ) {
+  String _chatAvatarUrl(ChatItem chat) {
     if (chat.isGroup) {
       return chat.avatarUrl.trim();
     }
 
-    final currentUserId =
-        _activeCurrentUserId();
+    final currentUserId = _activeCurrentUserId();
 
-    for (final member
-        in chat.members) {
-      final memberId =
-          member.id
-              .toString()
-              .trim();
+    for (final member in chat.members) {
+      final memberId = member.id.toString().trim();
 
       if (memberId.isEmpty) {
         continue;
       }
 
-      if (currentUserId.isNotEmpty &&
-          memberId ==
-              currentUserId) {
+      if (currentUserId.isNotEmpty && memberId == currentUserId) {
         continue;
       }
 
-      final memberAvatar =
-          member.avatarUrl.trim();
+      final memberAvatar = member.avatarUrl.trim();
 
       if (memberAvatar.isNotEmpty) {
         return memberAvatar;
@@ -823,62 +658,42 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // CHAT DISPLAY NAME
   // ===============================================================
 
-  String _chatDisplayName(
-    ChatItem chat,
-  ) {
+  String _chatDisplayName(ChatItem chat) {
     if (chat.isGroup) {
-      final groupName =
-          chat.name.trim();
+      final groupName = chat.name.trim();
 
-      return groupName.isEmpty
-          ? 'Group'
-          : groupName;
+      return groupName.isEmpty ? 'Group' : groupName;
     }
 
-    final currentUserId =
-        _activeCurrentUserId();
+    final currentUserId = _activeCurrentUserId();
 
-    for (final member
-        in chat.members) {
-      final memberId =
-          member.id
-              .toString()
-              .trim();
+    for (final member in chat.members) {
+      final memberId = member.id.toString().trim();
 
       if (memberId.isEmpty) {
         continue;
       }
 
-      if (currentUserId.isNotEmpty &&
-          memberId ==
-              currentUserId) {
+      if (currentUserId.isNotEmpty && memberId == currentUserId) {
         continue;
       }
 
-      final nickname =
-          _memberNickname(
-        chat,
-        memberId,
-      );
+      final nickname = _memberNickname(chat, memberId);
 
       if (nickname.isNotEmpty) {
         return nickname;
       }
 
-      final latestRealName =
-          member.name.trim();
+      final latestRealName = member.name.trim();
 
       if (latestRealName.isNotEmpty) {
         return latestRealName;
       }
     }
 
-    final fallbackName =
-        chat.name.trim();
+    final fallbackName = chat.name.trim();
 
-    return fallbackName.isEmpty
-        ? 'Unknown'
-        : fallbackName;
+    return fallbackName.isEmpty ? 'Unknown' : fallbackName;
   }
 
   // ===============================================================
@@ -886,31 +701,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ===============================================================
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final provider =
-        context.watch<ChatProvider>();
+  Widget build(BuildContext context) {
+    final provider = context.watch<ChatProvider>();
 
-    final isSearching =
-        _search.trim().isNotEmpty;
+    final isSearching = _search.trim().isNotEmpty;
 
-    final searchedUsers =
-        provider.searchedUsers;
+    final searchedUsers = provider.searchedUsers;
 
-    final chats =
-        _filteredChats(
-      provider.conversations,
-    );
+    final chats = _filteredChats(provider.conversations);
 
-    final isDark =
-        Theme.of(context)
-                .brightness ==
-            Brightness.dark;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    final bg = isDark
-        ? const Color(0xFF0F172A)
-        : const Color(0xFFF5F7FB);
+    final bg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF5F7FB);
 
     final borderColor = isDark
         ? const Color(0xFF243041)
@@ -920,9 +722,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ? const Color(0xFF94A3B8)
         : const Color(0xFF6B7280);
 
-    final cardColor = isDark
-        ? const Color(0xFF1E293B)
-        : Colors.white;
+    final cardColor = isDark ? const Color(0xFF1E293B) : Colors.white;
 
     return Scaffold(
       backgroundColor: bg,
@@ -934,209 +734,104 @@ class _ChatListScreenState extends State<ChatListScreen> {
             // =====================================================
 
             Padding(
-              padding:
-                  const EdgeInsets
-                      .fromLTRB(
-                16,
-                16,
-                10,
-                12,
-              ),
+              padding: const EdgeInsets.fromLTRB(16, 16, 10, 12),
               child: Row(
                 children: [
                   Container(
                     width: 46,
                     height: 46,
-                    decoration:
-                        BoxDecoration(
-                      color:
-                          const Color(
-                        0xFF1877F2,
-                      ),
-                      borderRadius:
-                          BorderRadius
-                              .circular(
-                        23,
-                      ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1877F2),
+                      borderRadius: BorderRadius.circular(23),
                     ),
-                    child:
-                        const Icon(
-                      Icons
-                          .chat_bubble_rounded,
-                      color:
-                          Colors.white,
+                    child: const Icon(
+                      Icons.chat_bubble_rounded,
+                      color: Colors.white,
                     ),
                   ),
 
-                  const SizedBox(
-                    width: 12,
-                  ),
+                  const SizedBox(width: 12),
 
                   Expanded(
                     child: Text(
                       'Chats',
-                      style:
-                          Theme.of(
-                        context,
-                      )
-                              .textTheme
-                              .headlineSmall
-                              ?.copyWith(
-                                fontWeight:
-                                    FontWeight
-                                        .w800,
-                              ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                   ),
 
                   IconButton(
-                    tooltip:
-                        'Create group',
-                    onPressed:
-                        _openCreateGroup,
-                    icon:
-                        const Icon(
-                      Icons.add_rounded,
-                      size: 31,
-                    ),
+                    tooltip: 'Create group',
+                    onPressed: _openCreateGroup,
+                    icon: const Icon(Icons.add_rounded, size: 31),
                   ),
                 ],
               ),
             ),
 
-            const SizedBox(
-              height: 10,
-            ),
+            const SizedBox(height: 10),
 
             // =====================================================
             // SEARCH
             // =====================================================
-
             Padding(
-              padding:
-                  const EdgeInsets
-                      .symmetric(
-                horizontal: 16,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Container(
                 height: 50,
-                decoration:
-                    BoxDecoration(
+                decoration: BoxDecoration(
                   color: cardColor,
-                  borderRadius:
-                      BorderRadius
-                          .circular(
-                    28,
-                  ),
-                  border:
-                      Border.all(
-                    color:
-                        borderColor,
-                  ),
+                  borderRadius: BorderRadius.circular(28),
+                  border: Border.all(color: borderColor),
                 ),
                 child: TextField(
-                  controller:
-                      _searchController,
-                  keyboardType:
-                      TextInputType
-                          .phone,
-                  onChanged:
-                      (value) {
+                  controller: _searchController,
+                  keyboardType: TextInputType.phone,
+                  onChanged: (value) {
                     setState(() {
-                      _search =
-                          value;
+                      _search = value;
                     });
 
-                    _debounce
-                        ?.cancel();
+                    _debounce?.cancel();
 
-                    _debounce =
-                        Timer(
-                      const Duration(
-                        milliseconds:
-                            500,
-                      ),
-                      () {
-                        final phone =
-                            value
-                                .trim();
+                    _debounce = Timer(const Duration(milliseconds: 500), () {
+                      final phone = value.trim();
 
-                        if (phone
-                                .length >=
-                            10) {
-                          provider
-                              .searchUsers(
-                            phone,
-                          );
-                        } else {
-                          provider
-                              .searchedUsers
-                              .clear();
-
-                          provider
-                              .notifyListeners();
-                        }
-                      },
-                    );
+                      if (phone.length >= 10) {
+                        provider.searchUsers(phone);
+                      } else {
+                        provider.clearSearchedUsers();
+                      }
+                    });
                   },
-                  decoration:
-                      const InputDecoration(
-                    hintText:
-                        'Search user by phone',
-                    prefixIcon:
-                        Icon(
-                      Icons
-                          .search_rounded,
-                    ),
-                    border:
-                        InputBorder
-                            .none,
-                    contentPadding:
-                        EdgeInsets
-                            .symmetric(
-                      vertical: 14,
-                    ),
+                  decoration: const InputDecoration(
+                    hintText: 'Search user by phone',
+                    prefixIcon: Icon(Icons.search_rounded),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(vertical: 14),
                   ),
                 ),
               ),
             ),
 
-            const SizedBox(
-              height: 10,
-            ),
+            const SizedBox(height: 10),
 
             // =====================================================
             // CONTENT
             // =====================================================
-
             Expanded(
               child: isSearching
-                  ? _buildSearchResults(
-                      provider,
-                      searchedUsers,
-                      secondaryText,
-                    )
-                  : _buildConversationList(
-                      provider,
-                      chats,
-                      secondaryText,
-                    ),
+                  ? _buildSearchResults(provider, searchedUsers, secondaryText)
+                  : _buildConversationList(provider, chats, secondaryText),
             ),
 
             // =====================================================
             // BOTTOM NAVIGATION
             // =====================================================
-
             _buildBottomNavigation(
               bgColor: bg,
-              dividerColor:
-                  borderColor,
-              accent:
-                  const Color(
-                0xFF1877F2,
-              ),
-              secondaryText:
-                  secondaryText,
+              dividerColor: borderColor,
+              accent: const Color(0xFF1877F2),
+              secondaryText: secondaryText,
             ),
           ],
         ),
@@ -1157,38 +852,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return Center(
         child: Text(
           'No user found',
-          style: TextStyle(
-            color:
-                secondaryText,
-            fontWeight:
-                FontWeight.w600,
-          ),
+          style: TextStyle(color: secondaryText, fontWeight: FontWeight.w600),
         ),
       );
     }
 
     return ListView.builder(
-      itemCount:
-          searchedUsers.length,
-      itemBuilder:
-          (context, index) {
-        final user =
-            searchedUsers[index];
+      itemCount: searchedUsers.length,
+      itemBuilder: (context, index) {
+        final user = searchedUsers[index];
 
-        final name =
-            _userName(user);
+        final name = _userName(user);
 
-        final phone =
-            _userPhone(user);
+        final phone = _userPhone(user);
 
-        final avatarUrl =
-            _userAvatarUrl(user);
+        final avatarUrl = _userAvatarUrl(user);
 
         return ListTile(
           leading: _Avatar(
             name: name,
-            avatarUrl:
-                avatarUrl,
+            avatarUrl: avatarUrl,
             isOnline: false,
             isGroup: false,
             radius: 24,
@@ -1196,73 +879,41 @@ class _ChatListScreenState extends State<ChatListScreen> {
           title: Text(
             name,
             maxLines: 1,
-            overflow:
-                TextOverflow
-                    .ellipsis,
-            style:
-                const TextStyle(
-              fontWeight:
-                  FontWeight.w700,
-            ),
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700),
           ),
-          subtitle: Text(
-            phone,
-            maxLines: 1,
-            overflow:
-                TextOverflow
-                    .ellipsis,
-          ),
+          subtitle: Text(phone, maxLines: 1, overflow: TextOverflow.ellipsis),
           onTap: () async {
-            if (provider
-                .isSending) {
+            if (provider.isSending) {
               return;
             }
 
-            final rawUserId =
-                user is Map
-                    ? user['id']
-                    : null;
+            final rawUserId = user is Map ? user['id'] : null;
 
-            final userId =
-                rawUserId is int
-                    ? rawUserId
-                    : int.tryParse(
-                        rawUserId
-                            .toString(),
-                      );
+            final userId = rawUserId is int
+                ? rawUserId
+                : int.tryParse(rawUserId.toString());
 
             if (userId == null) {
               return;
             }
 
-            final chat =
-                await provider
-                    .startPrivateChat(
-              userId,
-            );
+            final chat = await provider.startPrivateChat(userId);
 
             if (!context.mounted) {
               return;
             }
 
             if (chat != null) {
-              _searchController
-                  .clear();
+              _searchController.clear();
 
               setState(() {
                 _search = '';
               });
 
-              provider
-                  .searchedUsers
-                  .clear();
+              provider.clearSearchedUsers();
 
-              provider
-                  .notifyListeners();
-
-              _openPrivateChat(
-                chat,
-              );
+              _openPrivateChat(chat);
             }
           },
         );
@@ -1279,27 +930,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
     List<ChatItem> chats,
     Color secondaryText,
   ) {
-    if (provider.isLoading &&
-        chats.isEmpty) {
-      return const Center(
-        child:
-            CircularProgressIndicator(),
-      );
+    if (provider.isLoading && chats.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
     }
 
-    if (provider.error != null &&
-        chats.isEmpty) {
+    if (provider.error != null && chats.isEmpty) {
       return Center(
         child: Text(
           provider.error!,
-          textAlign:
-              TextAlign.center,
-          style: TextStyle(
-            color:
-                secondaryText,
-            fontWeight:
-                FontWeight.w600,
-          ),
+          textAlign: TextAlign.center,
+          style: TextStyle(color: secondaryText, fontWeight: FontWeight.w600),
         ),
       );
     }
@@ -1308,190 +948,96 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return Center(
         child: Text(
           'No chats found',
-          style:
-              Theme.of(context)
-                  .textTheme
-                  .bodyLarge
-                  ?.copyWith(
-                    color:
-                        secondaryText,
-                    fontWeight:
-                        FontWeight
-                            .w600,
-                  ),
+          style: Theme.of(context).textTheme.bodyLarge
+              ?.copyWith(color: secondaryText, fontWeight: FontWeight.w600),
         ),
       );
     }
 
     return ListView.builder(
       itemCount: chats.length,
-      itemBuilder:
-          (context, index) {
-        final chat =
-            chats[index];
+      itemBuilder: (context, index) {
+        final chat = chats[index];
 
-        final chatDisplayName =
-            _chatDisplayName(
-          chat,
-        );
+        final chatDisplayName = _chatDisplayName(chat);
 
-        final chatAvatarUrl =
-            _chatAvatarUrl(
-          chat,
-        );
+        final chatAvatarUrl = _chatAvatarUrl(chat);
 
         return InkWell(
-          onTap: () =>
-              _openChat(chat),
+          onTap: () => _openChat(chat),
           child: Padding(
-            padding:
-                const EdgeInsets
-                    .symmetric(
-              horizontal: 16,
-              vertical: 8,
-            ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             child: Row(
               children: [
                 _Avatar(
-                  name:
-                      chatDisplayName,
-                  avatarUrl:
-                      chatAvatarUrl,
-                  isOnline:
-                      chat.isOnline,
-                  isGroup:
-                      chat.isGroup,
+                  name: chatDisplayName,
+                  avatarUrl: chatAvatarUrl,
+                  isOnline: chat.isOnline,
+                  isGroup: chat.isGroup,
                 ),
 
-                const SizedBox(
-                  width: 14,
-                ),
+                const SizedBox(width: 14),
 
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment
-                            .start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         chatDisplayName,
                         maxLines: 1,
-                        overflow:
-                            TextOverflow
-                                .ellipsis,
-                        style:
-                            Theme.of(
-                          context,
-                        )
-                                .textTheme
-                                .titleMedium
-                                ?.copyWith(
-                                  fontWeight:
-                                      FontWeight
-                                          .w700,
-                                ),
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
 
-                      const SizedBox(
-                        height: 4,
-                      ),
+                      const SizedBox(height: 4),
 
                       Text(
-                        _buildPreview(
-                          chat,
-                        ),
+                        _buildPreview(chat),
                         maxLines: 1,
-                        overflow:
-                            TextOverflow
-                                .ellipsis,
-                        style:
-                            Theme.of(
-                          context,
-                        )
-                                .textTheme
-                                .bodyMedium
-                                ?.copyWith(
-                                  color:
-                                      secondaryText,
-                                  fontWeight:
-                                      FontWeight
-                                          .w500,
-                                ),
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: secondaryText,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ],
                   ),
                 ),
 
-                const SizedBox(
-                  width: 12,
-                ),
+                const SizedBox(width: 12),
 
                 Column(
-                  crossAxisAlignment:
-                      CrossAxisAlignment
-                          .end,
-                  mainAxisAlignment:
-                      MainAxisAlignment
-                          .center,
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
-                      _listTime(
-                        chat,
-                      ),
-                      style:
-                          TextStyle(
-                        color:
-                            secondaryText,
+                      _listTime(chat),
+                      style: TextStyle(
+                        color: secondaryText,
                         fontSize: 12,
-                        fontWeight:
-                            FontWeight
-                                .w500,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
 
-                    if (chat
-                            .unreadCount >
-                        0) ...[
-                      const SizedBox(
-                        height: 8,
-                      ),
+                    if (chat.unreadCount > 0) ...[
+                      const SizedBox(height: 8),
 
                       Container(
-                        padding:
-                            const EdgeInsets
-                                .symmetric(
-                          horizontal:
-                              8,
-                          vertical:
-                              3,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
                         ),
-                        decoration:
-                            const BoxDecoration(
-                          color:
-                              Color(
-                            0xFF1877F2,
-                          ),
-                          borderRadius:
-                              BorderRadius
-                                  .all(
-                            Radius
-                                .circular(
-                              999,
-                            ),
-                          ),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF1877F2),
+                          borderRadius: BorderRadius.all(Radius.circular(999)),
                         ),
                         child: Text(
                           '${chat.unreadCount}',
-                          style:
-                              const TextStyle(
-                            color:
-                                Colors
-                                    .white,
-                            fontSize:
-                                11,
-                            fontWeight:
-                                FontWeight
-                                    .w700,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
@@ -1516,130 +1062,63 @@ class _ChatListScreenState extends State<ChatListScreen> {
     required Color accent,
     required Color secondaryText,
   }) {
-    final textTheme =
-        Theme.of(context)
-            .textTheme;
+    final textTheme = Theme.of(context).textTheme;
 
     final items = [
-      _BottomNavItemData(
-        Icons
-            .chat_bubble_outline,
-        'Chats',
-      ),
-      _BottomNavItemData(
-        Icons.call_outlined,
-        'Calls',
-      ),
-      _BottomNavItemData(
-        Icons.person_outline,
-        'Profile',
-      ),
+      _BottomNavItemData(Icons.chat_bubble_outline, 'Chats'),
+      _BottomNavItemData(Icons.call_outlined, 'Calls'),
+      _BottomNavItemData(Icons.person_outline, 'Profile'),
     ];
 
     return Container(
-      decoration:
-          BoxDecoration(
+      decoration: BoxDecoration(
         color: bgColor,
-        border: Border(
-          top: BorderSide(
-            color:
-                dividerColor,
-            width: 1,
-          ),
-        ),
+        border: Border(top: BorderSide(color: dividerColor, width: 1)),
       ),
-      padding:
-          const EdgeInsets.only(
-        top: 6,
-        bottom: 10,
-      ),
+      padding: const EdgeInsets.only(top: 6, bottom: 10),
       child: Row(
-        children:
-            List.generate(
-          items.length,
-          (index) {
-            final isSelected =
-                _selectedBottomIndex ==
-                    index;
+        children: List.generate(items.length, (index) {
+          final isSelected = _selectedBottomIndex == index;
 
-            return Expanded(
-              child: InkWell(
-                onTap: () =>
-                    _handleBottomTap(
-                  index,
-                ),
-                child: Column(
-                  mainAxisSize:
-                      MainAxisSize
-                          .min,
-                  children: [
-                    AnimatedContainer(
-                      duration:
-                          const Duration(
-                        milliseconds:
-                            180,
-                      ),
-                      width: 72,
-                      height: 3,
-                      margin:
-                          const EdgeInsets
-                              .only(
-                        bottom: 10,
-                      ),
-                      decoration:
-                          BoxDecoration(
-                        color:
-                            isSelected
-                                ? accent
-                                : Colors
-                                    .transparent,
-                        borderRadius:
-                            BorderRadius
-                                .circular(
-                          20,
-                        ),
-                      ),
+          return Expanded(
+            child: InkWell(
+              onTap: () => _handleBottomTap(index),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    width: 72,
+                    height: 3,
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: isSelected ? accent : Colors.transparent,
+                      borderRadius: BorderRadius.circular(20),
                     ),
+                  ),
 
-                    Icon(
-                      items[index]
-                          .icon,
-                      size: 24,
-                      color:
-                          isSelected
-                              ? accent
-                              : secondaryText,
-                    ),
+                  Icon(
+                    items[index].icon,
+                    size: 24,
+                    color: isSelected ? accent : secondaryText,
+                  ),
 
-                    const SizedBox(
-                      height: 6,
-                    ),
+                  const SizedBox(height: 6),
 
-                    Text(
-                      items[index]
-                          .label,
-                      style:
-                          textTheme
-                              .bodySmall
-                              ?.copyWith(
-                        fontWeight:
-                            isSelected
-                                ? FontWeight
-                                    .w700
-                                : FontWeight
-                                    .w500,
-                        color:
-                            isSelected
-                                ? accent
-                                : secondaryText,
-                      ),
+                  Text(
+                    items[index].label,
+                    style: textTheme.bodySmall?.copyWith(
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
+                      color: isSelected ? accent : secondaryText,
                     ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            );
-          },
-        ),
+            ),
+          );
+        }),
       ),
     );
   }
@@ -1653,18 +1132,14 @@ class _BottomNavItemData {
   final IconData icon;
   final String label;
 
-  _BottomNavItemData(
-    this.icon,
-    this.label,
-  );
+  _BottomNavItemData(this.icon, this.label);
 }
 
 // ===============================================================
 // AVATAR
 // ===============================================================
 
-class _Avatar
-    extends StatelessWidget {
+class _Avatar extends StatelessWidget {
   final String name;
   final String avatarUrl;
 
@@ -1681,38 +1156,22 @@ class _Avatar
     this.radius = 28,
   });
 
-  String _cleanImageUrl(
-    String value,
-  ) {
-    final cleanValue =
-        value.trim();
+  String _cleanImageUrl(String value) {
+    final cleanValue = value.trim();
 
     if (cleanValue.isEmpty) {
       return '';
     }
 
-    if (cleanValue
-            .startsWith(
-          'http://',
-        ) ||
-        cleanValue
-            .startsWith(
-          'https://',
-        )) {
+    if (cleanValue.startsWith('http://') || cleanValue.startsWith('https://')) {
       return cleanValue;
     }
 
-    if (cleanValue
-        .startsWith(
-      '/media/',
-    )) {
+    if (cleanValue.startsWith('/media/')) {
       return '${AppConfig.serverUrl}$cleanValue';
     }
 
-    if (cleanValue
-        .startsWith(
-      'media/',
-    )) {
+    if (cleanValue.startsWith('media/')) {
       return '${AppConfig.serverUrl}/$cleanValue';
     }
 
@@ -1720,67 +1179,35 @@ class _Avatar
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final cleanAvatarUrl =
-        _cleanImageUrl(
-      avatarUrl,
-    );
+  Widget build(BuildContext context) {
+    final cleanAvatarUrl = _cleanImageUrl(avatarUrl);
 
     return Stack(
-      clipBehavior:
-          Clip.none,
+      clipBehavior: Clip.none,
       children: [
         CircleAvatar(
           radius: radius,
-          backgroundColor:
-              isGroup
-                  ? const Color(
-                      0xFFEFF4FF,
-                    )
-                  : const Color(
-                      0xFFE5E7EB,
-                    ),
-          backgroundImage:
-              cleanAvatarUrl
-                      .isNotEmpty
-                  ? NetworkImage(
-                      cleanAvatarUrl,
-                    )
-                  : null,
-          onBackgroundImageError:
-              cleanAvatarUrl
-                      .isNotEmpty
-                  ? (
-                      Object error,
-                      StackTrace?
-                          stackTrace,
-                    ) {
-                      debugPrint(
-                        'Avatar image load failed: $error',
-                      );
-                    }
-                  : null,
-          child:
-              cleanAvatarUrl
-                      .isEmpty
-                  ? Text(
-                      (name.trim().isNotEmpty
-                              ? name.trim().characters.first
-                              : 'U')
-                          .toUpperCase(),
-                      style:
-                          TextStyle(
-                        fontWeight:
-                            FontWeight
-                                .w800,
-                        fontSize:
-                            radius *
-                                0.65,
-                      ),
-                    )
-                  : null,
+          backgroundColor: isGroup
+              ? const Color(0xFFEFF4FF)
+              : const Color(0xFFE5E7EB),
+          backgroundImage: cleanAvatarUrl.isNotEmpty
+              ? NetworkImage(cleanAvatarUrl)
+              : null,
+          onBackgroundImageError: cleanAvatarUrl.isNotEmpty
+              ? (Object error, StackTrace? stackTrace) {
+                  debugPrint('Avatar image load failed: $error');
+                }
+              : null,
+          child: cleanAvatarUrl.isEmpty
+              ? Text(
+                  (name.trim().isNotEmpty ? name.trim().characters.first : 'U')
+                      .toUpperCase(),
+                  style: TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: radius * 0.65,
+                  ),
+                )
+              : null,
         ),
 
         if (isOnline)
@@ -1788,24 +1215,12 @@ class _Avatar
             right: -1,
             bottom: -1,
             child: Container(
-              width:
-                  radius * 0.55,
-              height:
-                  radius * 0.55,
-              decoration:
-                  BoxDecoration(
-                color:
-                    const Color(
-                  0xFF22C55E,
-                ),
-                shape:
-                    BoxShape.circle,
-                border:
-                    Border.all(
-                  color:
-                      Colors.white,
-                  width: 2,
-                ),
+              width: radius * 0.55,
+              height: radius * 0.55,
+              decoration: BoxDecoration(
+                color: const Color(0xFF22C55E),
+                shape: BoxShape.circle,
+                border: Border.all(color: Colors.white, width: 2),
               ),
             ),
           ),

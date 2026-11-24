@@ -31,15 +31,14 @@ enum CallSessionStatus {
   }
 
   bool get isActive =>
-      this == CallSessionStatus.ringing ||
-      this == CallSessionStatus.accepted;
+      this == CallSessionStatus.ringing || this == CallSessionStatus.accepted;
 
   bool get isTerminal => {
-        CallSessionStatus.rejected,
-        CallSessionStatus.ended,
-        CallSessionStatus.missed,
-        CallSessionStatus.cancelled,
-      }.contains(this);
+    CallSessionStatus.rejected,
+    CallSessionStatus.ended,
+    CallSessionStatus.missed,
+    CallSessionStatus.cancelled,
+  }.contains(this);
 }
 
 enum CallParticipantStatus {
@@ -85,23 +84,14 @@ class CallParticipantDto {
     this.leftAt,
   });
 
-  factory CallParticipantDto.fromJson(
-    Map<String, dynamic> json,
-  ) {
+  factory CallParticipantDto.fromJson(Map<String, dynamic> json) {
     return CallParticipantDto(
       userId: _asInt(json['user_id']) ?? 0,
       name: (json['name'] ?? '').toString(),
-      profilePicture:
-          (json['profile_picture'] ?? '').toString(),
-      status: CallParticipantStatus.fromJson(
-        json['status'],
-      ),
-      joinedAt: _asDate(
-        json['joined_at'],
-      ),
-      leftAt: _asDate(
-        json['left_at'],
-      ),
+      profilePicture: (json['profile_picture'] ?? '').toString(),
+      status: CallParticipantStatus.fromJson(json['status']),
+      joinedAt: _asDate(json['joined_at']),
+      leftAt: _asDate(json['left_at']),
     );
   }
 
@@ -160,117 +150,64 @@ class CallSessionDto {
     this.participants = const [],
   });
 
-  bool get isGroup =>
-      conversationType.toLowerCase() == 'group';
+  bool get isGroup => conversationType.toLowerCase() == 'group';
 
-  bool get isVideo =>
-      callType == CallType.video;
+  bool get isVideo => callType == CallType.video;
 
-  bool get isActive =>
-      status.isActive;
+  bool get isActive => status.isActive;
 
-  factory CallSessionDto.fromJson(
-    Map<String, dynamic> json,
-  ) {
+  factory CallSessionDto.fromJson(Map<String, dynamic> json) {
     final participants = <CallParticipantDto>[];
 
-    final rawParticipants =
-        json['participants'];
+    final rawParticipants = json['participants'];
 
     if (rawParticipants is List) {
       for (final item in rawParticipants) {
         if (item is Map) {
           participants.add(
-            CallParticipantDto.fromJson(
-              Map<String, dynamic>.from(
-                item,
-              ),
-            ),
+            CallParticipantDto.fromJson(Map<String, dynamic>.from(item)),
           );
         }
       }
     }
 
-    final isGroupCall = _asBool(
-      json['is_group_call'],
-    );
+    final isGroupCall = _asBool(json['is_group_call']);
 
-    final isVideoCall = _asBool(
-      json['is_video_call'],
-    );
+    final isVideoCall = _asBool(json['is_video_call']);
 
     return CallSessionDto(
-      callId:
-          _asInt(json['call_id']) ??
-          _asInt(json['id']) ??
-          0,
+      callId: _asInt(json['call_id']) ?? _asInt(json['id']) ?? 0,
 
-      callUuid:
-          (json['call_uuid'] ??
-                  json['uuid'] ??
-                  '')
-              .toString(),
+      callUuid: (json['call_uuid'] ?? json['uuid'] ?? '').toString(),
 
-      conversationId:
-          _asInt(
-            json['conversation_id'],
-          ) ??
-          0,
+      conversationId: _asInt(json['conversation_id']) ?? 0,
 
       conversationType:
-          (json['conversation_type'] ??
-                  (isGroupCall
-                      ? 'group'
-                      : 'private'))
+          (json['conversation_type'] ?? (isGroupCall ? 'group' : 'private'))
               .toString(),
 
-      callerId:
-          _asInt(json['caller_id']) ??
-          0,
+      callerId: _asInt(json['caller_id']) ?? 0,
 
-      receiverId:
-          _asInt(json['receiver_id']),
+      receiverId: _asInt(json['receiver_id']),
 
       callType: CallType.fromJson(
-        json['call_type'] ??
-            (isVideoCall
-                ? 'video'
-                : 'audio'),
+        json['call_type'] ?? (isVideoCall ? 'video' : 'audio'),
       ),
 
-      status:
-          CallSessionStatus.fromJson(
-        json['status'],
-      ),
+      status: CallSessionStatus.fromJson(json['status']),
 
-      roomName:
-          (json['room_name'] ??
-                  json['livekit_room_name'] ??
-                  '')
-              .toString(),
+      roomName: (json['room_name'] ?? json['livekit_room_name'] ?? '')
+          .toString(),
 
-      conversationName:
-          (json['conversation_name'] ??
-                  json['group_name'] ??
-                  '')
-              .toString(),
+      conversationName: (json['conversation_name'] ?? json['group_name'] ?? '')
+          .toString(),
 
-      callerName:
-          (json['caller_name'] ??
-                  json['callerName'] ??
-                  '')
-              .toString(),
+      callerName: (json['caller_name'] ?? json['callerName'] ?? '').toString(),
 
-      callerAvatar:
-          (json['caller_avatar'] ??
-                  json['callerAvatar'] ??
-                  '')
-              .toString(),
+      callerAvatar: (json['caller_avatar'] ?? json['callerAvatar'] ?? '')
+          .toString(),
 
-      myParticipantStatus:
-          (json['my_participant_status'] ??
-                  '')
-              .toString(),
+      myParticipantStatus: (json['my_participant_status'] ?? '').toString(),
 
       participants: participants,
     );
@@ -292,26 +229,18 @@ class CallSessionDto {
       receiverId: receiverId,
       callType: callType,
 
-      status:
-          status ?? this.status,
+      status: status ?? this.status,
 
-      roomName:
-          roomName ?? this.roomName,
+      roomName: roomName ?? this.roomName,
 
-      conversationName:
-          conversationName ??
-          this.conversationName,
+      conversationName: conversationName ?? this.conversationName,
 
       callerName: callerName,
       callerAvatar: callerAvatar,
 
-      myParticipantStatus:
-          myParticipantStatus ??
-          this.myParticipantStatus,
+      myParticipantStatus: myParticipantStatus ?? this.myParticipantStatus,
 
-      participants:
-          participants ??
-          this.participants,
+      participants: participants ?? this.participants,
     );
   }
 
@@ -331,13 +260,9 @@ class CallSessionDto {
       'conversation_name': conversationName,
       'caller_name': callerName,
       'caller_avatar': callerAvatar,
-      'my_participant_status':
-          myParticipantStatus,
+      'my_participant_status': myParticipantStatus,
       'participants': participants
-          .map(
-            (participant) =>
-                participant.toJson(),
-          )
+          .map((participant) => participant.toJson())
           .toList(),
     };
   }
@@ -351,37 +276,23 @@ class ActiveCallResult {
   final bool active;
   final CallSessionDto? call;
 
-  const ActiveCallResult({
-    required this.active,
-    required this.call,
-  });
+  const ActiveCallResult({required this.active, required this.call});
 
-  factory ActiveCallResult.fromJson(
-    Map<String, dynamic> json,
-  ) {
-    final active =
-        _asBool(json['active']);
+  factory ActiveCallResult.fromJson(Map<String, dynamic> json) {
+    final active = _asBool(json['active']);
 
-    final rawCall =
-        json['call'];
+    final rawCall = json['call'];
 
     return ActiveCallResult(
       active: active,
       call: rawCall is Map
-          ? CallSessionDto.fromJson(
-              Map<String, dynamic>.from(
-                rawCall,
-              ),
-            )
+          ? CallSessionDto.fromJson(Map<String, dynamic>.from(rawCall))
           : null,
     );
   }
 
   Map<String, dynamic> toJson() {
-    return {
-      'active': active,
-      'call': call?.toJson(),
-    };
+    return {'active': active, 'call': call?.toJson()};
   }
 }
 
@@ -411,68 +322,40 @@ class LiveKitCredentials {
     required this.participantIdentity,
   });
 
-  factory LiveKitCredentials.fromJson(
-    Map<String, dynamic> json,
-  ) {
+  factory LiveKitCredentials.fromJson(Map<String, dynamic> json) {
     return LiveKitCredentials(
-      serverUrl:
-          (json['server_url'] ??
-                  json['url'] ??
-                  '')
-              .toString(),
+      serverUrl: (json['server_url'] ?? json['url'] ?? '').toString(),
 
-      participantToken:
-          (json['participant_token'] ??
-                  json['token'] ??
-                  '')
-              .toString(),
+      participantToken: (json['participant_token'] ?? json['token'] ?? '')
+          .toString(),
 
-      roomName:
-          (json['room_name'] ??
-                  json['livekit_room_name'] ??
-                  '')
-              .toString(),
+      roomName: (json['room_name'] ?? json['livekit_room_name'] ?? '')
+          .toString(),
 
-      callId:
-          _asInt(json['call_id']) ??
-          0,
+      callId: _asInt(json['call_id']) ?? 0,
 
-      callUuid:
-          (json['call_uuid'] ??
-                  '')
-              .toString(),
+      callUuid: (json['call_uuid'] ?? '').toString(),
 
-      callType:
-          CallType.fromJson(
+      callType: CallType.fromJson(
         json['call_type'] ??
-            (_asBool(
-              json['is_video_call'],
-            )
-                ? 'video'
-                : 'audio'),
+            (_asBool(json['is_video_call']) ? 'video' : 'audio'),
       ),
 
       participantIdentity:
-          (json['participant_identity'] ??
-                  json['identity'] ??
-                  '')
-              .toString(),
+          (json['participant_identity'] ?? json['identity'] ?? '').toString(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'server_url': serverUrl,
-      'participant_token':
-          participantToken,
+      'participant_token': participantToken,
       'room_name': roomName,
       'call_id': callId,
       'call_uuid': callUuid,
       'call_type': callType.name,
-      'is_video_call':
-          callType == CallType.video,
-      'participant_identity':
-          participantIdentity,
+      'is_video_call': callType == CallType.video,
+      'participant_identity': participantIdentity,
     };
   }
 }
@@ -519,30 +402,18 @@ class IncomingCallPayload {
     this.conversationAvatar = '',
   });
 
-  bool get isVideo =>
-      callType == CallType.video;
+  bool get isVideo => callType == CallType.video;
 
-  bool get isAudio =>
-      callType == CallType.audio;
+  bool get isAudio => callType == CallType.audio;
 
-  bool get isValid =>
-      callId > 0 &&
-      conversationId > 0 &&
-      callerId > 0;
+  bool get isValid => callId > 0 && conversationId > 0 && callerId > 0;
 
-  factory IncomingCallPayload.fromMap(
-    Map<String, dynamic> map,
-  ) {
+  factory IncomingCallPayload.fromMap(Map<String, dynamic> map) {
     final video = _asBool(
-      map['is_video_call'] ??
-          map['isVideoCall'] ??
-          map['video'],
+      map['is_video_call'] ?? map['isVideoCall'] ?? map['video'],
     );
 
-    final group = _asBool(
-      map['is_group_call'] ??
-          map['isGroupCall'],
-    );
+    final group = _asBool(map['is_group_call'] ?? map['isGroupCall']);
 
     return IncomingCallPayload(
       callId:
@@ -551,77 +422,46 @@ class IncomingCallPayload {
           _asInt(map['id']) ??
           0,
 
-      callUuid:
-          _firstString([
-        map['call_uuid'],
-        map['callUuid'],
-        map['uuid'],
-      ]),
+      callUuid: _firstString([map['call_uuid'], map['callUuid'], map['uuid']]),
 
       conversationId:
-          _asInt(
-            map['conversation_id'],
-          ) ??
-          _asInt(
-            map['conversationId'],
-          ) ??
-          0,
+          _asInt(map['conversation_id']) ?? _asInt(map['conversationId']) ?? 0,
 
       callerId:
-          _asInt(
-            map['caller_id'],
-          ) ??
-          _asInt(
-            map['callerId'],
-          ) ??
-          _asInt(
-            map['from_user'],
-          ) ??
-          _asInt(
-            map['from'],
-          ) ??
+          _asInt(map['caller_id']) ??
+          _asInt(map['callerId']) ??
+          _asInt(map['from_user']) ??
+          _asInt(map['from']) ??
           0,
 
-      callerName:
-          _firstString(
-        [
-          map['caller_name'],
-          map['callerName'],
-          map['nameCaller'],
-          map['name'],
-        ],
-        fallback: 'Unknown',
-      ),
+      callerName: _firstString([
+        map['caller_name'],
+        map['callerName'],
+        map['nameCaller'],
+        map['name'],
+      ], fallback: 'Unknown'),
 
-      callerAvatar:
-          _firstString([
+      callerAvatar: _firstString([
         map['caller_avatar'],
         map['callerAvatar'],
         map['avatar'],
         map['profile_picture'],
       ]),
 
-      callType:
-          CallType.fromJson(
-        map['call_type'] ??
-            map['callType'] ??
-            (video
-                ? 'video'
-                : 'audio'),
+      callType: CallType.fromJson(
+        map['call_type'] ?? map['callType'] ?? (video ? 'video' : 'audio'),
       ),
 
       isGroupCall: group,
 
-      conversationName:
-          _firstString([
+      conversationName: _firstString([
         map['conversation_name'],
         map['conversationName'],
         map['group_name'],
         map['groupName'],
       ]),
 
-      conversationAvatar:
-          _firstString([
+      conversationAvatar: _firstString([
         map['conversation_avatar'],
         map['conversationAvatar'],
         map['group_avatar'],
@@ -630,12 +470,8 @@ class IncomingCallPayload {
     );
   }
 
-  factory IncomingCallPayload.fromJson(
-    Map<String, dynamic> json,
-  ) {
-    return IncomingCallPayload.fromMap(
-      json,
-    );
+  factory IncomingCallPayload.fromJson(Map<String, dynamic> json) {
+    return IncomingCallPayload.fromMap(json);
   }
 
   Map<String, dynamic> toMap() {
@@ -645,28 +481,21 @@ class IncomingCallPayload {
       'call_id': callId,
       'call_uuid': callUuid,
 
-      'conversation_id':
-          conversationId,
+      'conversation_id': conversationId,
 
       'caller_id': callerId,
       'caller_name': callerName,
-      'caller_avatar':
-          callerAvatar,
+      'caller_avatar': callerAvatar,
 
-      'call_type':
-          callType.name,
+      'call_type': callType.name,
 
-      'is_video_call':
-          isVideo,
+      'is_video_call': isVideo,
 
-      'is_group_call':
-          isGroupCall,
+      'is_group_call': isGroupCall,
 
-      'conversation_name':
-          conversationName,
+      'conversation_name': conversationName,
 
-      'conversation_avatar':
-          conversationAvatar,
+      'conversation_avatar': conversationAvatar,
     };
   }
 
@@ -706,11 +535,9 @@ int? _asInt(Object? value) {
     return value.toInt();
   }
 
-  final raw =
-      value.toString().trim();
+  final raw = value.toString().trim();
 
-  if (raw.isEmpty ||
-      raw.toLowerCase() == 'null') {
+  if (raw.isEmpty || raw.toLowerCase() == 'null') {
     return null;
   }
 
@@ -730,16 +557,9 @@ bool _asBool(Object? value) {
     return value != 0;
   }
 
-  final raw =
-      value
-          .toString()
-          .trim()
-          .toLowerCase();
+  final raw = value.toString().trim().toLowerCase();
 
-  return raw == 'true' ||
-      raw == '1' ||
-      raw == 'yes' ||
-      raw == 'y';
+  return raw == 'true' || raw == '1' || raw == 'yes' || raw == 'y';
 }
 
 DateTime? _asDate(Object? value) {
@@ -751,33 +571,24 @@ DateTime? _asDate(Object? value) {
     return value;
   }
 
-  final raw =
-      value.toString().trim();
+  final raw = value.toString().trim();
 
-  if (raw.isEmpty ||
-      raw.toLowerCase() == 'null') {
+  if (raw.isEmpty || raw.toLowerCase() == 'null') {
     return null;
   }
 
-  return DateTime.tryParse(
-    raw,
-  );
+  return DateTime.tryParse(raw);
 }
 
-String _firstString(
-  List<Object?> values, {
-  String fallback = '',
-}) {
+String _firstString(List<Object?> values, {String fallback = ''}) {
   for (final value in values) {
     if (value == null) {
       continue;
     }
 
-    final text =
-        value.toString().trim();
+    final text = value.toString().trim();
 
-    if (text.isNotEmpty &&
-        text.toLowerCase() != 'null') {
+    if (text.isNotEmpty && text.toLowerCase() != 'null') {
       return text;
     }
   }

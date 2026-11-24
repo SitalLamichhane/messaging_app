@@ -213,7 +213,11 @@ class ChatMessageDto {
       isEdited: _bool(json['is_edited'] ?? json['edited']),
       isDeleted: _bool(json['is_deleted'] ?? json['deleted']),
       delivered: _bool(json['delivered'] ?? json['is_delivered']),
-      seen: _bool(json['seen'] ?? json['is_seen'] ?? json['read'] ?? json['is_read']) || readByUserIds.isNotEmpty,
+      seen:
+          _bool(
+            json['seen'] ?? json['is_seen'] ?? json['read'] ?? json['is_read'],
+          ) ||
+          readByUserIds.isNotEmpty,
       readByUserIds: readByUserIds.toList(growable: false),
       createdAt: _date(json['created_at'] ?? json['timestamp']),
       attachments: attachments,

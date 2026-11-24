@@ -3,14 +3,12 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hiddenly/core/api_client.dart';
 import 'package:hiddenly/core/config/app_config.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
-class ChatSocketService
-    with WidgetsBindingObserver {
+class ChatSocketService with WidgetsBindingObserver {
   WebSocketChannel? _channel;
   StreamSubscription? _subscription;
 
@@ -23,9 +21,7 @@ class ChatSocketService
 
   int? _conversationId;
 
-  FutureOr<void> Function(
-    Map<String, dynamic> data,
-  )? _onMessage;
+  FutureOr<void> Function(Map<String, dynamic> data)? _onMessage;
 
   void Function(Object error)? _onError;
 
@@ -47,14 +43,9 @@ class ChatSocketService
 
   Future<void> connect({
     required int conversationId,
-    required FutureOr<void> Function(
-      Map<String, dynamic> data,
-    ) onMessage,
-    required void Function(
-      Object error,
-    ) onError,
-    required void Function()
-        onDisconnected,
+    required FutureOr<void> Function(Map<String, dynamic> data) onMessage,
+    required void Function(Object error) onError,
+    required void Function() onDisconnected,
   }) async {
     _conversationId = conversationId;
 
@@ -64,11 +55,9 @@ class ChatSocketService
 
     _manualDisconnect = false;
 
-    WidgetsBinding.instance
-        .removeObserver(this);
+    WidgetsBinding.instance.removeObserver(this);
 
-    WidgetsBinding.instance
-        .addObserver(this);
+    WidgetsBinding.instance.addObserver(this);
 
     await _connectInternal();
   }
@@ -78,28 +67,20 @@ class ChatSocketService
   // ============================================================
 
   Future<void> _connectInternal() async {
-    final conversationId =
-        _conversationId;
+    final conversationId = _conversationId;
 
     if (conversationId == null) {
-      debugPrint(
-        'CHAT WS: conversationId missing',
-      );
+      debugPrint('CHAT WS: conversationId missing');
       return;
     }
 
     if (_connecting) {
-      debugPrint(
-        'CHAT WS ALREADY CONNECTING',
-      );
+      debugPrint('CHAT WS ALREADY CONNECTING');
       return;
     }
 
-    if (_connected &&
-        _channel != null) {
-      debugPrint(
-        'CHAT WS ALREADY CONNECTED',
-      );
+    if (_connected && _channel != null) {
+      debugPrint('CHAT WS ALREADY CONNECTED');
       return;
     }
 
@@ -108,22 +89,13 @@ class ChatSocketService
     try {
       await _closeSocketOnly();
 
-      final token =
-          await ApiClient.storage.read(
-        key: 'access',
-      );
+      final token = await ApiClient.storage.read(key: 'access');
 
-      if (token == null ||
-          token.trim().isEmpty) {
-        throw Exception(
-          'Access token missing',
-        );
+      if (token == null || token.trim().isEmpty) {
+        throw Exception('Access token missing');
       }
 
-      final cleanToken =
-          Uri.encodeComponent(
-        token.trim(),
-      );
+      final cleanToken = Uri.encodeComponent(token.trim());
 
       final url =
           '${AppConfig.wsBaseUrl}'
@@ -131,23 +103,12 @@ class ChatSocketService
           '?token=$cleanToken';
 
       debugPrint('');
-      debugPrint(
-        '########################################',
-      );
-      debugPrint(
-        'CHAT WS CONNECTING',
-      );
-      debugPrint(
-        'conversationId: $conversationId',
-      );
-      debugPrint(
-        '########################################',
-      );
+      debugPrint('########################################');
+      debugPrint('CHAT WS CONNECTING');
+      debugPrint('conversationId: $conversationId');
+      debugPrint('########################################');
 
-      final channel =
-          WebSocketChannel.connect(
-        Uri.parse(url),
-      );
+      final channel = WebSocketChannel.connect(Uri.parse(url));
 
       // Actual WebSocket handshake.
       await channel.ready;
@@ -159,51 +120,32 @@ class ChatSocketService
 
       _reconnectAttempt = 0;
 
-      debugPrint(
-        'CHAT WS CONNECTED SUCCESSFULLY',
-      );
+      debugPrint('CHAT WS CONNECTED SUCCESSFULLY');
 
-      _subscription =
-          channel.stream.listen(
+      _subscription = channel.stream.listen(
         (message) async {
-          debugPrint(
-            'CHAT WS RAW: $message',
-          );
+          debugPrint('CHAT WS RAW: $message');
 
           try {
-            final decoded =
-                jsonDecode(
-              message.toString(),
-            );
+            final decoded = jsonDecode(message.toString());
 
             if (decoded is! Map) {
-              debugPrint(
-                'CHAT WS INVALID MESSAGE',
-              );
+              debugPrint('CHAT WS INVALID MESSAGE');
               return;
             }
 
-            final callback =
-                _onMessage;
+            final callback = _onMessage;
 
             if (callback != null) {
-              await callback(
-                Map<String, dynamic>.from(
-                  decoded,
-                ),
-              );
+              await callback(Map<String, dynamic>.from(decoded));
             }
           } catch (e) {
-            debugPrint(
-              'CHAT WS PARSE ERROR: $e',
-            );
+            debugPrint('CHAT WS PARSE ERROR: $e');
           }
         },
 
         onError: (error) {
-          debugPrint(
-            'CHAT WS ERROR: $error',
-          );
+          debugPrint('CHAT WS ERROR: $error');
 
           _connected = false;
           _connecting = false;
@@ -216,9 +158,7 @@ class ChatSocketService
         },
 
         onDone: () {
-          debugPrint(
-            'CHAT WS CLOSED',
-          );
+          debugPrint('CHAT WS CLOSED');
 
           _connected = false;
           _connecting = false;
@@ -236,9 +176,7 @@ class ChatSocketService
         cancelOnError: false,
       );
     } catch (e) {
-      debugPrint(
-        'CHAT WS CONNECT ERROR: $e',
-      );
+      debugPrint('CHAT WS CONNECT ERROR: $e');
 
       _connected = false;
       _connecting = false;
@@ -258,22 +196,15 @@ class ChatSocketService
   // ============================================================
 
   @override
-  void didChangeAppLifecycleState(
-    AppLifecycleState state,
-  ) {
-    debugPrint(
-      'CHAT WS APP STATE: $state',
-    );
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    debugPrint('CHAT WS APP STATE: $state');
 
     // ----------------------------------------------------------
     // APP RETURNS TO FOREGROUND
     // ----------------------------------------------------------
 
-    if (state ==
-        AppLifecycleState.resumed) {
-      debugPrint(
-        'CHAT WS APP RESUMED',
-      );
+    if (state == AppLifecycleState.resumed) {
+      debugPrint('CHAT WS APP RESUMED');
 
       /*
        * Android may have suspended/destroyed
@@ -282,9 +213,7 @@ class ChatSocketService
        *
        * Establish a fresh connection.
        */
-      unawaited(
-        _reconnectOnResume(),
-      );
+      unawaited(_reconnectOnResume());
 
       return;
     }
@@ -293,13 +222,9 @@ class ChatSocketService
     // BACKGROUND
     // ----------------------------------------------------------
 
-    if (state ==
-            AppLifecycleState.paused ||
-        state ==
-            AppLifecycleState.hidden) {
-      debugPrint(
-        'CHAT WS APP BACKGROUND',
-      );
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      debugPrint('CHAT WS APP BACKGROUND');
 
       /*
        * Do not depend on this connection.
@@ -318,11 +243,8 @@ class ChatSocketService
     // APP TERMINATING
     // ----------------------------------------------------------
 
-    if (state ==
-        AppLifecycleState.detached) {
-      debugPrint(
-        'CHAT WS APP DETACHED',
-      );
+    if (state == AppLifecycleState.detached) {
+      debugPrint('CHAT WS APP DETACHED');
 
       /*
        * FCM takes over when the app process
@@ -337,8 +259,7 @@ class ChatSocketService
   // RESUME RECONNECT
   // ============================================================
 
-  Future<void>
-      _reconnectOnResume() async {
+  Future<void> _reconnectOnResume() async {
     if (_manualDisconnect) {
       return;
     }
@@ -376,13 +297,11 @@ class ChatSocketService
       return;
     }
 
-    if (_reconnectTimer?.isActive ==
-        true) {
+    if (_reconnectTimer?.isActive == true) {
       return;
     }
 
-    if (_reconnectAttempt >=
-        _maxReconnectAttempts) {
+    if (_reconnectAttempt >= _maxReconnectAttempts) {
       debugPrint(
         'CHAT WS MAX RECONNECT '
         'ATTEMPTS REACHED',
@@ -392,12 +311,7 @@ class ChatSocketService
 
     _reconnectAttempt++;
 
-    final seconds =
-        (_reconnectAttempt * 2)
-            .clamp(
-      2,
-      10,
-    );
+    final seconds = (_reconnectAttempt * 2).clamp(2, 10);
 
     debugPrint(
       'CHAT WS RECONNECT '
@@ -406,31 +320,22 @@ class ChatSocketService
       'IN ${seconds}s',
     );
 
-    _reconnectTimer =
-        Timer(
-      Duration(
-        seconds: seconds,
-      ),
-      () async {
-        _reconnectTimer = null;
+    _reconnectTimer = Timer(Duration(seconds: seconds), () async {
+      _reconnectTimer = null;
 
-        if (_manualDisconnect) {
-          return;
-        }
+      if (_manualDisconnect) {
+        return;
+      }
 
-        await _connectInternal();
-      },
-    );
+      await _connectInternal();
+    });
   }
 
   // ============================================================
   // SEND TYPING
   // ============================================================
 
-  void sendTyping({
-    required int senderId,
-    required bool isTyping,
-  }) {
+  void sendTyping({required int senderId, required bool isTyping}) {
     send({
       'type': 'typing',
       'action': 'typing',
@@ -443,35 +348,23 @@ class ChatSocketService
   // SEND
   // ============================================================
 
-  bool send(
-    Map<String, dynamic> data,
-  ) {
-    if (_channel == null ||
-        !_connected) {
-      debugPrint(
-        'CHAT WS NOT CONNECTED',
-      );
+  bool send(Map<String, dynamic> data) {
+    if (_channel == null || !_connected) {
+      debugPrint('CHAT WS NOT CONNECTED');
 
       return false;
     }
 
     try {
-      final encoded =
-          jsonEncode(data);
+      final encoded = jsonEncode(data);
 
-      debugPrint(
-        'CHAT WS SEND: $encoded',
-      );
+      debugPrint('CHAT WS SEND: $encoded');
 
-      _channel!.sink.add(
-        encoded,
-      );
+      _channel!.sink.add(encoded);
 
       return true;
     } catch (e) {
-      debugPrint(
-        'CHAT WS SEND ERROR: $e',
-      );
+      debugPrint('CHAT WS SEND ERROR: $e');
 
       _connected = false;
 
@@ -487,8 +380,7 @@ class ChatSocketService
   // INTERNAL CLOSE
   // ============================================================
 
-  Future<void>
-      _closeSocketOnly() async {
+  Future<void> _closeSocketOnly() async {
     try {
       await _subscription?.cancel();
     } catch (_) {}
@@ -508,17 +400,14 @@ class ChatSocketService
   // ============================================================
 
   Future<void> disconnect() async {
-    debugPrint(
-      'CHAT WS MANUAL DISCONNECT',
-    );
+    debugPrint('CHAT WS MANUAL DISCONNECT');
 
     _manualDisconnect = true;
 
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
 
-    WidgetsBinding.instance
-        .removeObserver(this);
+    WidgetsBinding.instance.removeObserver(this);
 
     await _closeSocketOnly();
 
@@ -533,11 +422,10 @@ class ChatSocketService
 
     _reconnectAttempt = 0;
 
-    debugPrint(
-      'CHAT WS DISCONNECTED',
-    );
+    debugPrint('CHAT WS DISCONNECTED');
   }
 }
+
 // ============================================================
 // GLOBAL CHAT SOCKET
 // ============================================================
@@ -660,7 +548,9 @@ class GlobalChatSocketService with WidgetsBindingObserver {
     }
     _reconnectAttempt++;
     final seconds = (_reconnectAttempt * 2).clamp(2, 10);
-    debugPrint('GLOBAL CHAT WS RECONNECT $_reconnectAttempt/$_maxReconnectAttempts IN ${seconds}s');
+    debugPrint(
+      'GLOBAL CHAT WS RECONNECT $_reconnectAttempt/$_maxReconnectAttempts IN ${seconds}s',
+    );
     _reconnectTimer = Timer(Duration(seconds: seconds), () async {
       _reconnectTimer = null;
       if (_manualDisconnect) return;
@@ -685,9 +575,13 @@ class GlobalChatSocketService with WidgetsBindingObserver {
   }
 
   Future<void> _closeSocketOnly() async {
-    try { await _subscription?.cancel(); } catch (_) {}
+    try {
+      await _subscription?.cancel();
+    } catch (_) {}
     _subscription = null;
-    try { await _channel?.sink.close(); } catch (_) {}
+    try {
+      await _channel?.sink.close();
+    } catch (_) {}
     _channel = null;
     _connected = false;
   }

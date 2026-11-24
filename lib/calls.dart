@@ -65,10 +65,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
     _openCall(chat: chat, isVideoCall: true);
   }
 
-  void _openCall({
-    required ChatItem chat,
-    required bool isVideoCall,
-  }) {
+  void _openCall({required ChatItem chat, required bool isVideoCall}) {
     if (chat.id.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -114,9 +111,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
   void _openChat(ChatItem chat) {
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) => ChatDetailScreen(chat: chat),
-      ),
+      MaterialPageRoute(builder: (_) => ChatDetailScreen(chat: chat)),
     );
   }
 
@@ -132,12 +127,10 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
         currentUserAvatar: widget.currentUserAvatar,
       );
     }
-
     // PagesScreen temporarily commented
     // else if (index == 2) {
     //   page = const PagesScreen();
     // }
-
     else if (index == 2) {
       page = ProfileScreen(
         chatId: '',
@@ -162,8 +155,9 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
   }
 
   IconData _callTypeIcon(ChatItem chat) {
-    final latestCall =
-        chat.messages.where((m) => m.type == MessageType.call).toList();
+    final latestCall = chat.messages
+        .where((m) => m.type == MessageType.call)
+        .toList();
 
     if (latestCall.isNotEmpty &&
         latestCall.last.callType == CallEntryType.video) {
@@ -174,13 +168,15 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
   }
 
   String _subtitle(ChatItem chat) {
-    final latestCall =
-        chat.messages.where((m) => m.type == MessageType.call).toList();
+    final latestCall = chat.messages
+        .where((m) => m.type == MessageType.call)
+        .toList();
 
     if (latestCall.isNotEmpty) {
       final call = latestCall.last;
-      final type =
-          call.callType == CallEntryType.video ? 'Video call' : 'Voice call';
+      final type = call.callType == CallEntryType.video
+          ? 'Video call'
+          : 'Voice call';
       return '$type • ${chat.time}';
     }
 
@@ -196,12 +192,14 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final bgColor = isDark ? const Color(0xFF0F172A) : const Color(0xFFF7F8FC);
-    final borderColor =
-        isDark ? const Color(0xFF243041) : const Color(0xFFE5E7EB);
+    final borderColor = isDark
+        ? const Color(0xFF243041)
+        : const Color(0xFFE5E7EB);
     final searchBg = isDark ? const Color(0xFF1E293B) : Colors.white;
     final textColor = isDark ? Colors.white : const Color(0xFF111827);
-    final hintColor =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280);
+    final hintColor = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF6B7280);
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -271,9 +269,7 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                             const SizedBox(height: 18),
                             Text(
                               'People and groups',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .titleMedium
+                              style: Theme.of(context).textTheme.titleMedium
                                   ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                           ],
@@ -295,7 +291,8 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                                   ? 'No conversations found'
                                   : 'No matching conversations',
                               textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                              style: Theme.of(context).textTheme.bodyLarge
+                                  ?.copyWith(
                                     color: hintColor,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -305,101 +302,98 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                       )
                     else
                       SliverList(
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final chat = chats[index];
+                        delegate: SliverChildBuilderDelegate((context, index) {
+                          final chat = chats[index];
 
-                            return InkWell(
-                              onTap: () => _openChat(chat),
-                              child: Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 16,
-                                  vertical: 8,
-                                ),
-                                child: Row(
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 28,
-                                      backgroundImage:
-                                          chat.avatarUrl.trim().isNotEmpty
-                                              ? NetworkImage(chat.avatarUrl)
-                                              : null,
-                                      child: chat.avatarUrl.trim().isEmpty
-                                          ? Text(
-                                              chat.isGroup
-                                                  ? (chat.groupInitials.isEmpty
+                          return InkWell(
+                            onTap: () => _openChat(chat),
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 8,
+                              ),
+                              child: Row(
+                                children: [
+                                  CircleAvatar(
+                                    radius: 28,
+                                    backgroundImage:
+                                        chat.avatarUrl.trim().isNotEmpty
+                                        ? NetworkImage(chat.avatarUrl)
+                                        : null,
+                                    child: chat.avatarUrl.trim().isEmpty
+                                        ? Text(
+                                            chat.isGroup
+                                                ? (chat.groupInitials.isEmpty
                                                       ? '?'
                                                       : chat.groupInitials)
-                                                  : chat.name.trim().isNotEmpty
-                                                      ? chat.name
-                                                          .trim()[0]
-                                                          .toUpperCase()
-                                                      : '?',
-                                            )
-                                          : null,
-                                    ),
-                                    const SizedBox(width: 14),
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment:
-                                            CrossAxisAlignment.start,
-                                        children: [
-                                          Text(
-                                            chat.name,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleMedium
-                                                ?.copyWith(
-                                                  fontWeight: FontWeight.w700,
-                                                ),
-                                          ),
-                                          const SizedBox(height: 4),
-                                          Row(
-                                            children: [
-                                              Icon(
-                                                _callTypeIcon(chat),
-                                                size: 15,
-                                                color: hintColor,
+                                                : chat.name.trim().isNotEmpty
+                                                ? chat.name
+                                                      .trim()[0]
+                                                      .toUpperCase()
+                                                : '?',
+                                          )
+                                        : null,
+                                  ),
+                                  const SizedBox(width: 14),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          chat.name,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleMedium
+                                              ?.copyWith(
+                                                fontWeight: FontWeight.w700,
                                               ),
-                                              const SizedBox(width: 4),
-                                              Expanded(
-                                                child: Text(
-                                                  _subtitle(chat),
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: Theme.of(context)
-                                                      .textTheme
-                                                      .bodyMedium
-                                                      ?.copyWith(
-                                                        color: hintColor,
-                                                        fontWeight:
-                                                            FontWeight.w500,
-                                                      ),
-                                                ),
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          children: [
+                                            Icon(
+                                              _callTypeIcon(chat),
+                                              size: 15,
+                                              color: hintColor,
+                                            ),
+                                            const SizedBox(width: 4),
+                                            Expanded(
+                                              child: Text(
+                                                _subtitle(chat),
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: Theme.of(context)
+                                                    .textTheme
+                                                    .bodyMedium
+                                                    ?.copyWith(
+                                                      color: hintColor,
+                                                      fontWeight:
+                                                          FontWeight.w500,
+                                                    ),
                                               ),
-                                            ],
-                                          ),
-                                        ],
-                                      ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
                                     ),
-                                    const SizedBox(width: 6),
-                                    IconButton(
-                                      onPressed: () => _handleVoiceCall(chat),
-                                      icon: const Icon(Icons.call_outlined),
-                                    ),
-                                    IconButton(
-                                      onPressed: () => _handleVideoCall(chat),
-                                      icon: const Icon(Icons.videocam_outlined),
-                                    ),
-                                  ],
-                                ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  IconButton(
+                                    onPressed: () => _handleVoiceCall(chat),
+                                    icon: const Icon(Icons.call_outlined),
+                                  ),
+                                  IconButton(
+                                    onPressed: () => _handleVideoCall(chat),
+                                    icon: const Icon(Icons.videocam_outlined),
+                                  ),
+                                ],
                               ),
-                            );
-                          },
-                          childCount: chats.length,
-                        ),
+                            ),
+                          );
+                        }, childCount: chats.length),
                       ),
                     const SliverToBoxAdapter(child: SizedBox(height: 12)),
                   ],
@@ -432,16 +426,13 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
 
       // PagesScreen temporarily commented
       // _BottomNavItemData(Icons.description_outlined, 'Pages'),
-
       _BottomNavItemData(Icons.person_outline, 'Profile'),
     ];
 
     return Container(
       decoration: BoxDecoration(
         color: bgColor,
-        border: Border(
-          top: BorderSide(color: dividerColor, width: 1),
-        ),
+        border: Border(top: BorderSide(color: dividerColor, width: 1)),
       ),
       padding: const EdgeInsets.only(top: 6, bottom: 10),
       child: Row(
@@ -473,8 +464,9 @@ class _CallHistoryScreenState extends State<CallHistoryScreen> {
                   Text(
                     items[index].label,
                     style: textTheme.bodySmall?.copyWith(
-                      fontWeight:
-                          isSelected ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                       color: isSelected ? accent : secondaryText,
                     ),
                   ),

@@ -1,0 +1,54 @@
+group 'com.llfbandit.record'
+version '1.0'
+
+buildscript {
+    ext.kotlin_version = '2.2.20'
+    repositories {
+        google()
+        mavenCentral()
+    }
+
+    dependencies {
+        // https://developer.android.com/studio/releases/gradle-plugin
+        classpath 'com.android.tools.build:gradle:8.12.3'
+        // https://plugins.gradle.org/plugin/org.jetbrains.kotlin.android
+        classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
+    }
+}
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+apply plugin: 'com.android.library'
+
+
+android {
+    namespace = 'com.llfbandit.record'
+    
+    compileSdk = flutter.compileSdkVersion
+
+    compileOptions {
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
+    }
+
+    
+
+    sourceSets {
+        main.java.srcDirs += 'src/main/kotlin'
+    }
+
+    defaultConfig {
+        minSdk = 23
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+    }
+}

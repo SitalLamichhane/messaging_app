@@ -4,11 +4,7 @@ class ImageViewer extends StatefulWidget {
   final List<String> images;
   final int initialIndex;
 
-  const ImageViewer({
-    super.key,
-    required this.images,
-    this.initialIndex = 0,
-  });
+  const ImageViewer({super.key, required this.images, this.initialIndex = 0});
 
   @override
   State<ImageViewer> createState() => _ImageViewerState();
@@ -25,15 +21,10 @@ class _ImageViewerState extends State<ImageViewer> {
     if (widget.images.isEmpty) {
       current = 0;
     } else {
-      current = widget.initialIndex.clamp(
-        0,
-        widget.images.length - 1,
-      );
+      current = widget.initialIndex.clamp(0, widget.images.length - 1);
     }
 
-    controller = PageController(
-      initialPage: current,
-    );
+    controller = PageController(initialPage: current);
   }
 
   @override
@@ -56,9 +47,7 @@ class _ImageViewerState extends State<ImageViewer> {
           onPressed: () {
             Navigator.of(context).pop();
           },
-          icon: const Icon(
-            Icons.arrow_back_rounded,
-          ),
+          icon: const Icon(Icons.arrow_back_rounded),
         ),
 
         title: Text(
@@ -77,9 +66,7 @@ class _ImageViewerState extends State<ImageViewer> {
           ? const Center(
               child: Text(
                 'No image available',
-                style: TextStyle(
-                  color: Colors.white70,
-                ),
+                style: TextStyle(color: Colors.white70),
               ),
             )
           : PageView.builder(
@@ -95,8 +82,7 @@ class _ImageViewerState extends State<ImageViewer> {
               },
 
               itemBuilder: (context, index) {
-                final imageUrl =
-                    widget.images[index].trim();
+                final imageUrl = widget.images[index].trim();
 
                 return Center(
                   child: InteractiveViewer(
@@ -111,41 +97,26 @@ class _ImageViewerState extends State<ImageViewer> {
                             width: double.infinity,
                             fit: BoxFit.contain,
 
-                            loadingBuilder: (
-                              context,
-                              child,
-                              loadingProgress,
-                            ) {
-                              if (loadingProgress ==
-                                  null) {
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) {
                                 return child;
                               }
 
-                              final total =
-                                  loadingProgress
-                                      .expectedTotalBytes;
+                              final total = loadingProgress.expectedTotalBytes;
 
                               final loaded =
-                                  loadingProgress
-                                      .cumulativeBytesLoaded;
+                                  loadingProgress.cumulativeBytesLoaded;
 
                               return Center(
-                                child:
-                                    CircularProgressIndicator(
+                                child: CircularProgressIndicator(
                                   color: Colors.white,
                                   strokeWidth: 2.5,
-                                  value: total != null
-                                      ? loaded / total
-                                      : null,
+                                  value: total != null ? loaded / total : null,
                                 ),
                               );
                             },
 
-                            errorBuilder: (
-                              context,
-                              error,
-                              stackTrace,
-                            ) {
+                            errorBuilder: (context, error, stackTrace) {
                               return const _ImageError();
                             },
                           ),
@@ -166,18 +137,11 @@ class _ImageError extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.broken_image_outlined,
-            color: Colors.white70,
-            size: 56,
-          ),
+          Icon(Icons.broken_image_outlined, color: Colors.white70, size: 56),
           SizedBox(height: 10),
           Text(
             'Unable to load image',
-            style: TextStyle(
-              color: Colors.white70,
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.white70, fontSize: 14),
           ),
         ],
       ),

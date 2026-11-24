@@ -270,9 +270,7 @@ class GlobalCallSocketService {
       _lastPongAt = DateTime.now();
       _startHeartbeat(myGeneration, channel);
 
-      debugPrint(
-        'GLOBAL CALL WS CONNECTED/ACTIVE: ${_safeEndpoint(fixedUrl)}',
-      );
+      debugPrint('GLOBAL CALL WS CONNECTED/ACTIVE: ${_safeEndpoint(fixedUrl)}');
 
       // unawaited(
       //   _dispatchLocalEvent(
@@ -338,10 +336,10 @@ class GlobalCallSocketService {
     final delaySeconds = _reconnectAttempt <= 1
         ? 1
         : _reconnectAttempt <= 3
-            ? 3
-            : _reconnectAttempt <= 6
-                ? 5
-                : 10;
+        ? 3
+        : _reconnectAttempt <= 6
+        ? 5
+        : 10;
 
     debugPrint(
       'GLOBAL CALL WS RECONNECT SCHEDULED in ${delaySeconds}s '
@@ -411,7 +409,9 @@ class GlobalCallSocketService {
     await connect(url: nextUrl);
   }
 
-  Future<void> forceReconnect({String reason = 'manual_health_reconnect'}) async {
+  Future<void> forceReconnect({
+    String reason = 'manual_health_reconnect',
+  }) async {
     if (_manualDisconnect) {
       _manualDisconnect = false;
     }
@@ -452,18 +452,13 @@ class GlobalCallSocketService {
     await connect(url: nextUrl);
   }
 
-  void _startHeartbeat(
-  int generation,
-  WebSocketChannel channel,
-) {
-  _stopHeartbeat();
+  void _startHeartbeat(int generation, WebSocketChannel channel) {
+    _stopHeartbeat();
 
-  _lastPongAt = DateTime.now();
-  _heartbeatWaitingForPong = false;
+    _lastPongAt = DateTime.now();
+    _heartbeatWaitingForPong = false;
 
-  _heartbeatTimer = Timer.periodic(
-    _heartbeatInterval,
-    (_) {
+    _heartbeatTimer = Timer.periodic(_heartbeatInterval, (_) {
       if (_manualDisconnect ||
           generation != _generation ||
           _channel != channel ||
@@ -473,9 +468,7 @@ class GlobalCallSocketService {
 
       // Don't send multiple pings simultaneously.
       if (_heartbeatWaitingForPong) {
-        debugPrint(
-          'GLOBAL CALL WS PING SKIPPED: waiting for previous pong',
-        );
+        debugPrint('GLOBAL CALL WS PING SKIPPED: waiting for previous pong');
         return;
       }
 
@@ -489,60 +482,42 @@ class GlobalCallSocketService {
       try {
         _heartbeatWaitingForPong = true;
 
-        channel.sink.add(
-          jsonEncode(payload),
-        );
+        channel.sink.add(jsonEncode(payload));
 
         debugPrint('GLOBAL CALL WS PING');
       } catch (e, st) {
         _heartbeatWaitingForPong = false;
 
-        debugPrint(
-          'GLOBAL CALL WS PING SEND ERROR: $e',
-        );
+        debugPrint('GLOBAL CALL WS PING SEND ERROR: $e');
         debugPrint(st.toString());
 
-        unawaited(
-          forceReconnect(
-            reason: 'ping_send_error',
-          ),
-        );
+        unawaited(forceReconnect(reason: 'ping_send_error'));
 
         return;
       }
 
       _heartbeatTimeoutTimer?.cancel();
 
-      _heartbeatTimeoutTimer = Timer(
-        _heartbeatTimeout,
-        () {
-          if (_manualDisconnect ||
-              generation != _generation ||
-              _channel != channel ||
-              !isConnected) {
-            return;
-          }
+      _heartbeatTimeoutTimer = Timer(_heartbeatTimeout, () {
+        if (_manualDisconnect ||
+            generation != _generation ||
+            _channel != channel ||
+            !isConnected) {
+          return;
+        }
 
-          if (!_heartbeatWaitingForPong) {
-            return;
-          }
+        if (!_heartbeatWaitingForPong) {
+          return;
+        }
 
-          debugPrint(
-            'GLOBAL CALL WS HEARTBEAT TIMEOUT -> reconnect',
-          );
+        debugPrint('GLOBAL CALL WS HEARTBEAT TIMEOUT -> reconnect');
 
-          _heartbeatWaitingForPong = false;
+        _heartbeatWaitingForPong = false;
 
-          unawaited(
-            forceReconnect(
-              reason: 'heartbeat_timeout',
-            ),
-          );
-        },
-      );
-    },
-  );
-}
+        unawaited(forceReconnect(reason: 'heartbeat_timeout'));
+      });
+    });
+  }
 
   void _stopHeartbeat() {
     _heartbeatTimer?.cancel();
@@ -554,97 +529,88 @@ class GlobalCallSocketService {
     _heartbeatWaitingForPong = false;
   }
 
- Future<void> _handleMessage(dynamic message) async {
-  debugPrint('');
-  debugPrint(
-    '================ GLOBAL CALL WS MESSAGE ================',
-  );
+  Future<void> _handleMessage(dynamic message) async {
+    debugPrint('');
+    debugPrint('================ GLOBAL CALL WS MESSAGE ================');
 
-  try {
-    final decoded = jsonDecode(message.toString());
+    try {
+      final decoded = jsonDecode(message.toString());
 
-    if (decoded is! Map) {
-      debugPrint('GLOBAL CALL WS INVALID DATA');
-      return;
-    }
-
-    final rawData = Map<String, dynamic>.from(decoded);
-
-    // Any valid message means the socket/server is alive.
-    _lastPongAt = DateTime.now();
-
-    final event = (
-      rawData['event'] ??
-      rawData['type'] ??
-      rawData['action'] ??
-      ''
-    ).toString();
-
-    if (event.trim().isEmpty) {
-      debugPrint('GLOBAL CALL WS EVENT EMPTY');
-      return;
-    }
-
-    // Accept all common heartbeat acknowledgements.
-    if (event == 'pong' ||
-        event == 'global_pong' ||
-        event == 'ping_ack' ||
-        event == 'heartbeat_ack' ||
-        event == 'heartbeat') {
-      _heartbeatWaitingForPong = false;
-
-      _heartbeatTimeoutTimer?.cancel();
-      _heartbeatTimeoutTimer = null;
-
-      debugPrint('GLOBAL CALL WS PONG');
-      return;
-    }
-
-    // A real server message also proves this connection is alive.
-    //
-    // For example incoming_call/call_cancelled may arrive while we're
-    // waiting for a pong. Don't destroy a perfectly working socket.
-    if (_heartbeatWaitingForPong) {
-      debugPrint(
-        'GLOBAL CALL WS ACTIVITY RECEIVED WHILE WAITING FOR PONG: $event',
-      );
-
-      _heartbeatWaitingForPong = false;
-
-      _heartbeatTimeoutTimer?.cancel();
-      _heartbeatTimeoutTimer = null;
-    }
-
-    final data = _normalizeData(rawData, event);
-
-    debugPrint('GLOBAL CALL WS EVENT: $event');
-
-    final handlers = _handlers[event];
-
-    if (handlers == null || handlers.isEmpty) {
-      debugPrint('GLOBAL CALL WS NO HANDLER FOR: $event');
-      return;
-    }
-
-    for (final handler in List<GlobalSocketHandler>.from(handlers)) {
-      try {
-        await handler(data);
-      } catch (e, st) {
-        debugPrint(
-          'GLOBAL CALL WS HANDLER ERROR FOR $event: $e',
-        );
-        debugPrint(st.toString());
+      if (decoded is! Map) {
+        debugPrint('GLOBAL CALL WS INVALID DATA');
+        return;
       }
+
+      final rawData = Map<String, dynamic>.from(decoded);
+
+      // Any valid message means the socket/server is alive.
+      _lastPongAt = DateTime.now();
+
+      final event =
+          (rawData['event'] ?? rawData['type'] ?? rawData['action'] ?? '')
+              .toString();
+
+      if (event.trim().isEmpty) {
+        debugPrint('GLOBAL CALL WS EVENT EMPTY');
+        return;
+      }
+
+      // Accept all common heartbeat acknowledgements.
+      if (event == 'pong' ||
+          event == 'global_pong' ||
+          event == 'ping_ack' ||
+          event == 'heartbeat_ack' ||
+          event == 'heartbeat') {
+        _heartbeatWaitingForPong = false;
+
+        _heartbeatTimeoutTimer?.cancel();
+        _heartbeatTimeoutTimer = null;
+
+        debugPrint('GLOBAL CALL WS PONG');
+        return;
+      }
+
+      // A real server message also proves this connection is alive.
+      //
+      // For example incoming_call/call_cancelled may arrive while we're
+      // waiting for a pong. Don't destroy a perfectly working socket.
+      if (_heartbeatWaitingForPong) {
+        debugPrint(
+          'GLOBAL CALL WS ACTIVITY RECEIVED WHILE WAITING FOR PONG: $event',
+        );
+
+        _heartbeatWaitingForPong = false;
+
+        _heartbeatTimeoutTimer?.cancel();
+        _heartbeatTimeoutTimer = null;
+      }
+
+      final data = _normalizeData(rawData, event);
+
+      debugPrint('GLOBAL CALL WS EVENT: $event');
+
+      final handlers = _handlers[event];
+
+      if (handlers == null || handlers.isEmpty) {
+        debugPrint('GLOBAL CALL WS NO HANDLER FOR: $event');
+        return;
+      }
+
+      for (final handler in List<GlobalSocketHandler>.from(handlers)) {
+        try {
+          await handler(data);
+        } catch (e, st) {
+          debugPrint('GLOBAL CALL WS HANDLER ERROR FOR $event: $e');
+          debugPrint(st.toString());
+        }
+      }
+    } catch (e, st) {
+      debugPrint('GLOBAL CALL WS PARSE ERROR: $e');
+      debugPrint(st.toString());
+    } finally {
+      debugPrint('========================================================');
     }
-  } catch (e, st) {
-    debugPrint('GLOBAL CALL WS PARSE ERROR: $e');
-    debugPrint(st.toString());
-  } finally {
-    debugPrint(
-      '========================================================',
-    );
   }
-}
 
   Map<String, dynamic> _normalizeData(
     Map<String, dynamic> rawData,
@@ -734,10 +700,7 @@ class GlobalCallSocketService {
   }
 
   void on(String event, GlobalSocketHandler handler) {
-    final list = _handlers.putIfAbsent(
-      event,
-      () => <GlobalSocketHandler>[],
-    );
+    final list = _handlers.putIfAbsent(event, () => <GlobalSocketHandler>[]);
 
     if (!list.contains(handler)) {
       list.add(handler);

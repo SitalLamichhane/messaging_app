@@ -1,26 +1,10 @@
-
 import 'package:flutter/foundation.dart';
 
-enum MessageType {
-  text,
-  image,
-  video,
-  file,
-  call,
-  audio,
-  mediaAlbum,
-}
+enum MessageType { text, image, video, file, call, audio, mediaAlbum }
 
-enum CallEntryType {
-  voice,
-  video,
-}
+enum CallEntryType { voice, video }
 
-enum CallEntryStatus {
-  outgoing,
-  incoming,
-  missed,
-}
+enum CallEntryStatus { outgoing, incoming, missed }
 
 String _stringValue(dynamic value) {
   if (value == null) return '';
@@ -59,13 +43,15 @@ String _formatChatTime(DateTime dateTime) {
   final local = dateTime.toLocal();
 
   final sameDay =
-      now.year == local.year && now.month == local.month && now.day == local.day;
+      now.year == local.year &&
+      now.month == local.month &&
+      now.day == local.day;
 
   final hour = local.hour == 0
       ? 12
       : local.hour > 12
-          ? local.hour - 12
-          : local.hour;
+      ? local.hour - 12
+      : local.hour;
 
   final minute = local.minute.toString().padLeft(2, '0');
   final period = local.hour >= 12 ? 'PM' : 'AM';
@@ -188,9 +174,7 @@ class ChatUser {
           user['phone_number'] ?? user['phone'] ?? json['phone'] ?? '',
         ),
         avatarUrl: parsedAvatar,
-        isOnline: _boolValue(
-          user['is_online'] ?? json['is_online'],
-        ),
+        isOnline: _boolValue(user['is_online'] ?? json['is_online']),
         isBlocked: parsedIsBlocked,
         blockedBy: parsedBlockedBy,
         blockedByName: parsedBlockedByName,
@@ -391,12 +375,15 @@ class ChatMessage {
             json['sender_name'] ??
             '',
       ),
-      senderAvatar: senderMap == null ? null : _profileImageFromUserMap(senderMap),
+      senderAvatar: senderMap == null
+          ? null
+          : _profileImageFromUserMap(senderMap),
       filePath: filePathValue.trim().isEmpty ? null : filePathValue,
       fileName: _stringValue(json['file_name']).trim().isEmpty
           ? null
           : _stringValue(json['file_name']),
-      fileSizeBytes: json['file_size'] == null && json['file_size_bytes'] == null
+      fileSizeBytes:
+          json['file_size'] == null && json['file_size_bytes'] == null
           ? null
           : _intValue(json['file_size'] ?? json['file_size_bytes']),
       mediaUrls: parsedMediaUrls,
@@ -411,12 +398,13 @@ class ChatMessage {
       replyToMessageId: _stringValue(json['reply_to']).trim().isEmpty
           ? null
           : _stringValue(json['reply_to']),
-      replyPreview: _stringValue(
-        json['reply_preview'] ??
-            json['reply_to_data']?['text'] ??
-            json['reply_to_data']?['message'] ??
-            '',
-      ).trim().isEmpty
+      replyPreview:
+          _stringValue(
+            json['reply_preview'] ??
+                json['reply_to_data']?['text'] ??
+                json['reply_to_data']?['message'] ??
+                '',
+          ).trim().isEmpty
           ? null
           : _stringValue(
               json['reply_preview'] ??
@@ -424,8 +412,9 @@ class ChatMessage {
                   json['reply_to_data']?['message'] ??
                   '',
             ),
-      replyToMe:
-          json['reply_to_me'] == null ? null : _boolValue(json['reply_to_me']),
+      replyToMe: json['reply_to_me'] == null
+          ? null
+          : _boolValue(json['reply_to_me']),
     );
   }
 
@@ -511,13 +500,11 @@ class ChatItem {
     required this.time,
     this.unreadCount = 0,
     List<ChatMessage>? messages,
-  })  : memberNicknames = memberNicknames ?? {},
-        // Always keep a growable copy. API / const / unmodifiable lists
-        // must never be stored directly because AppChatData.addMessage()
-        // inserts local call/message entries into this list.
-        messages = List<ChatMessage>.from(
-          messages ?? const <ChatMessage>[],
-        );
+  }) : memberNicknames = memberNicknames ?? {},
+       // Always keep a growable copy. API / const / unmodifiable lists
+       // must never be stored directly because AppChatData.addMessage()
+       // inserts local call/message entries into this list.
+       messages = List<ChatMessage>.from(messages ?? const <ChatMessage>[]);
 
   factory ChatItem.fromJson(
     Map<String, dynamic> json, {
@@ -586,18 +573,15 @@ class ChatItem {
     final name = isGroup
         ? (rawName.isNotEmpty ? rawName : 'Group')
         : (otherUser?.name.trim().isNotEmpty == true
-            ? otherUser!.name
-            : rawName.isNotEmpty
-                ? rawName
-                : 'Unknown');
+              ? otherUser!.name
+              : rawName.isNotEmpty
+              ? rawName
+              : 'Unknown');
 
     final phone = isGroup
         ? ''
         : _stringValue(
-            otherUser?.phone ??
-                json['phone_number'] ??
-                json['phone'] ??
-                '',
+            otherUser?.phone ?? json['phone_number'] ?? json['phone'] ?? '',
           );
 
     final directAvatar = _stringValue(
@@ -612,14 +596,14 @@ class ChatItem {
     final avatarUrl = directAvatar.trim().isNotEmpty
         ? directAvatar
         : isGroup
-            ? _stringValue(
-                json['image'] ??
-                    json['group_image'] ??
-                    json['avatar'] ??
-                    json['avatar_url'] ??
-                    '',
-              )
-            : (otherUser?.avatarUrl ?? '');
+        ? _stringValue(
+            json['image'] ??
+                json['group_image'] ??
+                json['avatar'] ??
+                json['avatar_url'] ??
+                '',
+          )
+        : (otherUser?.avatarUrl ?? '');
 
     debugPrint('========== CHAT MAP ==========');
     debugPrint('MAPPED CHAT ID: ${_stringValue(json['id'])}');
@@ -641,7 +625,8 @@ class ChatItem {
       name: name,
       phone: phone,
       avatarUrl: avatarUrl,
-      isOnline: otherUser?.isOnline ?? _boolValue(json['is_online'], fallback: true),
+      isOnline:
+          otherUser?.isOnline ?? _boolValue(json['is_online'], fallback: true),
       isGroup: isGroup,
       members: members,
       adminIds: _parseAdminIds(json),
@@ -668,10 +653,7 @@ class ChatItem {
 
     if (value is Map) {
       return value.map(
-        (key, value) => MapEntry(
-          _stringValue(key),
-          _stringValue(value),
-        ),
+        (key, value) => MapEntry(_stringValue(key), _stringValue(value)),
       );
     }
 

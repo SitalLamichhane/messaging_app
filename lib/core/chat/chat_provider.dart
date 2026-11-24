@@ -32,6 +32,12 @@ class ChatProvider extends ChangeNotifier {
   final GlobalChatSocketService globalChatSocket = GlobalChatSocketService();
   final List<dynamic> searchedUsers = [];
 
+  /// Clears user search results and updates listening widgets.
+  void clearSearchedUsers() {
+    searchedUsers.clear();
+    notifyListeners();
+  }
+
   Future<String> _myUserId() async {
     return await ApiClient.storage.read(key: 'user_id') ?? '';
   }
@@ -50,7 +56,6 @@ class ChatProvider extends ChangeNotifier {
       return phone.contains(digits);
     }).toList();
   }
-
 
   Map<String, String> getReactionsForChat(String conversationId) {
     return Map<String, String>.from(
@@ -105,7 +110,10 @@ class ChatProvider extends ChangeNotifier {
     await globalChatSocket.connect(
       onMessage: (data) async {
         debugPrint('GLOBAL CHAT EVENT: $data');
-        final type = (data['type'] ?? data['action'] ?? '').toString().trim().toLowerCase();
+        final type = (data['type'] ?? data['action'] ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
         final payload = data['data'] ?? data['conversation'] ?? data['message'];
 
         if (type == 'global_chat_connected') {
@@ -116,7 +124,9 @@ class ChatProvider extends ChangeNotifier {
         if (type == 'conversation_created' || type == 'conversation_updated') {
           if (payload is! Map) return;
           try {
-            final chat = await _mapConversation(Map<String, dynamic>.from(payload));
+            final chat = await _mapConversation(
+              Map<String, dynamic>.from(payload),
+            );
             _upsertConversation(chat);
             debugPrint('REALTIME CONVERSATION APPLIED: ${chat.id}');
           } catch (e) {
@@ -128,8 +138,11 @@ class ChatProvider extends ChangeNotifier {
         if (type == 'new_message') {
           if (payload is! Map) return;
           final messageJson = Map<String, dynamic>.from(payload);
-          final rawConversationId = messageJson['conversation'] ?? messageJson['conversation_id'];
-          final conversationId = int.tryParse(rawConversationId?.toString() ?? '');
+          final rawConversationId =
+              messageJson['conversation'] ?? messageJson['conversation_id'];
+          final conversationId = int.tryParse(
+            rawConversationId?.toString() ?? '',
+          );
           if (conversationId == null) {
             debugPrint('GLOBAL CHAT MESSAGE: conversation id missing');
             return;
@@ -181,9 +194,7 @@ class ChatProvider extends ChangeNotifier {
     await globalChatSocket.disconnect();
   }
 
-  Future<void> connectSocket({
-    required int conversationId,
-  }) async {
+  Future<void> connectSocket({required int conversationId}) async {
     final myIdString = await _myUserId();
     final myId = int.tryParse(myIdString) ?? 0;
 
@@ -193,14 +204,8 @@ class ChatProvider extends ChangeNotifier {
     socket.connect(
       conversationId: conversationId,
       onMessage: (data) async {
-        final action = (data['action'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
-        final type = (data['type'] ?? '')
-            .toString()
-            .trim()
-            .toLowerCase();
+        final action = (data['action'] ?? '').toString().trim().toLowerCase();
+        final type = (data['type'] ?? '').toString().trim().toLowerCase();
 
         debugPrint(
           'PRIVATE CHAT WS EVENT conversation=$conversationId '
@@ -208,26 +213,17 @@ class ChatProvider extends ChangeNotifier {
         );
 
         if (_isReactionPayload(data)) {
-          _applyReactionPayload(
-            conversationId: conversationId,
-            data: data,
-          );
+          _applyReactionPayload(conversationId: conversationId, data: data);
           return;
         }
 
         if (_isDeletePayload(data)) {
-          _applyDeletePayload(
-            conversationId: conversationId,
-            data: data,
-          );
+          _applyDeletePayload(conversationId: conversationId, data: data);
           return;
         }
 
         if (_isPinPayload(data)) {
-          _applyPinPayload(
-            conversationId: conversationId,
-            data: data,
-          );
+          _applyPinPayload(conversationId: conversationId, data: data);
           return;
         }
 
@@ -317,11 +313,9 @@ class ChatProvider extends ChangeNotifier {
             if (isTyping) {
               final rawName = rawUser is Map
                   ? (rawUser['full_name'] ??
-                      rawUser['name'] ??
-                      rawUser['phone'])
-                  : (data['full_name'] ??
-                      data['name'] ??
-                      data['phone']);
+                        rawUser['name'] ??
+                        rawUser['phone'])
+                  : (data['full_name'] ?? data['name'] ?? data['phone']);
 
               final name = rawName?.toString().trim() ?? '';
               typingUserName = name.isEmpty ? null : name;
@@ -340,10 +334,8 @@ class ChatProvider extends ChangeNotifier {
             type == 'read_message' ||
             action == 'seen' ||
             type == 'seen') {
-          final messageId =
-              (data['message_id'] ?? data['id'])?.toString();
-          final readerId =
-              (data['user_id'] ?? data['reader_id'])?.toString();
+          final messageId = (data['message_id'] ?? data['id'])?.toString();
+          final readerId = (data['user_id'] ?? data['reader_id'])?.toString();
 
           debugPrint(
             'READ RECEIPT RECEIVED '
@@ -357,16 +349,12 @@ class ChatProvider extends ChangeNotifier {
             final list = conversationMessages[key];
 
             if (list != null) {
-              final index =
-                  list.indexWhere((m) => m.id == messageId);
+              final index = list.indexWhere((m) => m.id == messageId);
 
               if (index != -1 && list[index].isMe) {
-                list[index] =
-                    list[index].copyWith(isSeen: true);
+                list[index] = list[index].copyWith(isSeen: true);
 
-                debugPrint(
-                  'MESSAGE MARKED SEEN LOCALLY id=$messageId',
-                );
+                debugPrint('MESSAGE MARKED SEEN LOCALLY id=$messageId');
               }
             }
           }
@@ -401,37 +389,28 @@ class ChatProvider extends ChangeNotifier {
   void sendSocketTyping({required bool typing}) {
     if (currentUserId == null) return;
 
-    socket.sendTyping(
-      senderId: currentUserId!,
-      isTyping: typing,
-    );
+    socket.sendTyping(senderId: currentUserId!, isTyping: typing);
   }
 
   /// Called by ChatDetailScreen after the private conversation socket connects.
   ///
   /// Uses the EXISTING Django ChatConsumer action:
-  ///   {"action": "read_message", "message_id": <id>}
+  ///   `{"action": "read_message", "message_id": <id>}`
   ///
   /// No backend change is required.
-  Future<void> markLoadedIncomingMessagesRead(
-    int conversationId,
-  ) async {
+  Future<void> markLoadedIncomingMessagesRead(int conversationId) async {
     // ChatDetailScreen can call this immediately after connectSocket().
     // The websocket handshake may still be finishing at that moment.
     // Wait briefly instead of silently dropping the read receipts.
     for (int attempt = 0; attempt < 20; attempt++) {
-      if (socket.isConnected &&
-          socket.conversationId == conversationId) {
+      if (socket.isConnected && socket.conversationId == conversationId) {
         break;
       }
 
-      await Future.delayed(
-        const Duration(milliseconds: 150),
-      );
+      await Future.delayed(const Duration(milliseconds: 150));
     }
 
-    if (!socket.isConnected ||
-        socket.conversationId != conversationId) {
+    if (!socket.isConnected || socket.conversationId != conversationId) {
       debugPrint(
         'READ RECEIPT: socket not connected '
         'conversation=$conversationId',
@@ -440,8 +419,7 @@ class ChatProvider extends ChangeNotifier {
     }
 
     final messages =
-        conversationMessages['$conversationId'] ??
-            const <ChatMessage>[];
+        conversationMessages['$conversationId'] ?? const <ChatMessage>[];
 
     for (final message in messages) {
       if (message.isMe) continue;
@@ -472,8 +450,9 @@ class ChatProvider extends ChangeNotifier {
       final response = await ChatApi.getConversations();
 
       final data = response.data;
-      final list =
-          data is List ? data : data['results'] ?? data['conversations'] ?? [];
+      final list = data is List
+          ? data
+          : data['results'] ?? data['conversations'] ?? [];
 
       conversations.clear();
 
@@ -533,8 +512,9 @@ class ChatProvider extends ChangeNotifier {
       );
 
       final data = response.data;
-      final list =
-          data is List ? data : data['results'] ?? data['messages'] ?? [];
+      final list = data is List
+          ? data
+          : data['results'] ?? data['messages'] ?? [];
 
       final messages = <ChatMessage>[];
 
@@ -1003,10 +983,7 @@ class ChatProvider extends ChangeNotifier {
     if (files.isEmpty) return;
 
     for (final file in files) {
-      await sendFile(
-        conversationId: conversationId,
-        file: file,
-      );
+      await sendFile(conversationId: conversationId, file: file);
     }
   }
 
@@ -1068,8 +1045,8 @@ class ChatProvider extends ChangeNotifier {
 
     final key = '$conversationId';
     final messageKey = '$messageId';
-    final wasPinned = conversationPinnedMessageIds[key]?.contains(messageKey) ??
-        false;
+    final wasPinned =
+        conversationPinnedMessageIds[key]?.contains(messageKey) ?? false;
 
     _setLocalPinned(
       conversationId: conversationId,
@@ -1115,7 +1092,6 @@ class ChatProvider extends ChangeNotifier {
   List<ChatMessage> getMessagesForChat(String conversationId) {
     return conversationMessages[conversationId] ?? [];
   }
-
 
   bool _looksLikeTempOutgoingId(String id) {
     final cleanId = id.trim();
@@ -1220,7 +1196,6 @@ class ChatProvider extends ChangeNotifier {
     return true;
   }
 
-
   void _updateConversationPreviewFromMessage(
     int conversationId,
     ChatMessage message,
@@ -1305,7 +1280,6 @@ class ChatProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-
   void _removeLocalMessage({
     required int conversationId,
     required String messageId,
@@ -1349,10 +1323,12 @@ class ChatProvider extends ChangeNotifier {
     final myId = await _myUserId();
 
     final lastMessage = json['last_message'];
-    final mappedLastMessage =
-        lastMessage == null ? null : await _mapMessage(lastMessage);
+    final mappedLastMessage = lastMessage == null
+        ? null
+        : await _mapMessage(lastMessage);
 
-    final isGroup = json['type'] == 'group' ||
+    final isGroup =
+        json['type'] == 'group' ||
         json['conversation_type'] == 'group' ||
         json['is_group'] == true;
 
@@ -1374,7 +1350,8 @@ class ChatProvider extends ChangeNotifier {
     String chatName =
         json['name']?.toString() ?? json['title']?.toString() ?? '';
 
-    String avatarUrl = json['image']?.toString() ??
+    String avatarUrl =
+        json['image']?.toString() ??
         json['group_image']?.toString() ??
         json['avatar']?.toString() ??
         json['avatar_url']?.toString() ??
@@ -1384,7 +1361,8 @@ class ChatProvider extends ChangeNotifier {
     String phone = '';
 
     if (!isGroup) {
-      phone = json['phone']?.toString() ??
+      phone =
+          json['phone']?.toString() ??
           json['phone_number']?.toString() ??
           json['other_user']?['phone']?.toString() ??
           json['other_user']?['phone_number']?.toString() ??
@@ -1399,8 +1377,8 @@ class ChatProvider extends ChangeNotifier {
           chatName = otherUser.name.trim().isNotEmpty
               ? otherUser.name.trim()
               : otherUser.phone.trim().isNotEmpty
-                  ? otherUser.phone.trim()
-                  : 'Unknown';
+              ? otherUser.phone.trim()
+              : 'Unknown';
         }
 
         if (avatarUrl.trim().isEmpty) {
@@ -1411,7 +1389,8 @@ class ChatProvider extends ChangeNotifier {
       if (avatarUrl.trim().isEmpty && json['other_user'] is Map) {
         final otherUserMap = json['other_user'] as Map;
 
-        avatarUrl = otherUserMap['profile_picture']?.toString() ??
+        avatarUrl =
+            otherUserMap['profile_picture']?.toString() ??
             otherUserMap['profilePicture']?.toString() ??
             otherUserMap['avatar']?.toString() ??
             otherUserMap['avatar_url']?.toString() ??
@@ -1423,7 +1402,8 @@ class ChatProvider extends ChangeNotifier {
     }
 
     if (chatName.trim().isEmpty) {
-      chatName = json['other_user']?['full_name']?.toString() ??
+      chatName =
+          json['other_user']?['full_name']?.toString() ??
           json['other_user']?['profile_name']?.toString() ??
           json['other_user']?['name']?.toString() ??
           json['other_user']?['username']?.toString() ??
@@ -1439,7 +1419,8 @@ class ChatProvider extends ChangeNotifier {
       name: chatName,
       phone: phone,
       avatarUrl: avatarUrl,
-      isOnline: otherUser?.isOnline ??
+      isOnline:
+          otherUser?.isOnline ??
           json['is_online'] ??
           json['other_user']?['is_online'] ??
           false,
@@ -1467,7 +1448,8 @@ class ChatProvider extends ChangeNotifier {
 
       final user = member['user'] is Map ? member['user'] as Map : member;
 
-      final avatarUrl = user['profile_picture']?.toString() ??
+      final avatarUrl =
+          user['profile_picture']?.toString() ??
           user['profilePicture']?.toString() ??
           user['avatar']?.toString() ??
           user['avatar_url']?.toString() ??
@@ -1483,7 +1465,8 @@ class ChatProvider extends ChangeNotifier {
           member['photo']?.toString() ??
           '';
 
-      final name = member['display_name']?.toString() ??
+      final name =
+          member['display_name']?.toString() ??
           member['nickname']?.toString() ??
           user['full_name']?.toString() ??
           user['profile_name']?.toString() ??
@@ -1493,7 +1476,8 @@ class ChatProvider extends ChangeNotifier {
           user['phone_number']?.toString() ??
           'Unknown';
 
-      final phone = user['phone_number']?.toString() ??
+      final phone =
+          user['phone_number']?.toString() ??
           user['phone']?.toString() ??
           member['phone_number']?.toString() ??
           member['phone']?.toString() ??
@@ -1501,7 +1485,8 @@ class ChatProvider extends ChangeNotifier {
 
       members.add(
         ChatUser(
-          id: user['id']?.toString() ??
+          id:
+              user['id']?.toString() ??
               member['user_id']?.toString() ??
               member['id']?.toString() ??
               '',
@@ -1540,7 +1525,8 @@ class ChatProvider extends ChangeNotifier {
     String senderId = '';
 
     if (sender is Map) {
-      senderId = sender['id']?.toString() ??
+      senderId =
+          sender['id']?.toString() ??
           sender['user_id']?.toString() ??
           sender['pk']?.toString() ??
           '';
@@ -1549,23 +1535,26 @@ class ChatProvider extends ChangeNotifier {
     }
 
     if (senderId.trim().isEmpty || senderId.trim() == 'null') {
-      senderId = json['sender_id']?.toString() ??
+      senderId =
+          json['sender_id']?.toString() ??
           json['user_id']?.toString() ??
           json['from_user_id']?.toString() ??
           json['created_by']?.toString() ??
           '';
     }
 
-    final isOwnMessage = senderId.toString().trim() == myId.toString().trim() ||
+    final isOwnMessage =
+        senderId.toString().trim() == myId.toString().trim() ||
         json['is_me'] == true ||
         json['isMe'] == true ||
         json['mine'] == true;
 
-    final messageType = (json['message_type'] ??
-            json['content_type'] ??
-            json['media_type'] ??
-            '')
-        .toString();
+    final messageType =
+        (json['message_type'] ??
+                json['content_type'] ??
+                json['media_type'] ??
+                '')
+            .toString();
 
     var type = _backendTypeToMessageType(messageType);
 
@@ -1573,7 +1562,8 @@ class ChatProvider extends ChangeNotifier {
     // and only send media/attachments. Infer the type so received photo/video
     // messages do not become empty text messages.
     if (type == MessageType.text && messageType.trim().isEmpty) {
-      final albumSource = json['media_urls'] ??
+      final albumSource =
+          json['media_urls'] ??
           json['files'] ??
           json['album_items'] ??
           json['attachments'];
@@ -1581,17 +1571,18 @@ class ChatProvider extends ChangeNotifier {
       if (albumSource is List && albumSource.isNotEmpty) {
         type = MessageType.mediaAlbum;
       } else {
-        final mediaValue = (json['media'] ??
-                json['media_url'] ??
-                json['file'] ??
-                json['url'] ??
-                '')
-            .toString()
-            .toLowerCase()
-            .split('?')
-            .first
-            .split('#')
-            .first;
+        final mediaValue =
+            (json['media'] ??
+                    json['media_url'] ??
+                    json['file'] ??
+                    json['url'] ??
+                    '')
+                .toString()
+                .toLowerCase()
+                .split('?')
+                .first
+                .split('#')
+                .first;
 
         if (mediaValue.endsWith('.mp4') ||
             mediaValue.endsWith('.mov') ||
@@ -1625,23 +1616,23 @@ class ChatProvider extends ChangeNotifier {
       senderId: senderId,
       senderName: sender is Map
           ? sender['full_name']?.toString() ??
-              sender['name']?.toString() ??
-              sender['username']?.toString()
+                sender['name']?.toString() ??
+                sender['username']?.toString()
           : null,
       senderAvatar: sender is Map
           ? sender['profile_picture']?.toString() ??
-              sender['profilePicture']?.toString() ??
-              sender['avatar']?.toString() ??
-              sender['avatar_url']?.toString() ??
-              sender['profile_image']?.toString() ??
-              sender['image']?.toString() ??
-              sender['photo']?.toString()
+                sender['profilePicture']?.toString() ??
+                sender['avatar']?.toString() ??
+                sender['avatar_url']?.toString() ??
+                sender['profile_image']?.toString() ??
+                sender['image']?.toString() ??
+                sender['photo']?.toString()
           : null,
       filePath: type == MessageType.mediaAlbum
           ? null
           : json['media']?.toString() ??
-              json['media_url']?.toString() ??
-              json['file']?.toString(),
+                json['media_url']?.toString() ??
+                json['file']?.toString(),
       fileName: json['file_name']?.toString() ?? json['media_name']?.toString(),
       fileSizeBytes: json['file_size'] is int ? json['file_size'] : null,
       mediaUrls: type == MessageType.mediaAlbum
@@ -1655,8 +1646,8 @@ class ChatProvider extends ChangeNotifier {
           : null,
       audioPath: type == MessageType.audio
           ? json['media']?.toString() ??
-              json['media_url']?.toString() ??
-              json['file']?.toString()
+                json['media_url']?.toString() ??
+                json['file']?.toString()
           : null,
       audioDuration: json['duration'] == null
           ? null
@@ -1666,7 +1657,8 @@ class ChatProvider extends ChangeNotifier {
                       .toInt(),
             ),
       replyToMessageId: json['reply_to']?.toString(),
-      replyPreview: json['reply_preview']?.toString() ??
+      replyPreview:
+          json['reply_preview']?.toString() ??
           json['reply_to_text']?.toString() ??
           json['reply_to_data']?['text']?.toString(),
       replyToMe: json['reply_to_me'],
@@ -1785,7 +1777,8 @@ class ChatProvider extends ChangeNotifier {
   }) {
     if (data is! Map) return;
 
-    final rawMessageId = data['reaction_to'] ??
+    final rawMessageId =
+        data['reaction_to'] ??
         data['message_id'] ??
         data['target_message_id'] ??
         data['id'];
@@ -1793,7 +1786,8 @@ class ChatProvider extends ChangeNotifier {
 
     if (messageId.trim().isEmpty) return;
 
-    final reaction = data['reaction']?.toString() ??
+    final reaction =
+        data['reaction']?.toString() ??
         data['emoji']?.toString() ??
         data['my_reaction']?.toString() ??
         '';
@@ -1816,16 +1810,10 @@ class ChatProvider extends ChangeNotifier {
 
     if (messageId.trim().isEmpty) return;
 
-    _removeLocalMessage(
-      conversationId: conversationId,
-      messageId: messageId,
-    );
+    _removeLocalMessage(conversationId: conversationId, messageId: messageId);
   }
 
-  void _applyPinPayload({
-    required int conversationId,
-    required dynamic data,
-  }) {
+  void _applyPinPayload({required int conversationId, required dynamic data}) {
     if (data is! Map) return;
 
     final rawMessageId = data['message_id'] ?? data['id'];
@@ -1833,7 +1821,8 @@ class ChatProvider extends ChangeNotifier {
 
     if (messageId.trim().isEmpty) return;
 
-    final pinned = _boolFromDynamic(data['pinned_by_me'] ?? data['pinned']) ??
+    final pinned =
+        _boolFromDynamic(data['pinned_by_me'] ?? data['pinned']) ??
         (data['action']?.toString().toLowerCase() == 'message_pinned' ||
             data['type']?.toString().toLowerCase() == 'message_pinned');
 
@@ -1936,7 +1925,8 @@ class ChatProvider extends ChangeNotifier {
     dynamic rawValue = value;
 
     if (rawValue is Map) {
-      rawValue = rawValue['media_urls'] ??
+      rawValue =
+          rawValue['media_urls'] ??
           rawValue['urls'] ??
           rawValue['files'] ??
           rawValue['results'] ??
@@ -1954,7 +1944,8 @@ class ChatProvider extends ChangeNotifier {
         if (item == null) continue;
 
         if (item is Map) {
-          final url = item['url'] ??
+          final url =
+              item['url'] ??
               item['file'] ??
               item['media'] ??
               item['media_url'] ??
@@ -1968,7 +1959,8 @@ class ChatProvider extends ChangeNotifier {
           // Preserve attachment type when the backend provides it. We encode
           // it into the string instead of changing ChatMessage, so this remains
           // compatible with your existing model and copyWith implementation.
-          final rawType = item['type'] ??
+          final rawType =
+              item['type'] ??
               item['media_type'] ??
               item['attachment_type'] ??
               item['kind'] ??
@@ -1977,10 +1969,12 @@ class ChatProvider extends ChangeNotifier {
               item['mime_type'];
 
           final type = rawType?.toString().trim().toLowerCase() ?? '';
-          final isVideo = type == 'video' ||
+          final isVideo =
+              type == 'video' ||
               type.startsWith('video/') ||
               type.contains('video');
-          final isImage = type == 'image' ||
+          final isImage =
+              type == 'image' ||
               type == 'photo' ||
               type.startsWith('image/') ||
               type.contains('image');

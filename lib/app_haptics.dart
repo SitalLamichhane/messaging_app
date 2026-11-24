@@ -45,10 +45,7 @@ class AppHaptics {
       if (hasVibrator) {
         // Deliberately obvious test pulse.
         debugPrint('[HAPTIC] sending 500ms test vibration at amplitude 255');
-        await Vibration.vibrate(
-          duration: 500,
-          amplitude: amplitude ? 255 : -1,
-        );
+        await Vibration.vibrate(duration: 500, amplitude: amplitude ? 255 : -1);
         debugPrint('[HAPTIC] vibration command completed');
       } else {
         debugPrint('[HAPTIC] device reports NO vibrator');
@@ -70,55 +67,50 @@ class AppHaptics {
   }
 
   static Future<void> _pulse(
-  String name, {
-  required int durationMs,
-  required int amplitude,
-}) async {
-  if (!enabled) return;
+    String name, {
+    required int durationMs,
+    required int amplitude,
+  }) async {
+    if (!enabled) return;
 
-  debugPrint('[HAPTIC] $name requested');
+    debugPrint('[HAPTIC] $name requested');
 
-  try {
-    final hasVibrator = await Vibration.hasVibrator();
+    try {
+      final hasVibrator = await Vibration.hasVibrator();
 
-    if (!hasVibrator) {
+      if (!hasVibrator) {
+        await _flutterFallback(name);
+        return;
+      }
+
+      final hasAmplitude = await Vibration.hasAmplitudeControl();
+
+      if (hasAmplitude) {
+        await Vibration.vibrate(duration: durationMs, amplitude: amplitude);
+      } else {
+        // Samsung/device without amplitude control:
+        // make duration strong enough to actually feel.
+        final strongDuration = switch (name) {
+          'selection' => 80,
+          'light' => 110,
+          'medium' => 160,
+          'heavy' => 240,
+          _ => 300,
+        };
+
+        await Vibration.vibrate(duration: strongDuration);
+      }
+
+      debugPrint(
+        '[HAPTIC] $name sent '
+        'hasVibrator=$hasVibrator '
+        'amplitudeControl=$hasAmplitude',
+      );
+    } catch (e) {
+      debugPrint('[HAPTIC] ERROR: $e');
       await _flutterFallback(name);
-      return;
     }
-
-    final hasAmplitude = await Vibration.hasAmplitudeControl();
-
-    if (hasAmplitude) {
-      await Vibration.vibrate(
-        duration: durationMs,
-        amplitude: amplitude,
-      );
-    } else {
-      // Samsung/device without amplitude control:
-      // make duration strong enough to actually feel.
-      final strongDuration = switch (name) {
-        'selection' => 80,
-        'light' => 110,
-        'medium' => 160,
-        'heavy' => 240,
-        _ => 300,
-      };
-
-      await Vibration.vibrate(
-        duration: strongDuration,
-      );
-    }
-
-    debugPrint(
-      '[HAPTIC] $name sent '
-      'hasVibrator=$hasVibrator '
-      'amplitudeControl=$hasAmplitude',
-    );
-  } catch (e) {
-    debugPrint('[HAPTIC] ERROR: $e');
-    await _flutterFallback(name);
   }
-}
 
   static Future<void> _flutterFallback(String name) async {
     try {

@@ -1,8 +1,9 @@
 import 'package:flutter/services.dart';
 
 class SystemRingtoneService {
-  static const MethodChannel _channel =
-      MethodChannel('hiddenly/system_ringtone');
+  static const MethodChannel _channel = MethodChannel(
+    'hiddenly/system_ringtone',
+  );
 
   static Future<void> start() async {
     try {

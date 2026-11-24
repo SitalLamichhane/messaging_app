@@ -24,10 +24,7 @@ class BlockProvider extends ChangeNotifier {
     return _blockedMeMap[_activeKey] == true;
   }
 
-  String _key({
-    required String conversationId,
-    required String targetUserId,
-  }) {
+  String _key({required String conversationId, required String targetUserId}) {
     return '${conversationId.trim()}:${targetUserId.trim()}';
   }
 
@@ -159,7 +156,9 @@ class BlockProvider extends ChangeNotifier {
     _isLoading = false;
     _error = '';
 
-    debugPrint('LOAD BLOCK STATUS SKIPPED: using /chat/conversations/ data only');
+    debugPrint(
+      'LOAD BLOCK STATUS SKIPPED: using /chat/conversations/ data only',
+    );
     debugPrint('ACTIVE BLOCK KEY: $_activeKey');
 
     notifyListeners();
@@ -350,7 +349,8 @@ class BlockProvider extends ChangeNotifier {
     final data = e.response?.data;
 
     if (data is Map) {
-      final value = data['error'] ??
+      final value =
+          data['error'] ??
           data['detail'] ??
           data['message'] ??
           data['non_field_errors'];

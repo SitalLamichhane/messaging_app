@@ -34,8 +34,7 @@ class ChatApiException implements Exception {
       }
     } else if (data is String && data.trim().isNotEmpty) {
       message = data.trim();
-    } else if (error.message != null &&
-        error.message!.trim().isNotEmpty) {
+    } else if (error.message != null && error.message!.trim().isNotEmpty) {
       message = error.message!.trim();
     }
 
@@ -53,17 +52,13 @@ class ChatApiException implements Exception {
 class ChatApiService {
   final Dio dio;
 
-  ChatApiService({
-    Dio? dio,
-  }) : dio = dio ?? ApiClient.dio;
+  ChatApiService({Dio? dio}) : dio = dio ?? ApiClient.dio;
 
   // ============================================================
   // LOAD MESSAGES
   // ============================================================
 
-  Future<List<ChatMessageDto>> loadMessages(
-    int conversationId,
-  ) async {
+  Future<List<ChatMessageDto>> loadMessages(int conversationId) async {
     try {
       final response = await dio.get(
         '/chat/conversations/$conversationId/messages/',
@@ -86,9 +81,7 @@ class ChatApiService {
       return list
           .whereType<Map>()
           .map(
-            (item) => ChatMessageDto.fromJson(
-              Map<String, dynamic>.from(item),
-            ),
+            (item) => ChatMessageDto.fromJson(Map<String, dynamic>.from(item)),
           )
           .where((message) => message.id > 0)
           .toList();
@@ -121,8 +114,7 @@ class ChatApiService {
         data: {
           'text': cleanText,
           'message_type': 'text',
-          if (replyToId != null)
-            'reply_to': replyToId,
+          'reply_to': ?replyToId,
         },
       );
 
@@ -154,27 +146,12 @@ class ChatApiService {
     try {
       final form = FormData();
 
-      form.fields.add(
-        MapEntry(
-          'text',
-          text.trim(),
-        ),
-      );
+      form.fields.add(MapEntry('text', text.trim()));
 
-      form.fields.add(
-        MapEntry(
-          'message_type',
-          messageType.trim(),
-        ),
-      );
+      form.fields.add(MapEntry('message_type', messageType.trim()));
 
       if (replyToId != null) {
-        form.fields.add(
-          MapEntry(
-            'reply_to',
-            replyToId.toString(),
-          ),
-        );
+        form.fields.add(MapEntry('reply_to', replyToId.toString()));
       }
 
       for (final file in files) {
@@ -297,9 +274,7 @@ class ChatApiService {
     try {
       final response = await dio.patch(
         '/chat/messages/$messageId/edit/',
-        data: {
-          'text': cleanText,
-        },
+        data: {'text': cleanText},
       );
 
       return _parseMessage(response.data);
@@ -312,13 +287,9 @@ class ChatApiService {
   // DELETE
   // ============================================================
 
-  Future<void> deleteMessage(
-    int messageId,
-  ) async {
+  Future<void> deleteMessage(int messageId) async {
     try {
-      await dio.delete(
-        '/chat/messages/$messageId/delete/',
-      );
+      await dio.delete('/chat/messages/$messageId/delete/');
     } on DioException catch (error) {
       throw ChatApiException.fromDio(error);
     }
@@ -328,42 +299,32 @@ class ChatApiService {
   // MARK SINGLE MESSAGE READ
   // ============================================================
 
-  Future<bool> markMessageRead(
-  int messageId,
-) async {
-  try {
-    await dio.post(
-      '/chat/messages/$messageId/read/',
-    );
+  Future<bool> markMessageRead(int messageId) async {
+    try {
+      await dio.post('/chat/messages/$messageId/read/');
 
-    return true;
-  } on DioException catch (e) {
-    debugPrint(
-      '[CHAT API] markMessageRead failed: '
-      '${e.response?.statusCode} ${e.response?.data}',
-    );
+      return true;
+    } on DioException catch (e) {
+      debugPrint(
+        '[CHAT API] markMessageRead failed: '
+        '${e.response?.statusCode} ${e.response?.data}',
+      );
 
-    return false;
-  } catch (e) {
-    debugPrint(
-      '[CHAT API] markMessageRead failed: $e',
-    );
+      return false;
+    } catch (e) {
+      debugPrint('[CHAT API] markMessageRead failed: $e');
 
-    return false;
+      return false;
+    }
   }
-}
 
   // ============================================================
   // MARK CONVERSATION READ
   // ============================================================
 
-  Future<bool> markConversationRead(
-    int conversationId,
-  ) async {
+  Future<bool> markConversationRead(int conversationId) async {
     try {
-      await dio.post(
-        '/chat/conversations/$conversationId/read/',
-      );
+      await dio.post('/chat/conversations/$conversationId/read/');
 
       return true;
     } on DioException catch (error) {
@@ -388,9 +349,7 @@ class ChatApiService {
   // RESPONSE PARSER
   // ============================================================
 
-  ChatMessageDto _parseMessage(
-    dynamic data,
-  ) {
+  ChatMessageDto _parseMessage(dynamic data) {
     if (data is! Map) {
       throw const ChatApiException(
         statusCode: null,
@@ -398,36 +357,31 @@ class ChatApiService {
       );
     }
 
-    final map =
-        Map<String, dynamic>.from(data);
+    final map = Map<String, dynamic>.from(data);
 
     final nested = map['message'];
 
     if (nested is Map) {
-      final message =
-          ChatMessageDto.fromJson(
+      final message = ChatMessageDto.fromJson(
         Map<String, dynamic>.from(nested),
       );
 
       if (message.id <= 0) {
         throw const ChatApiException(
           statusCode: null,
-          message:
-              'Server returned an invalid message ID',
+          message: 'Server returned an invalid message ID',
         );
       }
 
       return message;
     }
 
-    final message =
-        ChatMessageDto.fromJson(map);
+    final message = ChatMessageDto.fromJson(map);
 
     if (message.id <= 0) {
       throw const ChatApiException(
         statusCode: null,
-        message:
-            'Server returned an invalid message ID',
+        message: 'Server returned an invalid message ID',
       );
     }
 

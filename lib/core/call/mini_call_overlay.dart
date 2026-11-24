@@ -31,7 +31,8 @@ class _MiniCallOverlayState extends ConsumerState<MiniCallOverlay> {
   }
 
   bool _hasActiveCall(CallState state) {
-    final hasUsers = state.currentUserId?.trim().isNotEmpty == true &&
+    final hasUsers =
+        state.currentUserId?.trim().isNotEmpty == true &&
         state.receiverId?.trim().isNotEmpty == true;
 
     return hasUsers && !_isFinalStatus(state.status);
@@ -160,8 +161,7 @@ class _MiniCallOverlayState extends ConsumerState<MiniCallOverlay> {
             });
           },
           onPanEnd: (_) {
-            final snapLeft =
-                _position.dx + (width / 2) < screenSize.width / 2;
+            final snapLeft = _position.dx + (width / 2) < screenSize.width / 2;
 
             setState(() {
               _position = Offset(
@@ -216,12 +216,14 @@ class _MiniVideoCallCard extends StatelessWidget {
     final remoteRenderer = callState.remoteRenderer;
     final localRenderer = callState.localRenderer;
 
-    final hasRemoteVideo = !_isFinalStatus(callState.status) &&
+    final hasRemoteVideo =
+        !_isFinalStatus(callState.status) &&
         !callState.isRemoteCameraOff &&
         remoteRenderer != null &&
         remoteRenderer.srcObject != null;
 
-    final hasLocalVideo = !_isFinalStatus(callState.status) &&
+    final hasLocalVideo =
+        !_isFinalStatus(callState.status) &&
         !callState.isCameraOff &&
         localRenderer != null &&
         localRenderer.srcObject != null;
@@ -231,10 +233,7 @@ class _MiniVideoCallCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.black,
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.22),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.white.withOpacity(0.22), width: 1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.34),
@@ -311,10 +310,7 @@ class _MiniVideoCallCard extends StatelessWidget {
                 gradient: LinearGradient(
                   begin: Alignment.bottomCenter,
                   end: Alignment.topCenter,
-                  colors: [
-                    Colors.black.withOpacity(0.76),
-                    Colors.transparent,
-                  ],
+                  colors: [Colors.black.withOpacity(0.76), Colors.transparent],
                 ),
               ),
               child: Text(
@@ -359,10 +355,7 @@ class _MiniAudioCallCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFF111827),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.16),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.white.withOpacity(0.16), width: 1),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(0.28),
@@ -378,11 +371,7 @@ class _MiniAudioCallCard extends StatelessWidget {
             backgroundColor: const Color(0xFF1877F2),
             backgroundImage: hasAvatar ? NetworkImage(avatar) : null,
             child: !hasAvatar
-                ? const Icon(
-                    Icons.call_rounded,
-                    color: Colors.white,
-                    size: 24,
-                  )
+                ? const Icon(Icons.call_rounded, color: Colors.white, size: 24)
                 : null,
           ),
           const SizedBox(width: 9),
@@ -432,16 +421,9 @@ class _MiniCircleButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: backgroundColor,
           shape: BoxShape.circle,
-          border: Border.all(
-            color: Colors.white.withOpacity(0.18),
-            width: 1,
-          ),
+          border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
         ),
-        child: Icon(
-          icon,
-          color: Colors.white,
-          size: 16,
-        ),
+        child: Icon(icon, color: Colors.white, size: 16),
       ),
     );
   }
@@ -451,10 +433,7 @@ class _VideoFallback extends StatelessWidget {
   final String name;
   final String avatarUrl;
 
-  const _VideoFallback({
-    required this.name,
-    required this.avatarUrl,
-  });
+  const _VideoFallback({required this.name, required this.avatarUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -471,7 +450,7 @@ class _VideoFallback extends StatelessWidget {
               child: Image.network(
                 avatarUrl,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
               ),
             ),
           Center(

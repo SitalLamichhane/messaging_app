@@ -9,10 +9,7 @@ class IncomingGroupCallBundle {
 
   bool _disposed = false;
 
-  IncomingGroupCallBundle({
-    required this.realtime,
-    required this.controller,
-  });
+  IncomingGroupCallBundle({required this.realtime, required this.controller});
 
   Future<void> dispose() async {
     if (_disposed) {

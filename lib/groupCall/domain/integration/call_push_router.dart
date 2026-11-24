@@ -8,17 +8,14 @@ import 'package:hiddenly/groupCall/domain/integration/incoming_group_call_bundle
 import 'package:hiddenly/groupCall/domain/presentation/screens/incoming_group_call_screen.dart';
 
 class CallPushRouter {
-  final GlobalKey<NavigatorState>
-      navigatorKey;
+  final GlobalKey<NavigatorState> navigatorKey;
 
   final CallPushService pushService;
 
-  final Future<IncomingGroupCallBundle>
-          Function(int conversationId)
-      controllerFactory;
+  final Future<IncomingGroupCallBundle> Function(int conversationId)
+  controllerFactory;
 
-  StreamSubscription<IncomingCallPayload>?
-      _sub;
+  StreamSubscription<IncomingCallPayload>? _sub;
 
   IncomingGroupCallBundle? _activeBundle;
 
@@ -42,43 +39,31 @@ class CallPushRouter {
 
     await pushService.initialize();
 
-    _sub =
-        pushService.incomingCalls.listen(
+    _sub = pushService.incomingCalls.listen(
       _showIncoming,
-      onError: (
-        Object error,
-        StackTrace stackTrace,
-      ) {
+      onError: (Object error, StackTrace stackTrace) {
         debugPrint(
           '[GROUP CALL PUSH ROUTER] '
           'stream error: $error',
         );
 
-        debugPrint(
-          stackTrace.toString(),
-        );
+        debugPrint(stackTrace.toString());
       },
     );
 
-    debugPrint(
-      '[GROUP CALL PUSH ROUTER] initialized',
-    );
+    debugPrint('[GROUP CALL PUSH ROUTER] initialized');
   }
 
-  Future<void> _showIncoming(
-    IncomingCallPayload payload,
-  ) async {
+  Future<void> _showIncoming(IncomingCallPayload payload) async {
     if (_disposed) {
       return;
     }
 
-    if (!payload.isGroupCall ||
-        !payload.isValid) {
+    if (!payload.isGroupCall || !payload.isValid) {
       return;
     }
 
-    if (_displayedCallId ==
-        payload.callId) {
+    if (_displayedCallId == payload.callId) {
       debugPrint(
         '[GROUP CALL PUSH ROUTER] '
         'duplicate screen ignored '
@@ -103,30 +88,21 @@ class CallPushRouter {
 
     NavigatorState? navigator;
 
-    for (int attempt = 0;
-        attempt < 20;
-        attempt++) {
-      navigator =
-          navigatorKey.currentState;
+    for (int attempt = 0; attempt < 20; attempt++) {
+      navigator = navigatorKey.currentState;
 
-      if (navigator != null &&
-          navigator.mounted) {
+      if (navigator != null && navigator.mounted) {
         break;
       }
 
-      await Future<void>.delayed(
-        const Duration(
-          milliseconds: 100,
-        ),
-      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
     }
 
     if (_disposed) {
       return;
     }
 
-    if (navigator == null ||
-        !navigator.mounted) {
+    if (navigator == null || !navigator.mounted) {
       debugPrint(
         '[GROUP CALL PUSH ROUTER] '
         'navigator not ready',
@@ -138,10 +114,7 @@ class CallPushRouter {
     IncomingGroupCallBundle? bundle;
 
     try {
-      bundle =
-          await controllerFactory(
-        payload.conversationId,
-      );
+      bundle = await controllerFactory(payload.conversationId);
 
       if (_disposed) {
         await bundle.dispose();
@@ -149,11 +122,8 @@ class CallPushRouter {
       }
 
       _activeBundle = bundle;
-      _displayedCallId =
-          payload.callId;
-      await bundle.realtime.connect(
-        payload.conversationId,
-      );
+      _displayedCallId = payload.callId;
+      await bundle.realtime.connect(payload.conversationId);
 
       if (_disposed) {
         return;
@@ -165,8 +135,7 @@ class CallPushRouter {
           builder: (_) {
             return IncomingGroupCallScreen(
               payload: payload,
-              controller:
-                  bundle!.controller,
+              controller: bundle!.controller,
             );
           },
         ),
@@ -177,23 +146,17 @@ class CallPushRouter {
         'open error: $e',
       );
 
-      debugPrint(
-        stackTrace.toString(),
-      );
+      debugPrint(stackTrace.toString());
     } finally {
       if (bundle != null) {
         await bundle.dispose();
       }
 
-      if (identical(
-        _activeBundle,
-        bundle,
-      )) {
+      if (identical(_activeBundle, bundle)) {
         _activeBundle = null;
       }
 
-      if (_displayedCallId ==
-          payload.callId) {
+      if (_displayedCallId == payload.callId) {
         _displayedCallId = null;
       }
     }
@@ -210,8 +173,7 @@ class CallPushRouter {
     await _sub?.cancel();
     _sub = null;
 
-    final bundle =
-        _activeBundle;
+    final bundle = _activeBundle;
 
     _activeBundle = null;
     _displayedCallId = null;

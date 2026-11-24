@@ -1,5 +1,3 @@
-// lib/core/call/webrtc_service.dart
-
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -8,14 +6,6 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 typedef IceCandidateCallback = void Function(RTCIceCandidate candidate);
 typedef AsyncCallCallback = Future<void> Function();
 
-/// WebRTC media layer used by [CallNotifier].
-///
-/// Important design rules:
-/// - Audio calls request microphone only. They do not secretly open the camera.
-/// - WebSocket signaling is handled outside this class.
-/// - ICE candidates received before remote SDP are queued and deduplicated.
-/// - Speaker routing never changes microphone mute state.
-/// - A temporary network disconnect starts one delayed ICE restart, not many.
 class WebRTCService {
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
@@ -40,15 +30,6 @@ class WebRTCService {
   final Set<String> _candidateKeys = <String>{};
   RTCVideoRenderer localRenderer = RTCVideoRenderer();
   RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
-  /// TURN configuration.
-  ///
-  /// Recommended run/build command:
-  /// flutter run \
-  ///   --dart-define=TURN_URLS=turn:openrelay.metered.ca:80,turn:openrelay.metered.ca:443,turns:openrelay.metered.ca:443 \
-  ///   --dart-define=TURN_USERNAME=YOUR_USERNAME \
-  ///   --dart-define=TURN_CREDENTIAL=YOUR_PASSWORD
-  ///
-  /// Do not hard-code production TURN credentials in the APK.
   static List<String> turnUrls = _readEnvironmentTurnUrls();
   static String turnUsername = const String.fromEnvironment(
     'TURN_USERNAME',
@@ -81,13 +62,15 @@ class WebRTCService {
   }
 
   List<String> _normalizedTurnUrls() {
-    return turnUrls.map((raw) {
-      final value = raw.trim();
-      if (value.startsWith('turn:') || value.startsWith('turns:')) {
-        return value;
-      }
-      return 'turn:$value';
-    }).toList(growable: false);
+    return turnUrls
+        .map((raw) {
+          final value = raw.trim();
+          if (value.startsWith('turn:') || value.startsWith('turns:')) {
+            return value;
+          }
+          return 'turn:$value';
+        })
+        .toList(growable: false);
   }
 
   Map<String, dynamic> _iceConfig() {
@@ -214,6 +197,7 @@ class WebRTCService {
         await _applyAudioRoute();
         onRemoteStream();
       }
+
       pc.onTrack = (event) async {
         if (_disposed) return;
         debugPrint(
@@ -232,9 +216,9 @@ class WebRTCService {
           return;
         }
         _remoteStream ??= await createLocalMediaStream('remote_stream');
-        final alreadyAdded = _remoteStream!
-            .getTracks()
-            .any((track) => track.id == event.track.id);
+        final alreadyAdded = _remoteStream!.getTracks().any(
+          (track) => track.id == event.track.id,
+        );
         if (!alreadyAdded) {
           await _remoteStream!.addTrack(event.track);
         }
@@ -253,8 +237,11 @@ class WebRTCService {
         await _applyAudioRoute();
         await onConnectionEstablished?.call();
       }
+
       Future<void> requestRestart() async {
-        if (_disposed || _restartCallbackRunning || onIceRestartNeeded == null) return;
+        if (_disposed || _restartCallbackRunning || onIceRestartNeeded == null) {
+          return;
+        }
         final now = DateTime.now();
         final previous = _lastRestartRequestAt;
         if (previous != null && now.difference(previous) < _restartCooldown) {
@@ -263,11 +250,12 @@ class WebRTCService {
         _lastRestartRequestAt = now;
         _restartCallbackRunning = true;
         try {
-          await onIceRestartNeeded?.call();
+          await onIceRestartNeeded.call();
         } finally {
           _restartCallbackRunning = false;
         }
       }
+
       void scheduleDisconnectedRecovery() {
         _disconnectRecoveryTimer?.cancel();
         onConnectionLost?.call();
@@ -283,6 +271,7 @@ class WebRTCService {
           }
         });
       }
+
       pc.onConnectionState = (nextState) async {
         if (_disposed) return;
         _connectionState = nextState;
@@ -462,11 +451,7 @@ class WebRTCService {
     final sdpMid = data['sdpMid']?.toString();
     final sdpMLineIndex = _toInt(data['sdpMLineIndex']);
     if (candidateValue.isEmpty) return;
-    final candidate = RTCIceCandidate(
-      candidateValue,
-      sdpMid,
-      sdpMLineIndex,
-    );
+    final candidate = RTCIceCandidate(candidateValue, sdpMid, sdpMLineIndex);
     final key = _candidateKey(candidate);
     if (!_candidateKeys.add(key)) return;
     if (!_remoteDescriptionSet) {
@@ -552,9 +537,7 @@ class WebRTCService {
     return null;
   }
 
-  Future<void> _bindLocalVideoToTransceiver(
-    MediaStreamTrack videoTrack,
-  ) async {
+  Future<void> _bindLocalVideoToTransceiver(MediaStreamTrack videoTrack) async {
     final pc = _peerConnection;
     final localStream = _localStream;
     if (pc == null || localStream == null || _disposed) {
@@ -581,9 +564,7 @@ class WebRTCService {
     // ANSWERER or repeated upgrade: reuse the same negotiated m=video.
     final oldDirection = await videoTransceiver.getDirection();
     if (oldDirection != TransceiverDirection.SendRecv) {
-      await videoTransceiver.setDirection(
-        TransceiverDirection.SendRecv,
-      );
+      await videoTransceiver.setDirection(TransceiverDirection.SendRecv);
     }
     _videoSender = videoTransceiver.sender;
     // Associate this sender with the local stream and attach the camera.
@@ -771,9 +752,7 @@ class WebRTCService {
     return answer;
   }
 
-  Future<void> handleRenegotiationAnswer(
-    Map<dynamic, dynamic> data,
-  ) async {
+  Future<void> handleRenegotiationAnswer(Map<dynamic, dynamic> data) async {
     final pc = _peerConnection;
     if (pc == null || _disposed) return;
     final sdp = data['sdp']?.toString() ?? '';
@@ -818,13 +797,15 @@ class WebRTCService {
 
   void toggleMic(bool enabled) {
     _micEnabled = enabled;
-    for (final track in _localStream?.getAudioTracks() ?? <MediaStreamTrack>[]) {
+    for (final track
+        in _localStream?.getAudioTracks() ?? <MediaStreamTrack>[]) {
       track.enabled = enabled;
     }
   }
 
   void toggleCamera(bool enabled) {
-    for (final track in _localStream?.getVideoTracks() ?? <MediaStreamTrack>[]) {
+    for (final track
+        in _localStream?.getVideoTracks() ?? <MediaStreamTrack>[]) {
       track.enabled = enabled;
     }
     if (_renderersInitialized && !_disposed) {

@@ -101,9 +101,7 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
 
     _animationController.addListener(_animationListener);
 
-    _transformationController.addListener(
-      _handleTransformationChanged,
-    );
+    _transformationController.addListener(_handleTransformationChanged);
   }
 
   // ===============================================================
@@ -162,12 +160,7 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
     _matrixAnimation = Matrix4Tween(
       begin: _transformationController.value.clone(),
       end: target,
-    ).animate(
-      CurvedAnimation(
-        parent: _animationController,
-        curve: curve,
-      ),
-    );
+    ).animate(CurvedAnimation(parent: _animationController, curve: curve));
 
     _animationController
       ..reset()
@@ -178,17 +171,11 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
   // RESET ZOOM
   // ===============================================================
 
-  void _resetZoom({
-    bool spring = false,
-  }) {
+  void _resetZoom({bool spring = false}) {
     _animateToMatrix(
       Matrix4.identity(),
-      duration: Duration(
-        milliseconds: spring ? 300 : 320,
-      ),
-      curve: spring
-          ? Curves.easeOutBack
-          : Curves.easeOutCubic,
+      duration: Duration(milliseconds: spring ? 300 : 320),
+      curve: spring ? Curves.easeOutBack : Curves.easeOutCubic,
     );
   }
 
@@ -231,11 +218,13 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
     final targetScale = widget.doubleTapScale;
 
     final matrix = Matrix4.identity()
-      ..translate(
+      ..translateByDouble(
         -position.dx * (targetScale - 1),
         -position.dy * (targetScale - 1),
+        0.0,
+        1.0,
       )
-      ..scale(targetScale);
+      ..scaleByDouble(targetScale, targetScale, targetScale, 1.0);
 
     _animateToMatrix(
       matrix,
@@ -248,9 +237,7 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
   // INTERACTION START
   // ===============================================================
 
-  void _handleInteractionStart(
-    ScaleStartDetails details,
-  ) {
+  void _handleInteractionStart(ScaleStartDetails details) {
     // Stop double-tap/reset animation immediately when
     // the user puts their fingers back on the screen.
     _animationController.stop();
@@ -268,9 +255,7 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
   // INTERACTION END
   // ===============================================================
 
-  void _handleInteractionEnd(
-    ScaleEndDetails details,
-  ) {
+  void _handleInteractionEnd(ScaleEndDetails details) {
     _isInteracting = false;
 
     if (mounted) {
@@ -289,9 +274,7 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
     // -------------------------------------------------------------
 
     if (scale < 1.0) {
-      _resetZoom(
-        spring: true,
-      );
+      _resetZoom(spring: true);
 
       return;
     }
@@ -347,55 +330,47 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
         // -----------------------------------------------------------
         // DOUBLE TAP
         // -----------------------------------------------------------
-
         onDoubleTapDown: _handleDoubleTapDown,
         onDoubleTap: _handleDoubleTap,
 
         child: InteractiveViewer(
-        transformationController:
-            _transformationController,
+          transformationController: _transformationController,
 
-        // ---------------------------------------------------------
-        // ZOOM
-        // ---------------------------------------------------------
+          // ---------------------------------------------------------
+          // ZOOM
+          // ---------------------------------------------------------
+          minScale: widget.minScale,
+          maxScale: widget.maxScale,
 
-        minScale: widget.minScale,
-        maxScale: widget.maxScale,
+          scaleEnabled: true,
 
-        scaleEnabled: true,
+          // DO NOT dynamically disable panning while gesture is active.
+          //
+          // Changing panEnabled based on scale during the same gesture
+          // can make zoom/pan feel jerky.
+          panEnabled: true,
 
-        // DO NOT dynamically disable panning while gesture is active.
-        //
-        // Changing panEnabled based on scale during the same gesture
-        // can make zoom/pan feel jerky.
-        panEnabled: true,
+          // ---------------------------------------------------------
+          // MOMENTUM
+          // ---------------------------------------------------------
+          interactionEndFrictionCoefficient: 0.000018,
 
-        // ---------------------------------------------------------
-        // MOMENTUM
-        // ---------------------------------------------------------
+          // ---------------------------------------------------------
+          // BOUNDARIES
+          // ---------------------------------------------------------
+          boundaryMargin: EdgeInsets.symmetric(
+            horizontal: size.width * 0.35,
+            vertical: size.height * 0.35,
+          ),
 
-        interactionEndFrictionCoefficient: 0.000018,
+          clipBehavior: Clip.none,
 
-        // ---------------------------------------------------------
-        // BOUNDARIES
-        // ---------------------------------------------------------
+          // ---------------------------------------------------------
+          // INTERACTION
+          // ---------------------------------------------------------
+          onInteractionStart: _handleInteractionStart,
 
-        boundaryMargin: EdgeInsets.symmetric(
-          horizontal: size.width * 0.35,
-          vertical: size.height * 0.35,
-        ),
-
-        clipBehavior: Clip.none,
-
-        // ---------------------------------------------------------
-        // INTERACTION
-        // ---------------------------------------------------------
-
-        onInteractionStart:
-            _handleInteractionStart,
-
-        onInteractionEnd:
-            _handleInteractionEnd,
+          onInteractionEnd: _handleInteractionEnd,
 
           child: widget.child,
         ),
@@ -414,9 +389,7 @@ class _SmoothMediaZoomState extends State<SmoothMediaZoom>
       ..dispose();
 
     _transformationController
-      ..removeListener(
-        _handleTransformationChanged,
-      )
+      ..removeListener(_handleTransformationChanged)
       ..dispose();
 
     super.dispose();
@@ -446,8 +419,7 @@ class SmoothZoomImage extends StatelessWidget {
   bool get _isNetwork {
     final value = path.trim().toLowerCase();
 
-    return value.startsWith('http://') ||
-        value.startsWith('https://');
+    return value.startsWith('http://') || value.startsWith('https://');
   }
 
   String get _resolvedLocalPath {
@@ -466,11 +438,7 @@ class SmoothZoomImage extends StatelessWidget {
 
   Widget _brokenImage() {
     return const Center(
-      child: Icon(
-        Icons.broken_image_rounded,
-        color: Colors.white70,
-        size: 48,
-      ),
+      child: Icon(Icons.broken_image_rounded, color: Colors.white70, size: 48),
     );
   }
 
@@ -488,11 +456,7 @@ class SmoothZoomImage extends StatelessWidget {
 
         filterQuality: FilterQuality.medium,
 
-        loadingBuilder: (
-          context,
-          child,
-          loadingProgress,
-        ) {
+        loadingBuilder: (context, child, loadingProgress) {
           if (loadingProgress == null) {
             return child;
           }
@@ -509,7 +473,7 @@ class SmoothZoomImage extends StatelessWidget {
           );
         },
 
-        errorBuilder: (_, __, ___) {
+        errorBuilder: (_, _, _) {
           return _brokenImage();
         },
       );
@@ -520,7 +484,7 @@ class SmoothZoomImage extends StatelessWidget {
       fit: fit,
       gaplessPlayback: true,
       filterQuality: FilterQuality.medium,
-      errorBuilder: (_, __, ___) {
+      errorBuilder: (_, _, _) {
         return _brokenImage();
       },
     );
@@ -541,9 +505,7 @@ class SmoothZoomImage extends StatelessWidget {
       child: SizedBox(
         width: size.width,
         height: size.height,
-        child: Center(
-          child: _buildImage(),
-        ),
+        child: Center(child: _buildImage()),
       ),
     );
   }
@@ -571,12 +533,10 @@ class SmoothZoomVideo extends StatefulWidget {
   });
 
   @override
-  State<SmoothZoomVideo> createState() =>
-      _SmoothZoomVideoState();
+  State<SmoothZoomVideo> createState() => _SmoothZoomVideoState();
 }
 
-class _SmoothZoomVideoState
-    extends State<SmoothZoomVideo> {
+class _SmoothZoomVideoState extends State<SmoothZoomVideo> {
   VideoPlayerController? _videoController;
 
   bool _initializing = true;
@@ -590,11 +550,9 @@ class _SmoothZoomVideoState
   // ===============================================================
 
   bool get _isNetwork {
-    final value =
-        widget.videoPath.trim().toLowerCase();
+    final value = widget.videoPath.trim().toLowerCase();
 
-    return value.startsWith('http://') ||
-        value.startsWith('https://');
+    return value.startsWith('http://') || value.startsWith('https://');
   }
 
   // ===============================================================
@@ -631,24 +589,18 @@ class _SmoothZoomVideoState
       final VideoPlayerController controller;
 
       if (_isNetwork) {
-        controller =
-            VideoPlayerController.networkUrl(
+        controller = VideoPlayerController.networkUrl(
           Uri.parse(widget.videoPath),
         );
       } else {
-        controller =
-            VideoPlayerController.file(
-          File(_localPath),
-        );
+        controller = VideoPlayerController.file(File(_localPath));
       }
 
       _videoController = controller;
 
       await controller.initialize();
 
-      await controller.setLooping(
-        widget.looping,
-      );
+      await controller.setLooping(widget.looping);
 
       if (widget.autoPlay) {
         await controller.play();
@@ -676,8 +628,7 @@ class _SmoothZoomVideoState
   Future<void> _togglePlay() async {
     final controller = _videoController;
 
-    if (controller == null ||
-        !controller.value.isInitialized) {
+    if (controller == null || !controller.value.isInitialized) {
       return;
     }
 
@@ -716,9 +667,7 @@ class _SmoothZoomVideoState
 
     if (_initializing) {
       return const Center(
-        child: CircularProgressIndicator(
-          color: Colors.white,
-        ),
+        child: CircularProgressIndicator(color: Colors.white),
       );
     }
 
@@ -729,28 +678,20 @@ class _SmoothZoomVideoState
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              Icons.error_outline_rounded,
-              color: Colors.white70,
-              size: 48,
-            ),
+            Icon(Icons.error_outline_rounded, color: Colors.white70, size: 48),
             SizedBox(height: 12),
             Text(
               'Could not play video',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-              ),
+              style: TextStyle(color: Colors.white, fontSize: 15),
             ),
           ],
         ),
       );
     }
 
-    final aspectRatio =
-        controller.value.aspectRatio > 0
-            ? controller.value.aspectRatio
-            : 16 / 9;
+    final aspectRatio = controller.value.aspectRatio > 0
+        ? controller.value.aspectRatio
+        : 16 / 9;
 
     return Center(
       child: AspectRatio(
@@ -767,8 +708,7 @@ class _SmoothZoomVideoState
   Widget _buildControls() {
     final controller = _videoController;
 
-    if (controller == null ||
-        !controller.value.isInitialized) {
+    if (controller == null || !controller.value.isInitialized) {
       return const SizedBox.shrink();
     }
 
@@ -776,8 +716,7 @@ class _SmoothZoomVideoState
       child: IgnorePointer(
         ignoring: !_showControls,
         child: AnimatedOpacity(
-          duration:
-              const Duration(milliseconds: 180),
+          duration: const Duration(milliseconds: 180),
           opacity: _showControls ? 1 : 0,
 
           child: Center(
@@ -789,8 +728,7 @@ class _SmoothZoomVideoState
                 height: 64,
 
                 decoration: BoxDecoration(
-                  color:
-                      Colors.black.withOpacity(0.45),
+                  color: Colors.black.withValues(alpha: 0.45),
                   shape: BoxShape.circle,
                 ),
 
@@ -823,7 +761,6 @@ class _SmoothZoomVideoState
       // -----------------------------------------------------------
       // Single tap toggles controls
       // -----------------------------------------------------------
-
       onTap: () {
         setState(() {
           _showControls = !_showControls;
@@ -838,8 +775,7 @@ class _SmoothZoomVideoState
           // -------------------------------------------------------
 
           SmoothMediaZoom(
-            onZoomChanged:
-                _handleZoomChanged,
+            onZoomChanged: _handleZoomChanged,
 
             child: SizedBox(
               width: size.width,
@@ -851,41 +787,27 @@ class _SmoothZoomVideoState
           // -------------------------------------------------------
           // PLAY / PAUSE
           // -------------------------------------------------------
-
           _buildControls(),
 
           // -------------------------------------------------------
           // VIDEO PROGRESS
           // -------------------------------------------------------
-
-          if (_videoController != null &&
-              _videoController!
-                  .value.isInitialized)
+          if (_videoController != null && _videoController!.value.isInitialized)
             Positioned(
               left: 16,
               right: 16,
               bottom: 18,
               child: AnimatedOpacity(
-                duration:
-                    const Duration(
-                  milliseconds: 180,
-                ),
-                opacity:
-                    _showControls ? 1 : 0,
+                duration: const Duration(milliseconds: 180),
+                opacity: _showControls ? 1 : 0,
                 child: VideoProgressIndicator(
                   _videoController!,
                   allowScrubbing: true,
-                  padding:
-                      const EdgeInsets.symmetric(
-                    vertical: 8,
-                  ),
-                  colors:
-                      const VideoProgressColors(
+                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  colors: const VideoProgressColors(
                     playedColor: Colors.white,
-                    bufferedColor:
-                        Colors.white38,
-                    backgroundColor:
-                        Colors.white24,
+                    bufferedColor: Colors.white38,
+                    backgroundColor: Colors.white24,
                   ),
                 ),
               ),

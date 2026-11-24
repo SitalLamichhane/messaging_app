@@ -61,9 +61,7 @@ class CallStartResult {
   bool get isOngoing {
     final value = status?.toLowerCase();
 
-    return value == 'ongoing' ||
-        value == 'active' ||
-        value == 'connected';
+    return value == 'ongoing' || value == 'active' || value == 'connected';
   }
 
   bool get isFinished {
@@ -173,21 +171,13 @@ class CallApi {
 
       final data = _asMap(response.data);
 
-      final callId = _nullableString(
-        data['call_id'] ?? data['id'],
-      );
+      final callId = _nullableString(data['call_id'] ?? data['id']);
 
-      final callUuid = _nullableString(
-        data['call_uuid'],
-      );
+      final callUuid = _nullableString(data['call_uuid']);
 
-      final status = _nullableString(
-        data['status'],
-      );
+      final status = _nullableString(data['status']);
 
-      final error = _nullableString(
-        data['error'],
-      );
+      final error = _nullableString(data['error']);
 
       final created = callId != null;
 
@@ -211,40 +201,29 @@ class CallApi {
         data: data,
       );
     }
-
     // ============================================================
     // DIO ERROR
     // ============================================================
-
     on DioException catch (e) {
       final response = e.response;
 
       final statusCode = response?.statusCode;
 
-      final data = _asMap(
-        response?.data,
-      );
+      final data = _asMap(response?.data);
 
       // ============================================================
       // 409 CONFLICT
       // ============================================================
 
       if (statusCode == 409) {
-        final existingCallId = _nullableString(
-          data['call_id'] ?? data['id'],
-        );
+        final existingCallId = _nullableString(data['call_id'] ?? data['id']);
 
-        final existingCallUuid = _nullableString(
-          data['call_uuid'],
-        );
+        final existingCallUuid = _nullableString(data['call_uuid']);
 
-        final existingStatus = _nullableString(
-          data['status'],
-        );
+        final existingStatus = _nullableString(data['status']);
 
         final serverError =
-            _nullableString(data['error']) ??
-            'A call is already active';
+            _nullableString(data['error']) ?? 'A call is already active';
 
         debugPrint('');
         debugPrint('##########################################');
@@ -302,11 +281,7 @@ class CallApi {
     final cleanAction = action.trim().toLowerCase();
 
     if (cleanCallId.isEmpty) {
-      throw ArgumentError.value(
-        callId,
-        'callId',
-        'Call id cannot be empty',
-      );
+      throw ArgumentError.value(callId, 'callId', 'Call id cannot be empty');
     }
 
     const allowedActions = <String>{
@@ -336,9 +311,7 @@ class CallApi {
     try {
       final response = await ApiClient.dio.post<dynamic>(
         '/chat/calls/$cleanCallId/status/',
-        data: <String, dynamic>{
-          'action': cleanAction,
-        },
+        data: <String, dynamic>{'action': cleanAction},
       );
 
       debugPrint(
@@ -370,103 +343,64 @@ class CallApi {
     String? status,
     String? action,
   }) {
-    final resolvedAction = (
-      action ??
-      status ??
-      ''
-    ).trim().toLowerCase();
+    final resolvedAction = (action ?? status ?? '').trim().toLowerCase();
 
-    return updateCallAction(
-      callId: callId,
-      action: resolvedAction,
-    );
+    return updateCallAction(callId: callId, action: resolvedAction);
   }
 
   // ============================================================
   // ACCEPT
   // ============================================================
 
-  static Future<Response<dynamic>> accept(
-    String callId,
-  ) {
-    return updateCallAction(
-      callId: callId,
-      action: 'accept',
-    );
+  static Future<Response<dynamic>> accept(String callId) {
+    return updateCallAction(callId: callId, action: 'accept');
   }
 
   // ============================================================
   // REJECT
   // ============================================================
 
-  static Future<Response<dynamic>> reject(
-    String callId,
-  ) {
-    return updateCallAction(
-      callId: callId,
-      action: 'reject',
-    );
+  static Future<Response<dynamic>> reject(String callId) {
+    return updateCallAction(callId: callId, action: 'reject');
   }
 
   // ============================================================
   // CANCEL
   // ============================================================
 
-  static Future<Response<dynamic>> cancel(
-    String callId,
-  ) {
-    return updateCallAction(
-      callId: callId,
-      action: 'cancel',
-    );
+  static Future<Response<dynamic>> cancel(String callId) {
+    return updateCallAction(callId: callId, action: 'cancel');
   }
 
   // ============================================================
   // END
   // ============================================================
 
-  static Future<Response<dynamic>> end(
-    String callId,
-  ) {
-    return updateCallAction(
-      callId: callId,
-      action: 'ended',
-    );
+  static Future<Response<dynamic>> end(String callId) {
+    return updateCallAction(callId: callId, action: 'ended');
   }
 
   // ============================================================
   // LEAVE
   // ============================================================
 
-  static Future<Response<dynamic>> leave(
-    String callId,
-  ) {
-    return updateCallAction(
-      callId: callId,
-      action: 'leave',
-    );
+  static Future<Response<dynamic>> leave(String callId) {
+    return updateCallAction(callId: callId, action: 'leave');
   }
 
   // ============================================================
   // MISSED
   // ============================================================
 
-  static Future<Response<dynamic>> missed(
-    String callId,
-  ) {
-    return updateCallAction(
-      callId: callId,
-      action: 'missed',
-    );
+  static Future<Response<dynamic>> missed(String callId) {
+    return updateCallAction(callId: callId, action: 'missed');
   }
 
   // ============================================================
   // HELPERS
   // ============================================================
 
-  static Map<String, dynamic> _asMap(
-    dynamic value,
-  ) {
+  static Map<String, dynamic> _asMap(dynamic value) {
     if (value == null) {
       return <String, dynamic>{};
     }
@@ -476,20 +410,13 @@ class CallApi {
     }
 
     if (value is Map) {
-      return value.map(
-        (key, value) => MapEntry(
-          key.toString(),
-          value,
-        ),
-      );
+      return value.map((key, value) => MapEntry(key.toString(), value));
     }
 
     return <String, dynamic>{};
   }
 
-  static String _string(
-    dynamic value,
-  ) {
+  static String _string(dynamic value) {
     if (value == null) {
       return '';
     }
@@ -497,9 +424,7 @@ class CallApi {
     return value.toString().trim();
   }
 
-  static String? _nullableString(
-    dynamic value,
-  ) {
+  static String? _nullableString(dynamic value) {
     final cleanValue = _string(value);
 
     if (cleanValue.isEmpty) {

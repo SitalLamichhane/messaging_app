@@ -6,10 +6,7 @@ import 'package:hiddenly/core/api_client.dart';
 class ProfileSetupScreen extends StatefulWidget {
   final String signupToken;
 
-  const ProfileSetupScreen({
-    super.key,
-    required this.signupToken,
-  });
+  const ProfileSetupScreen({super.key, required this.signupToken});
 
   @override
   State<ProfileSetupScreen> createState() => _ProfileSetupScreenState();
@@ -147,15 +144,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       throw Exception('Refresh token missing from server response');
     }
 
-    await ApiClient.storage.write(
-      key: 'access',
-      value: access.trim(),
-    );
+    await ApiClient.storage.write(key: 'access', value: access.trim());
 
-    await ApiClient.storage.write(
-      key: 'refresh',
-      value: refresh.trim(),
-    );
+    await ApiClient.storage.write(key: 'refresh', value: refresh.trim());
 
     final user = data['user'];
 
@@ -218,7 +209,6 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         fullName: _normalizeSpaces(_nameController.text),
         bio: _normalizeSpaces(_bioController.text),
       );
-      
 
       await _saveLoginData(response.data);
 
@@ -226,17 +216,12 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(
-          builder: (_) => const ChatListScreen(),
-        ),
+        MaterialPageRoute(builder: (_) => const ChatListScreen()),
       );
     } catch (e) {
       if (!mounted) return;
 
-      _showMessengerSnack(
-        message: _getErrorMessage(e),
-        isError: true,
-      );
+      _showMessengerSnack(message: _getErrorMessage(e), isError: true);
     } finally {
       if (mounted) {
         setState(() {
@@ -246,10 +231,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     }
   }
 
-  void _showMessengerSnack({
-    required String message,
-    required bool isError,
-  }) {
+  void _showMessengerSnack({required String message, required bool isError}) {
     final messenger = ScaffoldMessenger.of(context);
     messenger.hideCurrentSnackBar();
 
@@ -257,11 +239,10 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       SnackBar(
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-        backgroundColor:
-            isError ? const Color(0xFFEF4444) : const Color(0xFF1877F2),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-        ),
+        backgroundColor: isError
+            ? const Color(0xFFEF4444)
+            : const Color(0xFF1877F2),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         content: Row(
           children: [
             Icon(
@@ -312,24 +293,15 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(
-          color: Color(0xFF1877F2),
-          width: 1.6,
-        ),
+        borderSide: const BorderSide(color: Color(0xFF1877F2), width: 1.6),
       ),
       errorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(
-          color: Color(0xFFEF4444),
-          width: 1.2,
-        ),
+        borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1.2),
       ),
       focusedErrorBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(18),
-        borderSide: const BorderSide(
-          color: Color(0xFFEF4444),
-          width: 1.6,
-        ),
+        borderSide: const BorderSide(color: Color(0xFFEF4444), width: 1.6),
       ),
       errorStyle: const TextStyle(
         color: Color(0xFFEF4444),
@@ -371,12 +343,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     final titleColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final subtitleColor =
-        isDark ? const Color(0xFFCBD5E1) : const Color(0xFF64748B);
+    final subtitleColor = isDark
+        ? const Color(0xFFCBD5E1)
+        : const Color(0xFF64748B);
 
     return Scaffold(
-      backgroundColor:
-          isDark ? const Color(0xFF0F172A) : const Color(0xFFF3F5F9),
+      backgroundColor: isDark
+          ? const Color(0xFF0F172A)
+          : const Color(0xFFF3F5F9),
       resizeToAvoidBottomInset: true,
       body: SafeArea(
         child: GestureDetector(
@@ -505,29 +479,30 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                       });
                     },
                     onFieldSubmitted: (_) => _submit(),
-                    decoration: _inputDecoration(
-                      hintText: 'Tell us a bit about yourself...',
-                      icon: Icons.edit_note_rounded,
-                    ).copyWith(
-                      alignLabelWithHint: true,
-                      prefixIcon: Padding(
-                        padding: const EdgeInsets.only(
-                          left: 14,
-                          top: 14,
-                          right: 8,
+                    decoration:
+                        _inputDecoration(
+                          hintText: 'Tell us a bit about yourself...',
+                          icon: Icons.edit_note_rounded,
+                        ).copyWith(
+                          alignLabelWithHint: true,
+                          prefixIcon: Padding(
+                            padding: const EdgeInsets.only(
+                              left: 14,
+                              top: 14,
+                              right: 8,
+                            ),
+                            child: Icon(
+                              Icons.edit_note_rounded,
+                              color: isDark
+                                  ? const Color(0xFF94A3B8)
+                                  : const Color(0xFF64748B),
+                            ),
+                          ),
+                          prefixIconConstraints: const BoxConstraints(
+                            minWidth: 0,
+                            minHeight: 0,
+                          ),
                         ),
-                        child: Icon(
-                          Icons.edit_note_rounded,
-                          color: isDark
-                              ? const Color(0xFF94A3B8)
-                              : const Color(0xFF64748B),
-                        ),
-                      ),
-                      prefixIconConstraints: const BoxConstraints(
-                        minWidth: 0,
-                        minHeight: 0,
-                      ),
-                    ),
                     validator: (value) => _validateOptionalText(
                       value,
                       fieldLabel: 'Bio',
@@ -539,8 +514,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     width: double.infinity,
                     height: 60,
                     child: ElevatedButton(
-                      onPressed:
-                          _isSubmitting || !_canCompleteSetup ? null : _submit,
+                      onPressed: _isSubmitting || !_canCompleteSetup
+                          ? null
+                          : _submit,
                       style: ElevatedButton.styleFrom(
                         elevation: 0,
                         backgroundColor: const Color(0xFF1877F2),
@@ -557,8 +533,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                               height: 24,
                               child: CircularProgressIndicator(
                                 strokeWidth: 2.4,
-                                valueColor:
-                                    AlwaysStoppedAnimation<Color>(Colors.white),
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Colors.white,
+                                ),
                               ),
                             )
                           : const Row(
@@ -572,10 +549,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                                   ),
                                 ),
                                 SizedBox(width: 12),
-                                Icon(
-                                  Icons.arrow_forward_rounded,
-                                  size: 24,
-                                ),
+                                Icon(Icons.arrow_forward_rounded, size: 24),
                               ],
                             ),
                     ),

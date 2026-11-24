@@ -33,11 +33,9 @@ class _PhotosMediaPageState extends State<PhotosMediaPage> {
   Color get bgColor =>
       isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
 
-  Color get cardColor =>
-      isDark ? const Color(0xFF111827) : Colors.white;
+  Color get cardColor => isDark ? const Color(0xFF111827) : Colors.white;
 
-  Color get primaryText =>
-      isDark ? Colors.white : Colors.black;
+  Color get primaryText => isDark ? Colors.white : Colors.black;
 
   Color get secondaryText =>
       isDark ? const Color(0xFF94A3B8) : const Color(0xFF65676B);
@@ -64,8 +62,7 @@ class _PhotosMediaPageState extends State<PhotosMediaPage> {
       MediaItem(
         id: "2",
         type: "video",
-        url:
-            "https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4",
+        url: "https://flutter.github.io/assets-for-api-docs/assets/videos/bee.mp4",
         sentAt: DateTime.now(),
       ),
     ];
@@ -97,16 +94,10 @@ class _PhotosMediaPageState extends State<PhotosMediaPage> {
             title: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  "Photos & media",
-                  style: TextStyle(color: primaryText),
-                ),
+                Text("Photos & media", style: TextStyle(color: primaryText)),
                 Text(
                   widget.chatName,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: secondaryText,
-                  ),
+                  style: TextStyle(fontSize: 12, color: secondaryText),
                 ),
               ],
             ),
@@ -138,24 +129,24 @@ class _PhotosMediaPageState extends State<PhotosMediaPage> {
                               primaryText: primaryText,
                             )
                           : selected == "videos"
-                              ? _MediaGridTab(
-                                  items: _videos,
-                                  isVideo: true,
-                                  primaryText: primaryText,
-                                )
-                              : selected == "files"
-                                  ? _FilesTab(
-                                      items: _files,
-                                      secondaryText: secondaryText,
-                                      primaryText: primaryText,
-                                      dateFormatter: _formatDate,
-                                    )
-                                  : _AudioTab(
-                                      items: _audios,
-                                      secondaryText: secondaryText,
-                                      primaryText: primaryText,
-                                      dateFormatter: _formatDate,
-                                    ),
+                          ? _MediaGridTab(
+                              items: _videos,
+                              isVideo: true,
+                              primaryText: primaryText,
+                            )
+                          : selected == "files"
+                          ? _FilesTab(
+                              items: _files,
+                              secondaryText: secondaryText,
+                              primaryText: primaryText,
+                              dateFormatter: _formatDate,
+                            )
+                          : _AudioTab(
+                              items: _audios,
+                              secondaryText: secondaryText,
+                              primaryText: primaryText,
+                              dateFormatter: _formatDate,
+                            ),
                     ),
                   ],
                 ),
@@ -181,9 +172,7 @@ class _PhotosMediaPageState extends State<PhotosMediaPage> {
           children: [
             Text(
               label,
-              style: TextStyle(
-                color: isActive ? Colors.white : primaryText,
-              ),
+              style: TextStyle(color: isActive ? Colors.white : primaryText),
             ),
             const SizedBox(width: 4),
             Text(
@@ -229,10 +218,7 @@ class _MediaGridTab extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return Center(
-        child: Text(
-          "Empty",
-          style: TextStyle(color: primaryText),
-        ),
+        child: Text("Empty", style: TextStyle(color: primaryText)),
       );
     }
 
@@ -265,10 +251,7 @@ class _MediaGridTab extends StatelessWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                Image.network(
-                  item.url,
-                  fit: BoxFit.cover,
-                ),
+                Image.network(item.url, fit: BoxFit.cover),
                 if (isVideo)
                   const Center(
                     child: Icon(
@@ -358,14 +341,12 @@ class _MediaViewerPageState extends State<MediaViewerPage> {
           return Center(
             child: widget.isVideo
                 ? video != null && video!.value.isInitialized
-                    ? AspectRatio(
-                        aspectRatio: video!.value.aspectRatio,
-                        child: VideoPlayer(video!),
-                      )
-                    : const CircularProgressIndicator()
-                : InteractiveViewer(
-                    child: Image.network(item.url),
-                  ),
+                      ? AspectRatio(
+                          aspectRatio: video!.value.aspectRatio,
+                          child: VideoPlayer(video!),
+                        )
+                      : const CircularProgressIndicator()
+                : InteractiveViewer(child: Image.network(item.url)),
           );
         },
       ),
@@ -390,10 +371,7 @@ class _FilesTab extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return Center(
-        child: Text(
-          "Files here",
-          style: TextStyle(color: primaryText),
-        ),
+        child: Text("Files here", style: TextStyle(color: primaryText)),
       );
     }
 
@@ -404,14 +382,8 @@ class _FilesTab extends StatelessWidget {
         final item = items[index];
 
         return ListTile(
-          leading: Icon(
-            Icons.insert_drive_file_rounded,
-            color: primaryText,
-          ),
-          title: Text(
-            "File",
-            style: TextStyle(color: primaryText),
-          ),
+          leading: Icon(Icons.insert_drive_file_rounded, color: primaryText),
+          title: Text("File", style: TextStyle(color: primaryText)),
           subtitle: Text(
             dateFormatter(item.sentAt),
             style: TextStyle(color: secondaryText),
@@ -439,10 +411,7 @@ class _AudioTab extends StatelessWidget {
   Widget build(BuildContext context) {
     if (items.isEmpty) {
       return Center(
-        child: Text(
-          "Audio here",
-          style: TextStyle(color: primaryText),
-        ),
+        child: Text("Audio here", style: TextStyle(color: primaryText)),
       );
     }
 
@@ -453,14 +422,8 @@ class _AudioTab extends StatelessWidget {
         final item = items[index];
 
         return ListTile(
-          leading: Icon(
-            Icons.mic_rounded,
-            color: primaryText,
-          ),
-          title: Text(
-            "Voice message",
-            style: TextStyle(color: primaryText),
-          ),
+          leading: Icon(Icons.mic_rounded, color: primaryText),
+          title: Text("Voice message", style: TextStyle(color: primaryText)),
           subtitle: Text(
             dateFormatter(item.sentAt),
             style: TextStyle(color: secondaryText),

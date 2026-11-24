@@ -122,15 +122,15 @@ class GlobalCallHandler {
       debugPrint('### GLOBAL SOCKET CONNECTED EVENT ###');
     };
 
-   _globalIncomingCallHandler = (data) async {
-  debugPrint('### GLOBAL SOCKET incoming_call RECEIVED ###');
+    _globalIncomingCallHandler = (data) async {
+      debugPrint('### GLOBAL SOCKET incoming_call RECEIVED ###');
 
-  await _loadCurrentUserFromStorage();
+      await _loadCurrentUserFromStorage();
 
-  final payload = _payloadFrom(data);
+      final payload = _payloadFrom(data);
 
-  await GlobalCallHandler.handleIncomingCall(payload);
-};
+      await GlobalCallHandler.handleIncomingCall(payload);
+    };
 
     _globalCallCancelledHandler = (data) async {
       debugPrint('### GLOBAL SOCKET call_cancelled RECEIVED ###');
@@ -195,9 +195,10 @@ class GlobalCallHandler {
         isUtc: true,
       );
 
-      return DateTime.now().toUtc().add(const Duration(minutes: 1)).isAfter(
-            expiry,
-          );
+      return DateTime.now()
+          .toUtc()
+          .add(const Duration(minutes: 1))
+          .isAfter(expiry);
     } catch (_) {
       // If this is not a JWT, keep the current token and let the server decide.
       return false;
@@ -205,8 +206,7 @@ class GlobalCallHandler {
   }
 
   Future<String?> _freshAccessToken() async {
-    String token =
-        (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
+    String token = (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
 
     if (token.isEmpty || _jwtNeedsRefresh(token)) {
       final refreshed = await ApiClient.refreshAccessToken();
@@ -214,8 +214,7 @@ class GlobalCallHandler {
     }
 
     if (token.isEmpty) {
-      token =
-          (await ApiClient.storage.read(key: 'access_token'))?.trim() ?? '';
+      token = (await ApiClient.storage.read(key: 'access_token'))?.trim() ?? '';
     }
 
     if (token.isEmpty) {
@@ -243,47 +242,43 @@ class GlobalCallHandler {
   }
 
   Future<void> ensureGlobalIncomingCallSocketConnected() async {
-  final socket = GlobalCallSocketService.instance;
+    final socket = GlobalCallSocketService.instance;
 
-  if (socket.isConnecting) {
-    debugPrint('GLOBAL SOCKET ENSURE: connection already in progress');
-    return;
+    if (socket.isConnecting) {
+      debugPrint('GLOBAL SOCKET ENSURE: connection already in progress');
+      return;
+    }
+
+    if ((_currentUserId ?? '').trim().isEmpty) {
+      await _loadCurrentUserFromStorage();
+    }
+
+    final currentUserId = (_currentUserId ?? '').trim();
+
+    if (currentUserId.isEmpty) {
+      debugPrint('GLOBAL SOCKET ENSURE ERROR: user id unavailable');
+      return;
+    }
+
+    socket.setReconnectUrlProvider(() => _buildFreshGlobalSocketUrl());
+
+    if (socket.isConnected && socket.isHealthy) {
+      debugPrint('GLOBAL SOCKET ENSURE: already connected and healthy');
+      return;
+    }
+
+    if (socket.isConnected && !socket.isHealthy) {
+      debugPrint('GLOBAL SOCKET ENSURE: connected but unhealthy');
+
+      await socket.forceReconnect(reason: 'global_handler_unhealthy_socket');
+
+      return;
+    }
+
+    debugPrint('GLOBAL SOCKET ENSURE: socket disconnected -> connecting');
+
+    await socket.ensureConnected();
   }
-
-  if (( _currentUserId ?? '').trim().isEmpty) {
-    await _loadCurrentUserFromStorage();
-  }
-
-  final currentUserId = (_currentUserId ?? '').trim();
-
-  if (currentUserId.isEmpty) {
-    debugPrint('GLOBAL SOCKET ENSURE ERROR: user id unavailable');
-    return;
-  }
-
-  socket.setReconnectUrlProvider(
-    () => _buildFreshGlobalSocketUrl(),
-  );
-
-  if (socket.isConnected && socket.isHealthy) {
-    debugPrint('GLOBAL SOCKET ENSURE: already connected and healthy');
-    return;
-  }
-
-  if (socket.isConnected && !socket.isHealthy) {
-    debugPrint('GLOBAL SOCKET ENSURE: connected but unhealthy');
-
-    await socket.forceReconnect(
-      reason: 'global_handler_unhealthy_socket',
-    );
-
-    return;
-  }
-
-  debugPrint('GLOBAL SOCKET ENSURE: socket disconnected -> connecting');
-
-  await socket.ensureConnected();
-}
 
   Future<void> _saveCurrentUserToStorage({
     required String currentUserId,
@@ -318,18 +313,14 @@ class GlobalCallHandler {
           (await ApiClient.storage.read(key: 'full_name'))?.trim() ?? '';
       secureUserAvatar =
           (await ApiClient.storage.read(key: 'avatar_url'))?.trim() ??
-              (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
-              '';
+          (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
+          '';
     } catch (e, st) {
       debugPrint('GLOBAL LOAD STORAGE ERROR: $e');
       debugPrint(st.toString());
     }
 
-    _currentUserId = _firstNotEmpty([
-      _currentUserId,
-      secureUserId,
-      prefUserId,
-    ]);
+    _currentUserId = _firstNotEmpty([_currentUserId, secureUserId, prefUserId]);
 
     _currentUserName = _firstNotEmpty([
       _currentUserName,
@@ -460,7 +451,9 @@ class GlobalCallHandler {
         MaterialPageRoute(
           fullscreenDialog: true,
           builder: (_) => CallScreen(
-            name: callerName.trim().isEmpty ? 'Incoming call' : callerName.trim(),
+            name: callerName.trim().isEmpty
+                ? 'Incoming call'
+                : callerName.trim(),
             avatarUrl: callerAvatar.trim(),
             isVideoCall: isVideoCall,
             chat: null,
@@ -605,8 +598,7 @@ class GlobalCallHandler {
           data['conversation_id']?.toString() ??
           data['conversationId']?.toString();
 
-      final callId =
-          data['call_id']?.toString() ?? data['callId']?.toString();
+      final callId = data['call_id']?.toString() ?? data['callId']?.toString();
 
       final incomingKey = h._buildIncomingKey(
         callerId: callerId,
@@ -630,7 +622,8 @@ class GlobalCallHandler {
             );
 
             final activeCall = active.call;
-            final sameCall = active.active &&
+            final sameCall =
+                active.active &&
                 activeCall != null &&
                 activeCall.isActive &&
                 (callId == null ||
@@ -657,8 +650,7 @@ class GlobalCallHandler {
       }
 
       if (isGroupCall) {
-        final parsedConversationId =
-            int.tryParse(conversationId?.trim() ?? '');
+        final parsedConversationId = int.tryParse(conversationId?.trim() ?? '');
 
         if (parsedConversationId == null || parsedConversationId <= 0) {
           debugPrint('GROUP INCOMING CALL ERROR: invalid conversation id');
@@ -902,7 +894,7 @@ class GlobalCallHandler {
 
       if (acceptedFromCallKit) {
         debugPrint(
-          'GROUP CALLKIT ACCEPT -> DIRECT LIVEKIT JOIN ' 
+          'GROUP CALLKIT ACCEPT -> DIRECT LIVEKIT JOIN '
           'conversation=$conversationId call=${callId ?? ''}',
         );
 
@@ -928,7 +920,7 @@ class GlobalCallHandler {
         }
 
         debugPrint(
-          'GROUP CALLKIT ACCEPT -> LIVEKIT CONNECTED ' 
+          'GROUP CALLKIT ACCEPT -> LIVEKIT CONNECTED '
           'call=${activeCall.callId}',
         );
 
@@ -949,10 +941,8 @@ class GlobalCallHandler {
       await navigator.push(
         MaterialPageRoute(
           fullscreenDialog: true,
-          builder: (_) => IncomingGroupCallScreen(
-            payload: payload,
-            controller: controller,
-          ),
+          builder: (_) =>
+              IncomingGroupCallScreen(payload: payload, controller: controller),
         ),
       );
     } catch (e, st) {
@@ -999,8 +989,8 @@ class GlobalCallHandler {
           'reason': reason,
           if (cleanCallId.isNotEmpty) 'call_id': cleanCallId,
           if (cleanCallId.isNotEmpty) 'callId': cleanCallId,
-          if (conversationId != null) 'conversation_id': conversationId,
-          if (conversationId != null) 'conversationId': conversationId,
+          'conversation_id': ?conversationId,
+          'conversationId': ?conversationId,
         },
         targetUser: callerId,
         conversationId: conversationId,
@@ -1149,7 +1139,9 @@ class GlobalCallHandler {
         _pendingOfferConversationId == conversationId;
 
     final sameCall =
-        callId == null || _pendingOfferCallId == null || _pendingOfferCallId == callId;
+        callId == null ||
+        _pendingOfferCallId == null ||
+        _pendingOfferCallId == callId;
 
     if (!sameCaller || !sameConversation || !sameCall) return null;
 
@@ -1241,7 +1233,9 @@ class GlobalCallHandler {
         _activeIncomingConversationId == conversationId;
 
     final sameCall =
-        callId == null || _activeIncomingCallId == null || _activeIncomingCallId == callId;
+        callId == null ||
+        _activeIncomingCallId == null ||
+        _activeIncomingCallId == callId;
 
     return sameCaller && sameConversation && sameCall;
   }
@@ -1256,11 +1250,12 @@ class GlobalCallHandler {
     }
 
     final conv = conversationId?.trim() ?? '';
-    if (conv.isNotEmpty) return 'conversation_${conv}_caller_${callerId.trim()}';
+    if (conv.isNotEmpty) {
+      return 'conversation_${conv}_caller_${callerId.trim()}';
+    }
 
     return 'caller_${callerId.trim()}';
   }
-
 
   bool _isAcceptedOrOpenedCall(String key) {
     if (key.trim().isEmpty) return false;
@@ -1274,9 +1269,7 @@ class GlobalCallHandler {
     // This is only a very short debounce for the native CallKit accept path.
     // The authoritative duplicate guard for an active call is the real
     // per-conversation SocketService activeCallId/activeConversationId above.
-    return DateTime.now()
-            .difference(_acceptedOrOpenedCallKeyTime!)
-            .inSeconds <=
+    return DateTime.now().difference(_acceptedOrOpenedCallKeyTime!).inSeconds <=
         8;
   }
 
@@ -1327,7 +1320,10 @@ class GlobalCallHandler {
 
   void _removeOldHandlers() {
     if (_incomingCallHandler != null) {
-      SocketService.instance.off(CallSocketEvents.incomingCall, _incomingCallHandler);
+      SocketService.instance.off(
+        CallSocketEvents.incomingCall,
+        _incomingCallHandler,
+      );
       _incomingCallHandler = null;
     }
 
@@ -1342,41 +1338,48 @@ class GlobalCallHandler {
     }
 
     if (_callRejectHandler != null) {
-      SocketService.instance.off(CallSocketEvents.callReject, _callRejectHandler);
+      SocketService.instance.off(
+        CallSocketEvents.callReject,
+        _callRejectHandler,
+      );
       _callRejectHandler = null;
     }
 
     if (_callTimeoutHandler != null) {
-      SocketService.instance.off(CallSocketEvents.callTimeout, _callTimeoutHandler);
+      SocketService.instance.off(
+        CallSocketEvents.callTimeout,
+        _callTimeoutHandler,
+      );
       _callTimeoutHandler = null;
     }
   }
 
   void _removeGlobalHandlers() {
-  if (_globalConnectedHandler != null) {
-    GlobalCallSocketService.instance.off(
-      GlobalCallSocketEvents.connected,
-      _globalConnectedHandler!,
-    );
-    _globalConnectedHandler = null;
+    if (_globalConnectedHandler != null) {
+      GlobalCallSocketService.instance.off(
+        GlobalCallSocketEvents.connected,
+        _globalConnectedHandler!,
+      );
+      _globalConnectedHandler = null;
+    }
+
+    if (_globalIncomingCallHandler != null) {
+      GlobalCallSocketService.instance.off(
+        GlobalCallSocketEvents.incomingCall,
+        _globalIncomingCallHandler!,
+      );
+      _globalIncomingCallHandler = null;
+    }
+
+    if (_globalCallCancelledHandler != null) {
+      GlobalCallSocketService.instance.off(
+        GlobalCallSocketEvents.callCancelled,
+        _globalCallCancelledHandler!,
+      );
+      _globalCallCancelledHandler = null;
+    }
   }
 
-  if (_globalIncomingCallHandler != null) {
-    GlobalCallSocketService.instance.off(
-      GlobalCallSocketEvents.incomingCall,
-      _globalIncomingCallHandler!,
-    );
-    _globalIncomingCallHandler = null;
-  }
-
-  if (_globalCallCancelledHandler != null) {
-    GlobalCallSocketService.instance.off(
-      GlobalCallSocketEvents.callCancelled,
-      _globalCallCancelledHandler!,
-    );
-    _globalCallCancelledHandler = null;
-  }
-}
   void dispose() {
     _registered = false;
     forceResetCallUiLocks(reason: 'dispose');
@@ -1389,11 +1392,7 @@ class GlobalCallHandler {
 
     // Logout/user switch must stop the old user's persistent global socket.
     unawaited(
-      socket.disconnect(
-        clearHandlers: false,
-        forgetUrl: true,
-        manual: true,
-      ),
+      socket.disconnect(clearHandlers: false, forgetUrl: true, manual: true),
     );
 
     _currentUserId = null;

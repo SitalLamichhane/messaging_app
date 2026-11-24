@@ -18,10 +18,12 @@ class MessengerBlockPage extends StatelessWidget {
     final bgColor = isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
     final cardColor = isDark ? const Color(0xFF111827) : Colors.white;
     final primaryText = isDark ? Colors.white : const Color(0xFF111827);
-    final secondaryText =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF65676B);
-    final dividerColor =
-        isDark ? const Color(0xFF243041) : const Color(0xFFE4E6EB);
+    final secondaryText = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF65676B);
+    final dividerColor = isDark
+        ? const Color(0xFF243041)
+        : const Color(0xFFE4E6EB);
 
     return Scaffold(
       backgroundColor: bgColor,
@@ -42,9 +44,7 @@ class MessengerBlockPage extends StatelessWidget {
                   ),
                   Expanded(
                     child: Text(
-                      isBlocked
-                          ? 'Unblock on Messenger'
-                          : 'Block on Messenger',
+                      isBlocked ? 'Unblock on Messenger' : 'Block on Messenger',
                       textAlign: TextAlign.center,
                       style: TextStyle(
                         color: primaryText,

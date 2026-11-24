@@ -5,7 +5,6 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
     id("dev.flutter.flutter-gradle-plugin")
     id("com.google.gms.google-services")
 }
@@ -14,10 +13,12 @@ val keystoreProperties = Properties()
 val keystorePropertiesFile = rootProject.file("key.properties")
 
 if (keystorePropertiesFile.exists()) {
-    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+    FileInputStream(keystorePropertiesFile).use {
+        keystoreProperties.load(it)
+    }
 } else {
     throw GradleException(
-        "Missing key.properties file. Create it at android/key.properties"
+        "Missing android/key.properties file."
     )
 }
 
@@ -75,7 +76,6 @@ android {
     }
 }
 
-// Kotlin compiler configuration
 kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
@@ -92,6 +92,4 @@ dependencies {
     )
 
     implementation("androidx.multidex:multidex:2.0.1")
-
-    implementation("com.google.firebase:firebase-messaging:24.1.0")
 }

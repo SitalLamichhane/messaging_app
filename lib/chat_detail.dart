@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
@@ -104,9 +103,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   ];
 
   List<ChatMessage> _sortedProviderMessages(ChatProvider provider) {
-    return List<ChatMessage>.from(
-      provider.getMessagesForChat(widget.chat.id),
-    )..sort((a, b) => a.sentAt.compareTo(b.sentAt));
+    return List<ChatMessage>.from(provider.getMessagesForChat(widget.chat.id))
+      ..sort((a, b) => a.sentAt.compareTo(b.sentAt));
   }
 
   String _cleanImageUrl(String value) {
@@ -130,7 +128,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     return cleanValue;
   }
-
 
   ChatItem _freshChat() {
     try {
@@ -265,7 +262,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return '';
   }
 
-
   String _privateHeaderSubtitle(ChatItem chat) {
     return chat.isOnline ? 'Active now' : 'Offline';
   }
@@ -288,7 +284,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     return '';
   }
-
 
   Future<ChatItem> _latestChatForBlock({
     required String currentUserId,
@@ -313,7 +308,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       return latestChat;
     }
 
-    
     //   IMPORTANT:
     //   After app restart the chat passed into ChatDetailScreen can be stale.
     //   So we refresh from the same conversations API that already returns:
@@ -323,9 +317,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     //   This is NOT a separate block status API.
     //   It is the same /chat/conversations/ list API.
-    
+
     try {
-      debugPrint('BLOCK REFRESH: fetching /chat/conversations/ for latest block state');
+      debugPrint(
+        'BLOCK REFRESH: fetching /chat/conversations/ for latest block state',
+      );
 
       final response = await ApiClient.dio.get('/chat/conversations/');
       final data = response.data;
@@ -343,10 +339,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
         if (conversationId != widget.chat.id.toString()) continue;
 
-        final freshChat = ChatItem.fromJson(
-          map,
-          currentUserId: currentUserId,
-        );
+        final freshChat = ChatItem.fromJson(map, currentUserId: currentUserId);
 
         final index = AppChatData.chats.indexWhere(
           (chat) => chat.id.toString() == freshChat.id.toString(),
@@ -366,7 +359,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         return freshChat;
       }
 
-      debugPrint('BLOCK REFRESH SKIPPED: conversation ${widget.chat.id} not found');
+      debugPrint(
+        'BLOCK REFRESH SKIPPED: conversation ${widget.chat.id} not found',
+      );
       return latestChat;
     } catch (e) {
       debugPrint('BLOCK REFRESH ERROR: $e');
@@ -375,56 +370,56 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _reloadBlockStatus({bool forceRefresh = false}) async {
-  if (widget.chat.isGroup) return;
+    if (widget.chat.isGroup) return;
 
-  final currentUserId =
-      (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
+    final currentUserId =
+        (await ApiClient.storage.read(key: 'user_id'))?.trim() ?? '';
 
-  if (currentUserId.isEmpty) {
-    debugPrint('BLOCK STATUS ERROR: currentUserId is empty');
-    return;
-  }
+    if (currentUserId.isEmpty) {
+      debugPrint('BLOCK STATUS ERROR: currentUserId is empty');
+      return;
+    }
 
-  final latestChat = await _latestChatForBlock(
-    currentUserId: currentUserId,
-    forceRefresh: forceRefresh,
-  );
-
-  ChatUser? myMember;
-  ChatUser? targetMember;
-
-  for (final member in latestChat.members) {
-    final memberUserId = member.id.toString().trim();
-
-    debugPrint(
-      'BLOCK MEMBER CHECK => '
-      'memberId=$memberUserId, '
-      'name=${member.name}, '
-      'isBlocked=${member.isBlocked}, '
-      'blockedBy=${member.blockedBy}, '
-      'blockedByName=${member.blockedByName}',
+    final latestChat = await _latestChatForBlock(
+      currentUserId: currentUserId,
+      forceRefresh: forceRefresh,
     );
 
-    if (memberUserId == currentUserId) {
-      myMember = member;
-    } else if (targetMember == null) {
-      targetMember = member;
+    ChatUser? myMember;
+    ChatUser? targetMember;
+
+    for (final member in latestChat.members) {
+      final memberUserId = member.id.toString().trim();
+
+      debugPrint(
+        'BLOCK MEMBER CHECK => '
+        'memberId=$memberUserId, '
+        'name=${member.name}, '
+        'isBlocked=${member.isBlocked}, '
+        'blockedBy=${member.blockedBy}, '
+        'blockedByName=${member.blockedByName}',
+      );
+
+      if (memberUserId == currentUserId) {
+        myMember = member;
+      } else {
+        targetMember ??= member;
+      }
     }
-  }
 
-  if (myMember == null) {
-    debugPrint('BLOCK STATUS ERROR: myMember not found');
-    return;
-  }
+    if (myMember == null) {
+      debugPrint('BLOCK STATUS ERROR: myMember not found');
+      return;
+    }
 
-  if (targetMember == null) {
-    debugPrint('BLOCK STATUS ERROR: target member not found');
-    return;
-  }
+    if (targetMember == null) {
+      debugPrint('BLOCK STATUS ERROR: target member not found');
+      return;
+    }
 
-  final targetUserId = targetMember.id.toString().trim();
+    final targetUserId = targetMember.id.toString().trim();
 
-  /*
+    /*
     Messenger exact logic:
 
     Person who blocked:
@@ -440,150 +435,141 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     Provider can be stale after restart/login and can make receiver
     wrongly see the sender/blocker UI.
   */
-  final blockedByMe =
-      targetMember.isBlocked == true &&
-      targetMember.blockedBy?.toString() == currentUserId;
+    final blockedByMe =
+        targetMember.isBlocked == true &&
+        targetMember.blockedBy?.toString() == currentUserId;
 
-  final blockedMe =
-      myMember.isBlocked == true &&
-      myMember.blockedBy?.toString() == targetUserId;
+    final blockedMe =
+        myMember.isBlocked == true &&
+        myMember.blockedBy?.toString() == targetUserId;
 
-  final blockProvider = context.read<BlockProvider>();
+    if (!mounted) return;
+    final blockProvider = context.read<BlockProvider>();
 
-  // Store the API truth in provider only after deciding the role.
-  blockProvider.setLocalBlocked(
-    conversationId: latestChat.id,
-    targetUserId: targetUserId,
-    value: blockedByMe,
-  );
+    // Store the API truth in provider only after deciding the role.
+    blockProvider.setLocalBlocked(
+      conversationId: latestChat.id,
+      targetUserId: targetUserId,
+      value: blockedByMe,
+    );
 
-  blockProvider.setLocalBlockedMe(
-    conversationId: latestChat.id,
-    targetUserId: targetUserId,
-    value: blockedMe,
-  );
+    blockProvider.setLocalBlockedMe(
+      conversationId: latestChat.id,
+      targetUserId: targetUserId,
+      value: blockedMe,
+    );
 
-  if (!mounted) return;
+    if (!mounted) return;
 
-  setState(() {
-    _blockTargetUserId = targetUserId;
-    _blockedByMe = blockedByMe;
-    _blockedMe = blockedMe;
+    setState(() {
+      _blockTargetUserId = targetUserId;
+      _blockedByMe = blockedByMe;
+      _blockedMe = blockedMe;
 
-    // Only the real blocker can see/call Unblock.
-    // Receiver side must only see "This user is unavailable".
-    _canUnblock = blockedByMe;
-  });
+      // Only the real blocker can see/call Unblock.
+      // Receiver side must only see "This user is unavailable".
+      _canUnblock = blockedByMe;
+    });
 
-  debugPrint('========== BLOCK FINAL CHECK ==========');
-  debugPrint('currentUserId: $currentUserId');
-  debugPrint('conversationId: ${latestChat.id}');
-  debugPrint('targetUserId: $targetUserId');
+    debugPrint('========== BLOCK FINAL CHECK ==========');
+    debugPrint('currentUserId: $currentUserId');
+    debugPrint('conversationId: ${latestChat.id}');
+    debugPrint('targetUserId: $targetUserId');
 
-  debugPrint('myMember id: ${myMember.id}');
-  debugPrint('myMember isBlocked: ${myMember.isBlocked}');
-  debugPrint('myMember blockedBy: ${myMember.blockedBy}');
+    debugPrint('myMember id: ${myMember.id}');
+    debugPrint('myMember isBlocked: ${myMember.isBlocked}');
+    debugPrint('myMember blockedBy: ${myMember.blockedBy}');
 
-  debugPrint('targetMember id: ${targetMember.id}');
-  debugPrint('targetMember isBlocked: ${targetMember.isBlocked}');
-  debugPrint('targetMember blockedBy: ${targetMember.blockedBy}');
+    debugPrint('targetMember id: ${targetMember.id}');
+    debugPrint('targetMember isBlocked: ${targetMember.isBlocked}');
+    debugPrint('targetMember blockedBy: ${targetMember.blockedBy}');
 
-  debugPrint('BLOCK FINAL blockedByMe: $blockedByMe');
-  debugPrint('BLOCK FINAL blockedMe: $blockedMe');
-  debugPrint('=======================================');
-}
+    debugPrint('BLOCK FINAL blockedByMe: $blockedByMe');
+    debugPrint('BLOCK FINAL blockedMe: $blockedMe');
+    debugPrint('=======================================');
+  }
 
   bool _isBlockedForMessaging() {
-  // Messenger rule:
-  // If I blocked them OR they blocked me, I cannot send.
-  // Do not read provider here because provider may be stale after restart.
-  return _blockedByMe || _blockedMe;
-}
+    // Messenger rule:
+    // If I blocked them OR they blocked me, I cannot send.
+    // Do not read provider here because provider may be stale after restart.
+    return _blockedByMe || _blockedMe;
+  }
 
   void _showBlockedNotice() {
-  _showMessengerPop(
-    _blockedByMe
-        ? 'You blocked this user. Unblock to send messages.'
-        : 'This user is unavailable.',
-    icon: Icons.block_rounded,
-  );
-}
+    _showMessengerPop(
+      _blockedByMe
+          ? 'You blocked this user. Unblock to send messages.'
+          : 'This user is unavailable.',
+      icon: Icons.block_rounded,
+    );
+  }
 
   Future<void> _unblockFromBlockedComposer() async {
-  /*
+    /*
     Messenger rule:
     Only the person who blocked can unblock.
     Receiver side must never call unblock API.
   */
-  if (!_canUnblock || !_blockedByMe) {
-    _showMessengerPop(
-      'This user is unavailable.',
-      icon: Icons.block_rounded,
+    if (!_canUnblock || !_blockedByMe) {
+      _showMessengerPop('This user is unavailable.', icon: Icons.block_rounded);
+      return;
+    }
+
+    final targetUserId = _blockTargetUserId.trim();
+
+    if (targetUserId.isEmpty) {
+      _showMessengerPop('User not found', icon: Icons.error_rounded);
+      return;
+    }
+
+    final blockProvider = context.read<BlockProvider>();
+
+    final success = await blockProvider.unblockUser(
+      conversationId: widget.chat.id,
+      targetUserId: targetUserId,
+      isGroupChat: false,
     );
-    return;
-  }
 
-  final targetUserId = _blockTargetUserId.trim();
+    if (!mounted) return;
 
-  if (targetUserId.isEmpty) {
-    _showMessengerPop(
-      'User not found',
-      icon: Icons.error_rounded,
+    if (!success) {
+      _showMessengerPop(
+        blockProvider.error.trim().isNotEmpty
+            ? blockProvider.error
+            : 'Could not unblock user',
+        icon: Icons.error_rounded,
+      );
+      return;
+    }
+
+    // Unblock successful: local UI must return to normal immediately.
+    blockProvider.setLocalBlocked(
+      conversationId: widget.chat.id,
+      targetUserId: targetUserId,
+      value: false,
     );
-    return;
-  }
 
-  final blockProvider = context.read<BlockProvider>();
-
-  final success = await blockProvider.unblockUser(
-    conversationId: widget.chat.id,
-    targetUserId: targetUserId,
-    isGroupChat: false,
-  );
-
-  if (!mounted) return;
-
-  if (!success) {
-    _showMessengerPop(
-      blockProvider.error.trim().isNotEmpty
-          ? blockProvider.error
-          : 'Could not unblock user',
-      icon: Icons.error_rounded,
+    blockProvider.setLocalBlockedMe(
+      conversationId: widget.chat.id,
+      targetUserId: targetUserId,
+      value: false,
     );
-    return;
+
+    if (!mounted) return;
+
+    setState(() {
+      _blockedByMe = false;
+      _blockedMe = false;
+      _canUnblock = false;
+      _blockTargetUserId = targetUserId;
+    });
+
+    _showMessengerPop('User unblocked', icon: Icons.check_circle_rounded);
+
+    // Force refresh because AppChatData may still contain stale blocked members.
+    await _reloadBlockStatus(forceRefresh: true);
   }
-
-  // Unblock successful: local UI must return to normal immediately.
-  blockProvider.setLocalBlocked(
-    conversationId: widget.chat.id,
-    targetUserId: targetUserId,
-    value: false,
-  );
-
-  blockProvider.setLocalBlockedMe(
-    conversationId: widget.chat.id,
-    targetUserId: targetUserId,
-    value: false,
-  );
-
-  if (!mounted) return;
-
-  setState(() {
-    _blockedByMe = false;
-    _blockedMe = false;
-    _canUnblock = false;
-    _blockTargetUserId = targetUserId;
-  });
-
-  _showMessengerPop(
-    'User unblocked',
-    icon: Icons.check_circle_rounded,
-  );
-
-  // Force refresh because AppChatData may still contain stale blocked members.
-  await _reloadBlockStatus(forceRefresh: true);
-}
-
 
   @override
   void didChangeDependencies() {
@@ -618,9 +604,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       if (!mounted) return;
 
-      await provider.connectSocket(
-        conversationId: conversationId,
-      );
+      await provider.connectSocket(conversationId: conversationId);
 
       // The backend already supports read_message over this socket.
       // Mark the loaded incoming messages read now that the socket is ready.
@@ -763,7 +747,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         .toList();
   }
 
-
   void _syncMessengerProviderState(ChatProvider provider) {
     final freshReactions = provider.getReactionsForChat(widget.chat.id);
     final freshPinnedIds = provider.getPinnedMessageIdsForChat(widget.chat.id);
@@ -785,11 +768,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     try {
       _messages = _visibleProviderMessages(_chatProvider);
     } catch (_) {
-      _messages = (List<ChatMessage>.from(widget.chat.messages)
-            ..sort((a, b) => a.sentAt.compareTo(b.sentAt)))
-          .where((m) => !_hiddenMessageIds.contains(m.id))
-          .where((m) => m.type != MessageType.text || m.text.trim().isNotEmpty)
-          .toList();
+      _messages =
+          (List<ChatMessage>.from(widget.chat.messages)
+                ..sort((a, b) => a.sentAt.compareTo(b.sentAt)))
+              .where((m) => !_hiddenMessageIds.contains(m.id))
+              .where(
+                (m) => m.type != MessageType.text || m.text.trim().isNotEmpty,
+              )
+              .toList();
     }
   }
 
@@ -883,10 +869,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
 
       if (mounted) {
         setState(() {
@@ -910,10 +893,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           replyToMe: _replyingTo!.isMe,
         );
       } else {
-        await provider.sendText(
-          conversationId: conversationId,
-          text: text,
-        );
+        await provider.sendText(conversationId: conversationId, text: text);
       }
 
       if (!mounted) return;
@@ -950,10 +930,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
 
       if (mounted) {
         setState(() {
@@ -966,10 +943,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final provider = _chatProvider;
 
     try {
-      await provider.sendText(
-        conversationId: conversationId,
-        text: '👍',
-      );
+      await provider.sendText(conversationId: conversationId, text: '👍');
 
       if (!mounted) return;
 
@@ -1015,10 +989,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 builder: (context, value, child) {
                   return Opacity(
                     opacity: value,
-                    child: Transform.scale(
-                      scale: value,
-                      child: child,
-                    ),
+                    child: Transform.scale(scale: value, child: child),
                   );
                 },
                 child: Container(
@@ -1031,7 +1002,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     borderRadius: BorderRadius.circular(18),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.25),
+                        color: Colors.black.withValues(alpha: 0.25),
                         blurRadius: 16,
                         offset: const Offset(0, 4),
                       ),
@@ -1040,11 +1011,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(
-                        icon,
-                        color: Colors.white,
-                        size: 20,
-                      ),
+                      Icon(icon, color: Colors.white, size: 20),
                       const SizedBox(width: 8),
                       Flexible(
                         child: Text(
@@ -1072,46 +1039,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     overlay.insert(entry);
 
-    Future.delayed(
-      const Duration(milliseconds: 950),
-      () {
-        if (entry.mounted) {
-          entry.remove();
-        }
-      },
-    );
+    Future.delayed(const Duration(milliseconds: 950), () {
+      if (entry.mounted) {
+        entry.remove();
+      }
+    });
   }
 
   Future<void> _copyMessage(ChatMessage message) async {
-  String copyValue = '';
+    String copyValue = '';
 
-  if (message.type == MessageType.text) {
-    copyValue = message.text.trim();
-  } else if (message.type == MessageType.image) {
-    copyValue = message.filePath ?? '';
-  } else if (message.type == MessageType.mediaAlbum) {
-    copyValue = (message.mediaUrls ?? []).join('\n');
-  } else if (message.type == MessageType.video) {
-    copyValue = message.filePath ?? '';
-  } else if (message.type == MessageType.audio) {
-    copyValue = message.audioPath ?? '';
-  } else if (message.type == MessageType.file) {
-    copyValue = message.filePath ?? '';
-  } else if (message.type == MessageType.call) {
-    copyValue = _previewForReply(message);
+    if (message.type == MessageType.text) {
+      copyValue = message.text.trim();
+    } else if (message.type == MessageType.image) {
+      copyValue = message.filePath ?? '';
+    } else if (message.type == MessageType.mediaAlbum) {
+      copyValue = (message.mediaUrls ?? []).join('\n');
+    } else if (message.type == MessageType.video) {
+      copyValue = message.filePath ?? '';
+    } else if (message.type == MessageType.audio) {
+      copyValue = message.audioPath ?? '';
+    } else if (message.type == MessageType.file) {
+      copyValue = message.filePath ?? '';
+    } else if (message.type == MessageType.call) {
+      copyValue = _previewForReply(message);
+    }
+
+    if (copyValue.trim().isEmpty) {
+      _showMessengerPop('Nothing to copy');
+      return;
+    }
+
+    await Clipboard.setData(ClipboardData(text: copyValue));
+
+    if (!mounted) return;
+
+    _showMessengerPop('Copied');
   }
-
-  if (copyValue.trim().isEmpty) {
-    _showMessengerPop('Nothing to copy');
-    return;
-  }
-
-  await Clipboard.setData(ClipboardData(text: copyValue));
-
-  if (!mounted) return;
-
-  _showMessengerPop('Copied');
-}
 
   bool _isNetworkPath(String value) {
     final lower = value.toLowerCase().trim();
@@ -1190,7 +1154,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }) async {
     final fileName = _fileNameFromPath(sourcePath, fallbackName);
     final dir = await getTemporaryDirectory();
-    final targetPath = '${dir.path}/save_${DateTime.now().millisecondsSinceEpoch}_$fileName';
+    final targetPath =
+        '${dir.path}/save_${DateTime.now().millisecondsSinceEpoch}_$fileName';
 
     if (_isNetworkPath(sourcePath)) {
       final uri = Uri.parse(sourcePath);
@@ -1240,10 +1205,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       if (message.type == MessageType.mediaAlbum) {
         final urls = message.mediaUrls ?? [];
         if (urls.isEmpty) {
-          _showMessengerPop(
-            'File not found',
-            icon: Icons.error_rounded,
-          );
+          _showMessengerPop('File not found', icon: Icons.error_rounded);
           return;
         }
 
@@ -1259,32 +1221,28 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             bytes,
             quality: 100,
             fileName: fileName,
-            androidRelativePath: 'Pictures/MessagingApp',
+
             skipIfExists: false,
           );
         }
 
         if (!mounted) return;
-        _showMessengerPop(
-          'Photos saved',
-          icon: Icons.download_done_rounded,
-        );
+        _showMessengerPop('Photos saved', icon: Icons.download_done_rounded);
         return;
       }
 
-      final path = (message.filePath != null && message.filePath!.trim().isNotEmpty)
+      final path =
+          (message.filePath != null && message.filePath!.trim().isNotEmpty)
           ? message.filePath!.trim()
           : (message.audioPath ?? '').trim();
 
       if (path.isEmpty) {
-        _showMessengerPop(
-          'File not found',
-          icon: Icons.error_rounded,
-        );
+        _showMessengerPop('File not found', icon: Icons.error_rounded);
         return;
       }
 
-      final fallbackName = message.fileName ??
+      final fallbackName =
+          message.fileName ??
           '${message.type.name}_${DateTime.now().millisecondsSinceEpoch}';
       final fileName = _fileNameFromPath(path, fallbackName);
 
@@ -1295,17 +1253,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           bytes,
           quality: 100,
           fileName: fileName,
-          androidRelativePath: 'Pictures/MessagingApp',
+
           skipIfExists: false,
         );
 
         debugPrint('SAVE IMAGE RESULT: $result');
 
         if (!mounted) return;
-        _showMessengerPop(
-          'Photo saved',
-          icon: Icons.download_done_rounded,
-        );
+        _showMessengerPop('Photo saved', icon: Icons.download_done_rounded);
         return;
       }
 
@@ -1321,7 +1276,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       final result = await SaverGallery.saveFile(
         filePath: localPath,
         fileName: fileName,
-        androidRelativePath: androidFolder,
+
         skipIfExists: false,
       );
 
@@ -1329,22 +1284,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       if (!mounted) return;
       _showMessengerPop(
-        message.type == MessageType.video
-            ? 'Video saved'
-            : 'File saved',
+        message.type == MessageType.video ? 'Video saved' : 'File saved',
         icon: Icons.download_done_rounded,
       );
     } catch (e) {
       debugPrint('SAVE MESSAGE ERROR: $e');
 
       if (!mounted) return;
-      _showMessengerPop(
-        'Could not save',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not save', icon: Icons.error_rounded);
     }
   }
-
 
   void _showReactionBurst(Offset center, String emoji) {
     if (!mounted) return;
@@ -1393,26 +1342,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     unawaited(
       _chatProvider
           .setReaction(
-        conversationId: conversationId,
-        messageId: messageId,
-        reaction: nextReaction,
-      )
+            conversationId: conversationId,
+            messageId: messageId,
+            reaction: nextReaction,
+          )
           .then((success) {
-        if (!mounted || success) return;
+            if (!mounted || success) return;
 
-        setState(() {
-          if (previousReaction == null || previousReaction.trim().isEmpty) {
-            _messageReactions.remove(message.id);
-          } else {
-            _messageReactions[message.id] = previousReaction;
-          }
-        });
+            setState(() {
+              if (previousReaction == null || previousReaction.trim().isEmpty) {
+                _messageReactions.remove(message.id);
+              } else {
+                _messageReactions[message.id] = previousReaction;
+              }
+            });
 
-        _showMessengerPop(
-          'Could not react',
-          icon: Icons.error_rounded,
-        );
-      }),
+            _showMessengerPop('Could not react', icon: Icons.error_rounded);
+          }),
     );
   }
 
@@ -1456,7 +1402,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   width: 56,
                   height: 56,
                   decoration: BoxDecoration(
-                    color: dangerColor.withOpacity(0.12),
+                    color: dangerColor.withValues(alpha: 0.12),
                     shape: BoxShape.circle,
                   ),
                   child: const Icon(
@@ -1480,11 +1426,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       ? 'Choose who you want to remove this message for.'
                       : 'This will remove the message only from your chat.',
                   textAlign: TextAlign.center,
-                  style: TextStyle(
-                    color: subColor,
-                    fontSize: 14,
-                    height: 1.3,
-                  ),
+                  style: TextStyle(color: subColor, fontSize: 14, height: 1.3),
                 ),
                 const SizedBox(height: 18),
                 _DeleteChoiceTile(
@@ -1573,10 +1515,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
 
     if (!success) {
-      _showMessengerPop(
-        'Could not delete',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not delete', icon: Icons.error_rounded);
       return;
     }
 
@@ -1590,10 +1529,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     AppChatData.notify();
 
-    _showMessengerPop(
-      'Deleted from me',
-      icon: Icons.delete_rounded,
-    );
+    _showMessengerPop('Deleted from me', icon: Icons.delete_rounded);
   }
 
   Future<void> _deleteFromEverybody(ChatMessage message) async {
@@ -1609,10 +1545,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final messageId = int.tryParse(message.id);
 
     if (conversationId == null || messageId == null) {
-      _showMessengerPop(
-        'Message is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Message is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -1634,10 +1567,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     });
 
     if (!success) {
-      _showMessengerPop(
-        'Could not delete',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not delete', icon: Icons.error_rounded);
       return;
     }
 
@@ -1651,10 +1581,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     AppChatData.notify();
 
-    _showMessengerPop(
-      'Deleted from everyone',
-      icon: Icons.delete_rounded,
-    );
+    _showMessengerPop('Deleted from everyone', icon: Icons.delete_rounded);
   }
 
   Future<void> _pinMessage(ChatMessage message) async {
@@ -1662,10 +1589,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final messageId = int.tryParse(message.id);
 
     if (conversationId == null || messageId == null) {
-      _showMessengerPop(
-        'Message is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Message is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -1695,10 +1619,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         }
       });
 
-      _showMessengerPop(
-        'Could not update pin',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not update pin', icon: Icons.error_rounded);
       return;
     }
 
@@ -1709,8 +1630,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   }
 
   Future<void> _forwardMessage(ChatMessage message) async {
-    final availableChats =
-        AppChatData.chats.where((chat) => chat.id != widget.chat.id).toList();
+    final availableChats = AppChatData.chats
+        .where((chat) => chat.id != widget.chat.id)
+        .toList();
 
     if (availableChats.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1733,8 +1655,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       builder: (context) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final textColor = isDark ? Colors.white : Colors.black87;
-        final subColor =
-            isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280);
+        final subColor = isDark
+            ? const Color(0xFF94A3B8)
+            : const Color(0xFF6B7280);
 
         return SafeArea(
           child: Padding(
@@ -1766,7 +1689,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: availableChats.length,
-                    separatorBuilder: (_, __) => Divider(
+                    separatorBuilder: (_, _) => Divider(
                       height: 1,
                       color: isDark
                           ? const Color(0xFF243041)
@@ -1780,8 +1703,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         onTap: () => Navigator.pop(context, chat),
                         leading: Builder(
                           builder: (_) {
-                            final forwardAvatarUrl =
-                                _cleanImageUrl(chat.avatarUrl);
+                            final forwardAvatarUrl = _cleanImageUrl(
+                              chat.avatarUrl,
+                            );
 
                             return CircleAvatar(
                               backgroundImage: forwardAvatarUrl.isNotEmpty
@@ -1827,6 +1751,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     AppChatData.addMessage(selectedChat, forwardedMessage);
     AppChatData.notify();
 
+    if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Forwarded to ${_displayNameForChatItem(selectedChat)}'),
@@ -1835,180 +1760,330 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-void _openReactionPicker(
-  ChatMessage message,
-  BuildContext bubbleContext,
-) {
-  AppHaptics.medium();
+  void _openReactionPicker(ChatMessage message, BuildContext bubbleContext) {
+    AppHaptics.medium();
 
-  final renderObject = bubbleContext.findRenderObject();
-  final overlayObject = Overlay.of(context).context.findRenderObject();
+    final renderObject = bubbleContext.findRenderObject();
+    final overlayObject = Overlay.of(context).context.findRenderObject();
 
-  if (renderObject is! RenderBox || overlayObject is! RenderBox) return;
+    if (renderObject is! RenderBox || overlayObject is! RenderBox) return;
 
-  final position = renderObject.localToGlobal(
-    Offset.zero,
-    ancestor: overlayObject,
-  );
-  final size = renderObject.size;
+    final position = renderObject.localToGlobal(
+      Offset.zero,
+      ancestor: overlayObject,
+    );
+    final size = renderObject.size;
 
-  int? hoveredReactionIndex;
+    int? hoveredReactionIndex;
 
-  showGeneralDialog(
-    context: context,
-    barrierDismissible: true,
-    barrierLabel: 'Message actions',
-    barrierColor: Colors.transparent,
-    transitionDuration: const Duration(milliseconds: 145),
-    pageBuilder: (_, __, ___) {
-      return StatefulBuilder(
-        builder: (context, dialogSetState) {
-          final screenSize = MediaQuery.of(context).size;
-          final safeTop = MediaQuery.of(context).padding.top;
-          final safeBottom = MediaQuery.of(context).padding.bottom;
+    showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Message actions',
+      barrierColor: Colors.transparent,
+      transitionDuration: const Duration(milliseconds: 145),
+      pageBuilder: (_, _, _) {
+        return StatefulBuilder(
+          builder: (context, dialogSetState) {
+            final screenSize = MediaQuery.of(context).size;
+            final safeTop = MediaQuery.of(context).padding.top;
+            final safeBottom = MediaQuery.of(context).padding.bottom;
 
-          const edgePadding = 12.0;
-          const reactionHeight = 44.0;
-          const reactionGap = 4.0;
-          const menuGap = 4.0;
-          const reactionItemWidth = 34.0;
-          const reactionHorizontalPadding = 8.0;
-          const reactionMoreWidth = 34.0;
-          const reactionMoreGap = 3.0;
-          const menuWidth = 205.0;
-          const menuHeight = 276.0;
+            const edgePadding = 12.0;
+            const reactionHeight = 44.0;
+            const reactionGap = 4.0;
+            const menuGap = 4.0;
+            const reactionItemWidth = 34.0;
+            const reactionHorizontalPadding = 8.0;
+            const reactionMoreWidth = 34.0;
+            const reactionMoreGap = 3.0;
+            const menuWidth = 205.0;
+            const menuHeight = 276.0;
 
-          double safeClamp(double value, double min, double max) {
-            if (max < min) return min;
-            return value.clamp(min, max).toDouble();
-          }
-
-          final bubbleLeft = position.dx;
-          final bubbleTop = position.dy;
-          final bubbleRight = position.dx + size.width;
-
-          final reactionWidth = reactionHorizontalPadding +
-              (_messengerReactions.length * reactionItemWidth) +
-              reactionMoreGap +
-              reactionMoreWidth +
-              reactionHorizontalPadding;
-
-          final bottomLimit = screenSize.height - safeBottom - 8;
-          final minCloneTop = safeTop + 8 + reactionHeight + reactionGap;
-          final maxCloneTop = bottomLimit - menuHeight - menuGap - size.height;
-
-          double cloneTop;
-          if (maxCloneTop >= minCloneTop) {
-            cloneTop = safeClamp(
-              bubbleTop - 8,
-              minCloneTop,
-              maxCloneTop,
-            );
-          } else {
-            cloneTop = safeClamp(
-              bubbleTop - 8,
-              minCloneTop,
-              bottomLimit - size.height,
-            );
-          }
-
-          final reactionTop = cloneTop - reactionHeight - reactionGap;
-          double menuTop = cloneTop + size.height + menuGap;
-          if (menuTop + menuHeight > bottomLimit) {
-            menuTop = safeClamp(
-              bottomLimit - menuHeight,
-              reactionTop + reactionHeight + reactionGap + 2,
-              bottomLimit - menuHeight,
-            );
-          }
-
-          final popupAreaWidth = screenSize.width - (edgePadding * 2);
-          final cloneLeft = edgePadding;
-          final cloneRight = screenSize.width - edgePadding;
-
-          final reactionLeft = safeClamp(
-            message.isMe ? cloneRight - reactionWidth : cloneLeft,
-            edgePadding,
-            screenSize.width - reactionWidth - edgePadding,
-          );
-
-          final menuLeft = safeClamp(
-            message.isMe ? cloneRight - menuWidth : cloneLeft,
-            edgePadding,
-            screenSize.width - menuWidth - edgePadding,
-          );
-
-          int? hitTestReaction(Offset globalPosition) {
-            final localX = globalPosition.dx - reactionLeft - reactionHorizontalPadding;
-            final localY = globalPosition.dy - reactionTop - 6;
-            if (localY < -22 || localY > reactionHeight + 14) return null;
-
-            final index = (localX / reactionItemWidth).floor();
-            if (index < 0 || index >= _messengerReactions.length) return null;
-            return index;
-          }
-
-          Offset reactionCenterFor(int index) {
-            return Offset(
-              reactionLeft + reactionHorizontalPadding + (index * reactionItemWidth) + (reactionItemWidth / 2),
-              reactionTop + reactionHeight / 2,
-            );
-          }
-
-          void updateHover(Offset globalPosition) {
-            final next = hitTestReaction(globalPosition);
-            if (next != hoveredReactionIndex) {
-              AppHaptics.selection();
-              dialogSetState(() => hoveredReactionIndex = next);
+            double safeClamp(double value, double min, double max) {
+              if (max < min) return min;
+              return value.clamp(min, max).toDouble();
             }
-          }
 
-          void selectReactionIndex(int index) {
-            final emoji = _messengerReactions[index];
-            AppHaptics.selection();
-            _applyReaction(message, emoji, reactionCenterFor(index));
-            Navigator.pop(context);
-          }
+            final bubbleLeft = position.dx;
+            final bubbleTop = position.dy;
+            final bubbleRight = position.dx + size.width;
 
-          Widget menuTile({
-            required IconData icon,
-            required String title,
-            required VoidCallback onTap,
-            Color? color,
-            bool topDivider = false,
-          }) {
-            final itemColor = color ?? Colors.white;
+            final reactionWidth =
+                reactionHorizontalPadding +
+                (_messengerReactions.length * reactionItemWidth) +
+                reactionMoreGap +
+                reactionMoreWidth +
+                reactionHorizontalPadding;
 
-            return Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (topDivider)
-                  Container(
-                    height: 1,
-                    margin: const EdgeInsets.fromLTRB(18, 6, 18, 6),
-                    color: Colors.white.withOpacity(0.13),
+            final bottomLimit = screenSize.height - safeBottom - 8;
+            final minCloneTop = safeTop + 8 + reactionHeight + reactionGap;
+            final maxCloneTop =
+                bottomLimit - menuHeight - menuGap - size.height;
+
+            double cloneTop;
+            if (maxCloneTop >= minCloneTop) {
+              cloneTop = safeClamp(bubbleTop - 8, minCloneTop, maxCloneTop);
+            } else {
+              cloneTop = safeClamp(
+                bubbleTop - 8,
+                minCloneTop,
+                bottomLimit - size.height,
+              );
+            }
+
+            final reactionTop = cloneTop - reactionHeight - reactionGap;
+            double menuTop = cloneTop + size.height + menuGap;
+            if (menuTop + menuHeight > bottomLimit) {
+              menuTop = safeClamp(
+                bottomLimit - menuHeight,
+                reactionTop + reactionHeight + reactionGap + 2,
+                bottomLimit - menuHeight,
+              );
+            }
+
+            final popupAreaWidth = screenSize.width - (edgePadding * 2);
+            final cloneLeft = edgePadding;
+            final cloneRight = screenSize.width - edgePadding;
+
+            final reactionLeft = safeClamp(
+              message.isMe ? cloneRight - reactionWidth : cloneLeft,
+              edgePadding,
+              screenSize.width - reactionWidth - edgePadding,
+            );
+
+            final menuLeft = safeClamp(
+              message.isMe ? cloneRight - menuWidth : cloneLeft,
+              edgePadding,
+              screenSize.width - menuWidth - edgePadding,
+            );
+
+            int? hitTestReaction(Offset globalPosition) {
+              final localX =
+                  globalPosition.dx - reactionLeft - reactionHorizontalPadding;
+              final localY = globalPosition.dy - reactionTop - 6;
+              if (localY < -22 || localY > reactionHeight + 14) return null;
+
+              final index = (localX / reactionItemWidth).floor();
+              if (index < 0 || index >= _messengerReactions.length) return null;
+              return index;
+            }
+
+            Offset reactionCenterFor(int index) {
+              return Offset(
+                reactionLeft +
+                    reactionHorizontalPadding +
+                    (index * reactionItemWidth) +
+                    (reactionItemWidth / 2),
+                reactionTop + reactionHeight / 2,
+              );
+            }
+
+            void updateHover(Offset globalPosition) {
+              final next = hitTestReaction(globalPosition);
+              if (next != hoveredReactionIndex) {
+                AppHaptics.selection();
+                dialogSetState(() => hoveredReactionIndex = next);
+              }
+            }
+
+            void selectReactionIndex(int index) {
+              final emoji = _messengerReactions[index];
+              AppHaptics.selection();
+              _applyReaction(message, emoji, reactionCenterFor(index));
+              Navigator.pop(context);
+            }
+
+            Widget menuTile({
+              required IconData icon,
+              required String title,
+              required VoidCallback onTap,
+              Color? color,
+              bool topDivider = false,
+            }) {
+              final itemColor = color ?? Colors.white;
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (topDivider)
+                    Container(
+                      height: 1,
+                      margin: const EdgeInsets.fromLTRB(18, 6, 18, 6),
+                      color: Colors.white.withValues(alpha: 0.13),
+                    ),
+                  Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: onTap,
+                      splashColor: Colors.white.withValues(alpha: 0.04),
+                      highlightColor: Colors.white.withValues(alpha: 0.03),
+                      child: SizedBox(
+                        height: 42,
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 22),
+                            Icon(icon, color: itemColor, size: 21),
+                            const SizedBox(width: 18),
+                            Text(
+                              title,
+                              style: TextStyle(
+                                color: itemColor,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w500,
+                                letterSpacing: -0.25,
+                                decoration: TextDecoration.none,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
                   ),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: onTap,
-                    splashColor: Colors.white.withOpacity(0.04),
-                    highlightColor: Colors.white.withOpacity(0.03),
-                    child: SizedBox(
-                      height: 42,
-                      child: Row(
+                ],
+              );
+            }
+
+            Widget reactionTray(double openValue) {
+              return GestureDetector(
+                onTap: () {},
+                onPanStart: (details) => updateHover(details.globalPosition),
+                onPanUpdate: (details) => updateHover(details.globalPosition),
+                onPanEnd: (_) {
+                  final index = hoveredReactionIndex;
+                  if (index != null) selectReactionIndex(index);
+                },
+                child: Transform.translate(
+                  offset: Offset(0, (1 - openValue) * 8),
+                  child: Transform.scale(
+                    scale: 0.92 + (0.08 * openValue),
+                    child: Opacity(
+                      opacity: openValue.clamp(0.0, 1.0).toDouble(),
+                      child: Stack(
+                        clipBehavior: Clip.none,
                         children: [
-                          const SizedBox(width: 22),
-                          Icon(icon, color: itemColor, size: 21),
-                          const SizedBox(width: 18),
-                          Text(
-                            title,
-                            style: TextStyle(
-                              color: itemColor,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              letterSpacing: -0.25,
-                              decoration: TextDecoration.none,
+                          Container(
+                            height: reactionHeight,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: reactionHorizontalPadding,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF1F2026)
+                                  .withValues(alpha: 0.97),
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(
+                                color: Colors.white.withValues(alpha: 0.06),
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.26),
+                                  blurRadius: 16,
+                                  offset: const Offset(0, 7),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ..._messengerReactions.asMap().entries.map((
+                                  entry,
+                                ) {
+                                  final index = entry.key;
+                                  final emoji = entry.value;
+                                  final selected =
+                                      _messageReactions[message.id] == emoji;
+                                  final hovered = hoveredReactionIndex == index;
+
+                                  return GestureDetector(
+                                    onTap: () => selectReactionIndex(index),
+                                    onTapDown: (_) {
+                                      AppHaptics.selection();
+                                      dialogSetState(
+                                        () => hoveredReactionIndex = index,
+                                      );
+                                    },
+                                    child: AnimatedContainer(
+                                      duration: const Duration(
+                                        milliseconds: 170,
+                                      ),
+                                      curve: Curves.easeOutBack,
+                                      width: 34,
+                                      height: 34,
+                                      alignment: Alignment.center,
+                                      transform: Matrix4.identity()
+                                        ..translate(0.0, hovered ? -13.0 : 0.0)
+                                        ..scale(
+                                          hovered
+                                              ? 1.26
+                                              : selected
+                                              ? 1.10
+                                              : 1.0,
+                                        ),
+                                      child: AnimatedRotation(
+                                        turns: hovered ? -0.018 : 0,
+                                        duration: const Duration(
+                                          milliseconds: 170,
+                                        ),
+                                        curve: Curves.easeOutBack,
+                                        child: AnimatedScale(
+                                          scale: hovered ? 1.04 : 1.0,
+                                          duration: const Duration(
+                                            milliseconds: 170,
+                                          ),
+                                          curve: Curves.easeOutBack,
+                                          child: Text(
+                                            emoji,
+                                            style: const TextStyle(
+                                              fontSize: 22,
+                                              height: 1,
+                                              decoration: TextDecoration.none,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }),
+                                const SizedBox(width: reactionMoreGap),
+                                GestureDetector(
+                                  onTap: () {
+                                    Navigator.pop(context);
+                                    _openFullEmojiReactionPicker(message);
+                                  },
+                                  child: Container(
+                                    width: reactionMoreWidth,
+                                    height: reactionMoreWidth,
+                                    alignment: Alignment.center,
+                                    decoration: const BoxDecoration(
+                                      color: Color(0xFF44454D),
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: const Icon(
+                                      Icons.keyboard_arrow_down_rounded,
+                                      color: Colors.white,
+                                      size: 26,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Positioned(
+                            left: message.isMe ? null : 24,
+                            right: message.isMe ? 24 : null,
+                            bottom: -4,
+                            child: Transform.rotate(
+                              angle: math.pi / 4,
+                              child: Container(
+                                width: 10,
+                                height: 10,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF1F2026)
+                                      .withValues(alpha: 0.97),
+                                  borderRadius: BorderRadius.circular(2),
+                                ),
+                              ),
                             ),
                           ),
                         ],
@@ -2016,365 +2091,253 @@ void _openReactionPicker(
                     ),
                   ),
                 ),
-              ],
-            );
-          }
+              );
+            }
 
-          Widget reactionTray(double openValue) {
             return GestureDetector(
-              onTap: () {},
+              behavior: HitTestBehavior.opaque,
+              onTap: () => Navigator.pop(context),
               onPanStart: (details) => updateHover(details.globalPosition),
               onPanUpdate: (details) => updateHover(details.globalPosition),
               onPanEnd: (_) {
                 final index = hoveredReactionIndex;
                 if (index != null) selectReactionIndex(index);
               },
-              child: Transform.translate(
-                offset: Offset(0, (1 - openValue) * 8),
-                child: Transform.scale(
-                  scale: 0.92 + (0.08 * openValue),
-                  child: Opacity(
-                    opacity: openValue.clamp(0.0, 1.0).toDouble(),
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Container(
-                          height: reactionHeight,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: reactionHorizontalPadding,
-                            vertical: 6,
-                          ),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF1F2026).withOpacity(0.97),
-                            borderRadius: BorderRadius.circular(28),
-                            border: Border.all(
-                              color: Colors.white.withOpacity(0.06),
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.26),
-                                blurRadius: 16,
-                                offset: const Offset(0, 7),
-                              ),
-                            ],
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              ..._messengerReactions.asMap().entries.map((entry) {
-                                final index = entry.key;
-                                final emoji = entry.value;
-                                final selected = _messageReactions[message.id] == emoji;
-                                final hovered = hoveredReactionIndex == index;
-
-                                return GestureDetector(
-                                  onTap: () => selectReactionIndex(index),
-                                  onTapDown: (_) {
-                                    AppHaptics.selection();
-                                    dialogSetState(() => hoveredReactionIndex = index);
-                                  },
-                                  child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 170),
-                                    curve: Curves.easeOutBack,
-                                    width: 34,
-                                    height: 34,
-                                    alignment: Alignment.center,
-                                    transform: Matrix4.identity()
-                                      ..translate(0.0, hovered ? -13.0 : 0.0)
-                                      ..scale(
-                                        hovered
-                                            ? 1.26
-                                            : selected
-                                                ? 1.10
-                                                : 1.0,
-                                      ),
-                                    child: AnimatedRotation(
-                                      turns: hovered ? -0.018 : 0,
-                                      duration: const Duration(milliseconds: 170),
-                                      curve: Curves.easeOutBack,
-                                      child: AnimatedScale(
-                                        scale: hovered ? 1.04 : 1.0,
-                                        duration: const Duration(milliseconds: 170),
-                                        curve: Curves.easeOutBack,
-                                        child: Text(
-                                          emoji,
-                                          style: const TextStyle(
-                                            fontSize: 22,
-                                            height: 1,
-                                            decoration: TextDecoration.none,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }),
-                              const SizedBox(width: reactionMoreGap),
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.pop(context);
-                                  _openFullEmojiReactionPicker(message);
-                                },
-                                child: Container(
-                                  width: reactionMoreWidth,
-                                  height: reactionMoreWidth,
-                                  alignment: Alignment.center,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFF44454D),
-                                    shape: BoxShape.circle,
-                                  ),
-                                  child: const Icon(
-                                    Icons.keyboard_arrow_down_rounded,
-                                    color: Colors.white,
-                                    size: 26,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Positioned(
-                        left: message.isMe ? null : 24,
-                        right: message.isMe ? 24 : null,
-                        bottom: -4,
-                        child: Transform.rotate(
-                         angle: math.pi / 4,
-                          child: Container(
-                        width: 10,
-                       height: 10,
-                       decoration: BoxDecoration(
-                       color: const Color(0xFF1F2026).withOpacity(0.97),
-                       borderRadius: BorderRadius.circular(2),
-                       ),
-                     ),
-                   ),
-                 ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            );
-          }
-
-          return GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onTap: () => Navigator.pop(context),
-            onPanStart: (details) => updateHover(details.globalPosition),
-            onPanUpdate: (details) => updateHover(details.globalPosition),
-            onPanEnd: (_) {
-              final index = hoveredReactionIndex;
-              if (index != null) selectReactionIndex(index);
-            },
-            child: Material(
-              color: Colors.transparent,
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0, end: 1),
-                duration: const Duration(milliseconds: 185),
-                curve: Curves.easeOutBack,
-                builder: (context, value, child) {
-                  return Stack(
-                    children: [
-                      Positioned.fill(
-                        child: BackdropFilter(
-                          filter: ui.ImageFilter.blur(
-                            sigmaX: 6 * value,
-                            sigmaY: 6 * value,
-                          ),
-                          child: Container(
-                            color: Colors.black.withOpacity(0.40 * value),
-                          ),
-                        ),
-                      ),
-                      Opacity(
-                        opacity: value.clamp(0.0, 1.0).toDouble(),
-                        child: Transform.translate(
-                          offset: Offset(0, 8 * (1 - value)),
-                          child: Transform.scale(
-                            scale: 0.985 + (0.015 * value),
-                            alignment: message.isMe
-                                ? Alignment.centerRight
-                                : Alignment.centerLeft,
-                            child: child,
-                          ),
-                        ),
-                      ),
-                    ],
-                  );
-                },
+              child: Material(
+                color: Colors.transparent,
                 child: TweenAnimationBuilder<double>(
                   tween: Tween(begin: 0, end: 1),
                   duration: const Duration(milliseconds: 185),
                   curve: Curves.easeOutBack,
-                  builder: (context, openValue, _) {
+                  builder: (context, value, child) {
                     return Stack(
-                      clipBehavior: Clip.none,
                       children: [
-                        Positioned(
-                          left: cloneLeft,
-                          top: cloneTop,
-                          width: popupAreaWidth,
-                          child: IgnorePointer(
-                            child: Material(
-                              color: Colors.transparent,
-                              child: Transform.translate(
-                                offset: Offset(0, (1 - openValue) * 10),
-                                child: Transform.scale(
-                                  scale: 0.985 + (0.015 * openValue),
-                                  alignment: message.isMe
-                                      ? Alignment.centerRight
-                                      : Alignment.centerLeft,
-                                  child: Align(
-                                    alignment: message.isMe
-                                        ? Alignment.centerRight
-                                        : Alignment.centerLeft,
-                                    child: ConstrainedBox(
-                                      constraints: BoxConstraints(
-                                        maxWidth: popupAreaWidth * 0.78,
-                                      ),
-                                      child: _MessageBubble(
-                                        message: message,
-                                        isDark: true,
-                                        isOnlyEmoji: _isOnlyEmoji(message.text),
-                                        compact: true,
-                                        onCallAction: () => _startCall(
-                                          message.callType ==
-                                              CallEntryType.video,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                        Positioned.fill(
+                          child: BackdropFilter(
+                            filter: ui.ImageFilter.blur(
+                              sigmaX: 6 * value,
+                              sigmaY: 6 * value,
+                            ),
+                            child: Container(
+                              color: Colors.black.withValues(
+                                alpha: 0.40 * value,
                               ),
                             ),
                           ),
                         ),
-
-                        Positioned(
-                          left: menuLeft,
-                          top: menuTop,
-                          child: GestureDetector(
-                            onTap: () {},
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.circular(24),
-                              child: BackdropFilter(
-                                filter: ui.ImageFilter.blur(sigmaX: 9, sigmaY: 9),
-                                child: Transform.translate(
-                                  offset: Offset(0, (1 - openValue) * 12),
-                                  child: Transform.scale(
-                                    scale: 0.96 + (0.04 * openValue),
-                                    alignment: Alignment.topCenter,
-                                    child: Container(
-                                      width: menuWidth,
-                                      padding: const EdgeInsets.symmetric(vertical: 12),
-                                      decoration: BoxDecoration(
-                                        color: const Color(0xFF151820).withOpacity(0.95),
-                                        borderRadius: BorderRadius.circular(24),
-                                        border: Border.all(
-                                          color: Colors.white.withOpacity(0.08),
-                                        ),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withOpacity(0.25),
-                                            blurRadius: 22,
-                                            offset: const Offset(0, 10),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          menuTile(
-                                            icon: Icons.reply_rounded,
-                                            title: 'Reply',
-                                            onTap: () {
-                                              Navigator.pop(context);
-                                              _replyTo(message);
-                                            },
-                                          ),
-                                          menuTile(
-                                          icon: message.type == MessageType.text
-                                           ? Icons.copy_rounded
-                                          : Icons.download_rounded,
-                                              title: message.type == MessageType.text
-                                                       ? 'Copy'
-                                                        : 'Save',
-                                                       onTap: () {
-                                               Navigator.pop(context);
-                                              if (message.type == MessageType.text) {
-                                             _copyMessage(message);
-                                                } else {
-                                               _saveMessage(message);
-                                               }
-                                               },
-                                              ),
-                                          menuTile(
-                                            icon: Icons.push_pin_outlined,
-                                            title: _pinnedMessageIds.contains(message.id)
-                                                ? 'Unpin'
-                                                : 'Pin',
-                                            onTap: () {
-                                              Navigator.pop(context);
-                                              _pinMessage(message);
-                                            },
-                                          ),
-                                          menuTile(
-                                            icon: Icons.redo_rounded,
-                                            title: 'Forward',
-                                            onTap: () {
-                                              Navigator.pop(context);
-                                              _forwardMessage(message);
-                                            },
-                                          ),
-                                          menuTile(
-                                            icon: Icons.delete_outline_rounded,
-                                            title: 'Delete',
-                                            color: const Color(0xFFFF4D4D),
-                                            onTap: () {
-                                              Navigator.pop(context);
-                                              _openDeleteMessageDialog(message);
-                                            },
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
+                        Opacity(
+                          opacity: value.clamp(0.0, 1.0).toDouble(),
+                          child: Transform.translate(
+                            offset: Offset(0, 8 * (1 - value)),
+                            child: Transform.scale(
+                              scale: 0.985 + (0.015 * value),
+                              alignment: message.isMe
+                                  ? Alignment.centerRight
+                                  : Alignment.centerLeft,
+                              child: child,
                             ),
                           ),
-                        ),
-
-                        // Reaction tray is intentionally last so it always stays
-                        // above the chat bubble and above the action menu.
-                        Positioned(
-                          left: reactionLeft,
-                          top: reactionTop,
-                          child: reactionTray(openValue),
                         ),
                       ],
                     );
                   },
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0, end: 1),
+                    duration: const Duration(milliseconds: 185),
+                    curve: Curves.easeOutBack,
+                    builder: (context, openValue, _) {
+                      return Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Positioned(
+                            left: cloneLeft,
+                            top: cloneTop,
+                            width: popupAreaWidth,
+                            child: IgnorePointer(
+                              child: Material(
+                                color: Colors.transparent,
+                                child: Transform.translate(
+                                  offset: Offset(0, (1 - openValue) * 10),
+                                  child: Transform.scale(
+                                    scale: 0.985 + (0.015 * openValue),
+                                    alignment: message.isMe
+                                        ? Alignment.centerRight
+                                        : Alignment.centerLeft,
+                                    child: Align(
+                                      alignment: message.isMe
+                                          ? Alignment.centerRight
+                                          : Alignment.centerLeft,
+                                      child: ConstrainedBox(
+                                        constraints: BoxConstraints(
+                                          maxWidth: popupAreaWidth * 0.78,
+                                        ),
+                                        child: _MessageBubble(
+                                          message: message,
+                                          isDark: true,
+                                          isOnlyEmoji: _isOnlyEmoji(
+                                            message.text,
+                                          ),
+                                          compact: true,
+                                          onCallAction: () => _startCall(
+                                            message.callType ==
+                                                CallEntryType.video,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          Positioned(
+                            left: menuLeft,
+                            top: menuTop,
+                            child: GestureDetector(
+                              onTap: () {},
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(24),
+                                child: BackdropFilter(
+                                  filter: ui.ImageFilter.blur(
+                                    sigmaX: 9,
+                                    sigmaY: 9,
+                                  ),
+                                  child: Transform.translate(
+                                    offset: Offset(0, (1 - openValue) * 12),
+                                    child: Transform.scale(
+                                      scale: 0.96 + (0.04 * openValue),
+                                      alignment: Alignment.topCenter,
+                                      child: Container(
+                                        width: menuWidth,
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 12,
+                                        ),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFF151820)
+                                              .withValues(alpha: 0.95),
+                                          borderRadius: BorderRadius.circular(
+                                            24,
+                                          ),
+                                          border: Border.all(
+                                            color: Colors.white.withValues(
+                                              alpha: 0.08,
+                                            ),
+                                          ),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(
+                                                alpha: 0.25,
+                                              ),
+                                              blurRadius: 22,
+                                              offset: const Offset(0, 10),
+                                            ),
+                                          ],
+                                        ),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            menuTile(
+                                              icon: Icons.reply_rounded,
+                                              title: 'Reply',
+                                              onTap: () {
+                                                Navigator.pop(context);
+                                                _replyTo(message);
+                                              },
+                                            ),
+                                            menuTile(
+                                              icon:
+                                                  message.type ==
+                                                      MessageType.text
+                                                  ? Icons.copy_rounded
+                                                  : Icons.download_rounded,
+                                              title:
+                                                  message.type ==
+                                                      MessageType.text
+                                                  ? 'Copy'
+                                                  : 'Save',
+                                              onTap: () {
+                                                Navigator.pop(context);
+                                                if (message.type ==
+                                                    MessageType.text) {
+                                                  _copyMessage(message);
+                                                } else {
+                                                  _saveMessage(message);
+                                                }
+                                              },
+                                            ),
+                                            menuTile(
+                                              icon: Icons.push_pin_outlined,
+                                              title:
+                                                  _pinnedMessageIds.contains(
+                                                    message.id,
+                                                  )
+                                                  ? 'Unpin'
+                                                  : 'Pin',
+                                              onTap: () {
+                                                Navigator.pop(context);
+                                                _pinMessage(message);
+                                              },
+                                            ),
+                                            menuTile(
+                                              icon: Icons.redo_rounded,
+                                              title: 'Forward',
+                                              onTap: () {
+                                                Navigator.pop(context);
+                                                _forwardMessage(message);
+                                              },
+                                            ),
+                                            menuTile(
+                                              icon:
+                                                  Icons.delete_outline_rounded,
+                                              title: 'Delete',
+                                              color: const Color(0xFFFF4D4D),
+                                              onTap: () {
+                                                Navigator.pop(context);
+                                                _openDeleteMessageDialog(
+                                                  message,
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+
+                          // Reaction tray is intentionally last so it always stays
+                          // above the chat bubble and above the action menu.
+                          Positioned(
+                            left: reactionLeft,
+                            top: reactionTop,
+                            child: reactionTray(openValue),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
                 ),
               ),
-            ),
-          );
-        },
-      );
-    },
-    transitionBuilder: (_, animation, __, child) {
-      return FadeTransition(
-        opacity: CurvedAnimation(
-          parent: animation,
-          curve: Curves.easeOutCubic,
-          reverseCurve: Curves.easeInCubic,
-        ),
-        child: child,
-      );
-    },
-  );
-}
-
+            );
+          },
+        );
+      },
+      transitionBuilder: (_, animation, _, child) {
+        return FadeTransition(
+          opacity: CurvedAnimation(
+            parent: animation,
+            curve: Curves.easeOutCubic,
+            reverseCurve: Curves.easeInCubic,
+          ),
+          child: child,
+        );
+      },
+    );
+  }
 
   void _openMoreMessageActions(ChatMessage message) {
     AppHaptics.medium();
@@ -2383,9 +2346,9 @@ void _openReactionPicker(
       context: context,
       barrierDismissible: true,
       barrierLabel: 'More actions',
-      barrierColor: Colors.black.withOpacity(0.55),
+      barrierColor: Colors.black.withValues(alpha: 0.55),
       transitionDuration: const Duration(milliseconds: 180),
-      pageBuilder: (_, __, ___) {
+      pageBuilder: (_, _, _) {
         final isDark = Theme.of(context).brightness == Brightness.dark;
         final menuColor = isDark ? const Color(0xFF242424) : Colors.white;
         final textColor = isDark ? Colors.white : Colors.black87;
@@ -2439,7 +2402,9 @@ void _openReactionPicker(
                         child: Column(
                           children: [
                             _ReactionActionTile(
-                              title: message.type == MessageType.text ? 'Copy text' : 'Save to phone',
+                              title: message.type == MessageType.text
+                                  ? 'Copy text'
+                                  : 'Save to phone',
                               icon: message.type == MessageType.text
                                   ? Icons.copy_rounded
                                   : Icons.download_rounded,
@@ -2503,7 +2468,7 @@ void _openReactionPicker(
           ),
         );
       },
-      transitionBuilder: (_, animation, __, child) {
+      transitionBuilder: (_, animation, _, child) {
         return FadeTransition(
           opacity: animation,
           child: ScaleTransition(
@@ -2572,24 +2537,28 @@ void _openReactionPicker(
                       emojiViewConfig: EmojiViewConfig(
                         columns: 8,
                         emojiSizeMax: 30,
-                        backgroundColor:
-                            isDark ? const Color(0xFF111827) : Colors.white,
+                        backgroundColor: isDark
+                            ? const Color(0xFF111827)
+                            : Colors.white,
                       ),
                       categoryViewConfig: CategoryViewConfig(
-                        backgroundColor:
-                            isDark ? const Color(0xFF111827) : Colors.white,
+                        backgroundColor: isDark
+                            ? const Color(0xFF111827)
+                            : Colors.white,
                         iconColor: const Color(0xFF94A3B8),
                         iconColorSelected: const Color(0xFF1877F2),
                         indicatorColor: const Color(0xFF1877F2),
                       ),
                       bottomActionBarConfig: BottomActionBarConfig(
                         enabled: false,
-                        backgroundColor:
-                            isDark ? const Color(0xFF111827) : Colors.white,
+                        backgroundColor: isDark
+                            ? const Color(0xFF111827)
+                            : Colors.white,
                       ),
                       searchViewConfig: SearchViewConfig(
-                        backgroundColor:
-                            isDark ? const Color(0xFF111827) : Colors.white,
+                        backgroundColor: isDark
+                            ? const Color(0xFF111827)
+                            : Colors.white,
                         buttonIconColor: const Color(0xFF1877F2),
                         hintText: 'Search emoji',
                       ),
@@ -2606,7 +2575,9 @@ void _openReactionPicker(
 
     controller.dispose();
 
-    if (selectedEmoji == null || selectedEmoji.trim().isEmpty) return;
+    if (!mounted || selectedEmoji == null || selectedEmoji.trim().isEmpty) {
+      return;
+    }
 
     AppHaptics.selection();
 
@@ -2640,10 +2611,7 @@ void _openReactionPicker(
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -2674,10 +2642,7 @@ void _openReactionPicker(
       debugPrint('PICK IMAGE ERROR: $e');
 
       if (!mounted) return;
-      _showMessengerPop(
-        'Could not send photo',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not send photo', icon: Icons.error_rounded);
     } finally {
       if (mounted) {
         setState(() {
@@ -2709,10 +2674,7 @@ void _openReactionPicker(
     final conversationId = int.tryParse(widget.chat.id);
 
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -2745,10 +2707,7 @@ void _openReactionPicker(
       debugPrint('PICK MULTIPLE IMAGES ERROR: $e');
 
       if (!mounted) return;
-      _showMessengerPop(
-        'Could not send photos',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not send photos', icon: Icons.error_rounded);
     } finally {
       if (mounted) {
         setState(() {
@@ -2779,10 +2738,7 @@ void _openReactionPicker(
     final conversationId = int.tryParse(widget.chat.id);
 
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -2818,10 +2774,7 @@ void _openReactionPicker(
       debugPrint('PICK VIDEO ERROR: $e');
 
       if (!mounted) return;
-      _showMessengerPop(
-        'Could not send video',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not send video', icon: Icons.error_rounded);
     } finally {
       if (mounted) {
         setState(() {
@@ -2830,8 +2783,6 @@ void _openReactionPicker(
       }
     }
   }
-
-
 
   Future<void> _showMessengerMediaSheet() async {
     // Messenger rule:
@@ -2854,10 +2805,7 @@ void _openReactionPicker(
     final conversationId = int.tryParse(widget.chat.id);
 
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -2876,10 +2824,7 @@ void _openReactionPicker(
       debugPrint('MESSENGER GALLERY PICKER ERROR: $e');
 
       if (!mounted) return;
-      _showMessengerPop(
-        'Could not open gallery',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not open gallery', icon: Icons.error_rounded);
       return;
     }
 
@@ -3014,9 +2959,7 @@ void _openReactionPicker(
       return;
     }
 
-    final pickedFiles = await FilePicker.pickFiles(
-      type: FileType.media,
-    );
+    final pickedFiles = await FilePicker.pickFiles(type: FileType.media);
 
     if (pickedFiles.isEmpty) return;
 
@@ -3026,20 +2969,14 @@ void _openReactionPicker(
         .toList();
 
     if (selectedFiles.isEmpty) {
-      _showMessengerPop(
-        'No media selected',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('No media selected', icon: Icons.error_rounded);
       return;
     }
 
     final conversationId = int.tryParse(widget.chat.id);
 
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -3164,9 +3101,7 @@ void _openReactionPicker(
       return;
     }
 
-    final pickedFiles = await FilePicker.pickFiles(
-      type: FileType.any,
-    );
+    final pickedFiles = await FilePicker.pickFiles(type: FileType.any);
 
     if (pickedFiles.isEmpty) return;
 
@@ -3175,20 +3110,14 @@ void _openReactionPicker(
         .toList();
 
     if (selectedFiles.isEmpty) {
-      _showMessengerPop(
-        'No file selected',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('No file selected', icon: Icons.error_rounded);
       return;
     }
 
     final conversationId = int.tryParse(widget.chat.id);
 
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
       return;
     }
 
@@ -3213,10 +3142,7 @@ void _openReactionPicker(
       debugPrint('PICK MULTIPLE FILES ERROR: $e');
 
       if (!mounted) return;
-      _showMessengerPop(
-        'Could not send files',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Could not send files', icon: Icons.error_rounded);
     }
   }
 
@@ -3287,10 +3213,7 @@ void _openReactionPicker(
 
     final conversationId = int.tryParse(widget.chat.id);
     if (conversationId == null) {
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+      _showMessengerPop('Conversation is not ready', icon: Icons.error_rounded);
       setState(() {
         _recordDuration = Duration.zero;
         _currentRecordPath = null;
@@ -3334,154 +3257,146 @@ void _openReactionPicker(
     });
   }
 
-Future<void> _startCall(bool isVideo) async {
-  if (_isStartingCall) return;
+  Future<void> _startCall(bool isVideo) async {
+    if (_isStartingCall) return;
 
-  // Safety guard: group conversations must use the modular group-call flow.
-  if (widget.chat.isGroup) {
-    _showMessengerPop(
-      'Open the group chat to start a group call',
-      icon: Icons.groups_rounded,
-    );
-    return;
-  }
-
-  if (_isBlockedForMessaging()) {
-    _showBlockedNotice();
-    return;
-  }
-
-  setState(() {
-    _isStartingCall = true;
-  });
-
-  try {
-    final currentUserId =
-        ((await ApiClient.storage.read(key: 'user_id')) ?? '').trim();
-
-    final storedUserName =
-        (await ApiClient.storage.read(key: 'user_name'))?.trim();
-    final storedFullName =
-        (await ApiClient.storage.read(key: 'full_name'))?.trim();
-
-    final currentUserName = storedUserName?.isNotEmpty == true
-        ? storedUserName!
-        : storedFullName?.isNotEmpty == true
-            ? storedFullName!
-            : 'You';
-
-    final storedUserAvatar =
-        (await ApiClient.storage.read(key: 'user_avatar'))?.trim();
-    final storedProfilePicture =
-        (await ApiClient.storage.read(key: 'profile_picture'))?.trim();
-
-    final currentUserAvatar = storedUserAvatar?.isNotEmpty == true
-        ? storedUserAvatar!
-        : storedProfilePicture ?? '';
-
-    if (currentUserId.isEmpty) {
-      debugPrint('CALL ERROR: currentUserId missing');
+    // Safety guard: group conversations must use the modular group-call flow.
+    if (widget.chat.isGroup) {
       _showMessengerPop(
-        'User not ready',
-        icon: Icons.error_rounded,
+        'Open the group chat to start a group call',
+        icon: Icons.groups_rounded,
       );
       return;
     }
 
-    final conversationId = int.tryParse(widget.chat.id);
-
-    if (conversationId == null) {
-      debugPrint('CALL ERROR: invalid conversation id ${widget.chat.id}');
-      _showMessengerPop(
-        'Conversation is not ready',
-        icon: Icons.error_rounded,
-      );
+    if (_isBlockedForMessaging()) {
+      _showBlockedNotice();
       return;
     }
 
-    final latestChat = await _latestChatForBlock(
-      currentUserId: currentUserId,
-    );
+    setState(() {
+      _isStartingCall = true;
+    });
 
-    String? receiverId;
+    try {
+      final currentUserId =
+          ((await ApiClient.storage.read(key: 'user_id')) ?? '').trim();
 
-    for (final member in latestChat.members) {
-      final memberId = member.id.toString().trim();
+      final storedUserName = (await ApiClient.storage.read(key: 'user_name'))
+          ?.trim();
+      final storedFullName = (await ApiClient.storage.read(key: 'full_name'))
+          ?.trim();
 
-      if (memberId.isEmpty) continue;
+      final currentUserName = storedUserName?.isNotEmpty == true
+          ? storedUserName!
+          : storedFullName?.isNotEmpty == true
+          ? storedFullName!
+          : 'You';
 
-      if (memberId != currentUserId) {
-        receiverId = memberId;
-        break;
+      final storedUserAvatar = (await ApiClient.storage.read(
+        key: 'user_avatar',
+      ))?.trim();
+      final storedProfilePicture = (await ApiClient.storage.read(
+        key: 'profile_picture',
+      ))?.trim();
+
+      final currentUserAvatar = storedUserAvatar?.isNotEmpty == true
+          ? storedUserAvatar!
+          : storedProfilePicture ?? '';
+
+      if (currentUserId.isEmpty) {
+        debugPrint('CALL ERROR: currentUserId missing');
+        _showMessengerPop('User not ready', icon: Icons.error_rounded);
+        return;
+      }
+
+      final conversationId = int.tryParse(widget.chat.id);
+
+      if (conversationId == null) {
+        debugPrint('CALL ERROR: invalid conversation id ${widget.chat.id}');
+        _showMessengerPop(
+          'Conversation is not ready',
+          icon: Icons.error_rounded,
+        );
+        return;
+      }
+
+      final latestChat = await _latestChatForBlock(
+        currentUserId: currentUserId,
+      );
+
+      String? receiverId;
+
+      for (final member in latestChat.members) {
+        final memberId = member.id.toString().trim();
+
+        if (memberId.isEmpty) continue;
+
+        if (memberId != currentUserId) {
+          receiverId = memberId;
+          break;
+        }
+      }
+
+      debugPrint('======================');
+      debugPrint('CURRENT USER: $currentUserId');
+      debugPrint('RECEIVER: $receiverId');
+      debugPrint('CONVERSATION: $conversationId');
+      debugPrint('CHAT MEMBERS: ${latestChat.members.length}');
+      debugPrint('======================');
+
+      if (receiverId == null || receiverId.trim().isEmpty) {
+        debugPrint('CALL ERROR: receiver id not found');
+        _showMessengerPop('Receiver not found', icon: Icons.error_rounded);
+        return;
+      }
+
+      if (!mounted) return;
+
+      // IMPORTANT:
+      // ChatDetailScreen does NOT:
+      //   1. create the backend call directly
+      //   2. connect /ws/call/<conversationId>/
+      //   3. create a call id
+      //
+      // CallScreen -> CallProvider owns the complete outgoing call transaction:
+      // backend call creation -> server call id -> signaling socket -> WebRTC.
+      await Navigator.push<void>(
+        context,
+        MaterialPageRoute(
+          builder: (_) => CallScreen(
+            name: _chatDisplayName(),
+            avatarUrl: _resolvedChatAvatarUrl(),
+            isVideoCall: isVideo,
+            chat: latestChat,
+            currentUserId: currentUserId,
+            currentUserName: currentUserName,
+            currentUserAvatar: currentUserAvatar,
+            receiverId: receiverId!,
+            isCaller: true,
+            conversationId: conversationId.toString(),
+            callId: null,
+          ),
+        ),
+      );
+    } catch (e, stack) {
+      debugPrint('OPEN CALL SCREEN ERROR: $e');
+      debugPrint(stack.toString());
+
+      if (!mounted) return;
+
+      _showMessengerPop('Could not start call', icon: Icons.error_rounded);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isStartingCall = false;
+        });
       }
     }
-
-    debugPrint('======================');
-    debugPrint('CURRENT USER: $currentUserId');
-    debugPrint('RECEIVER: $receiverId');
-    debugPrint('CONVERSATION: $conversationId');
-    debugPrint('CHAT MEMBERS: ${latestChat.members.length}');
-    debugPrint('======================');
-
-    if (receiverId == null || receiverId.trim().isEmpty) {
-      debugPrint('CALL ERROR: receiver id not found');
-      _showMessengerPop(
-        'Receiver not found',
-        icon: Icons.error_rounded,
-      );
-      return;
-    }
-
-    if (!mounted) return;
-
-    // IMPORTANT:
-    // ChatDetailScreen does NOT:
-    //   1. create the backend call directly
-    //   2. connect /ws/call/<conversationId>/
-    //   3. create a call id
-    //
-    // CallScreen -> CallProvider owns the complete outgoing call transaction:
-    // backend call creation -> server call id -> signaling socket -> WebRTC.
-    await Navigator.push<void>(
-      context,
-      MaterialPageRoute(
-        builder: (_) => CallScreen(
-          name: _chatDisplayName(),
-          avatarUrl: _resolvedChatAvatarUrl(),
-          isVideoCall: isVideo,
-          chat: latestChat,
-          currentUserId: currentUserId,
-          currentUserName: currentUserName,
-          currentUserAvatar: currentUserAvatar,
-          receiverId: receiverId!,
-          isCaller: true,
-          conversationId: conversationId.toString(),
-          callId: null,
-        ),
-      ),
-    );
-  } catch (e, stack) {
-    debugPrint('OPEN CALL SCREEN ERROR: $e');
-    debugPrint(stack.toString());
-
-    if (!mounted) return;
-
-    _showMessengerPop(
-      'Could not start call',
-      icon: Icons.error_rounded,
-    );
-  } finally {
-    if (mounted) {
-      setState(() {
-        _isStartingCall = false;
-      });
-    }
   }
-}
 
   Future<void> _openProfile() async {
-    final currentUserId =
-        (await ApiClient.storage.read(key: 'user_id')) ?? '';
+    final currentUserId = (await ApiClient.storage.read(key: 'user_id')) ?? '';
 
     if (mounted && currentUserId.trim() != _currentUserId) {
       setState(() {
@@ -3503,10 +3418,10 @@ Future<void> _startCall(bool isVideo) async {
       return;
     }
 
-    final storedName =
-        (await ApiClient.storage.read(key: 'user_name')) ?? '';
-    final currentUserName =
-        storedName.trim().isEmpty ? 'You' : storedName.trim();
+    final storedName = (await ApiClient.storage.read(key: 'user_name')) ?? '';
+    final currentUserName = storedName.trim().isEmpty
+        ? 'You'
+        : storedName.trim();
     final currentUserAvatar =
         ((await ApiClient.storage.read(key: 'user_avatar')) ?? '').trim();
 
@@ -3537,10 +3452,7 @@ Future<void> _startCall(bool isVideo) async {
       if (groupBuilder != null) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(
-            builder: (routeContext) => groupBuilder(
-              routeContext,
-              result,
-            ),
+            builder: (routeContext) => groupBuilder(routeContext, result),
           ),
         );
       } else {
@@ -3674,7 +3586,6 @@ Future<void> _startCall(bool isVideo) async {
     );
   }
 
-
   Widget _buildCustomAppBar(bool isDark) {
     final chat = _freshChat();
     final chatAvatarUrl = _resolvedChatAvatarUrl();
@@ -3730,8 +3641,8 @@ Future<void> _startCall(bool isVideo) async {
                                 ? Text(
                                     chatDisplayName.trim().isNotEmpty
                                         ? chatDisplayName
-                                            .trim()[0]
-                                            .toUpperCase()
+                                              .trim()[0]
+                                              .toUpperCase()
                                         : 'U',
                                     style: const TextStyle(
                                       fontWeight: FontWeight.w800,
@@ -3795,17 +3706,12 @@ Future<void> _startCall(bool isVideo) async {
             ),
             IconButton(
               tooltip: 'Voice call',
-              onPressed:
-                  _isStartingCall ? null : () => _startCall(false),
-              icon: const Icon(
-                Icons.call_rounded,
-                color: Color(0xFF1877F2),
-              ),
+              onPressed: _isStartingCall ? null : () => _startCall(false),
+              icon: const Icon(Icons.call_rounded, color: Color(0xFF1877F2)),
             ),
             IconButton(
               tooltip: 'Video call',
-              onPressed:
-                  _isStartingCall ? null : () => _startCall(true),
+              onPressed: _isStartingCall ? null : () => _startCall(true),
               icon: const Icon(
                 Icons.videocam_rounded,
                 color: Color(0xFF1877F2),
@@ -3860,15 +3766,19 @@ Future<void> _startCall(bool isVideo) async {
                   child: const LinearProgressIndicator(
                     minHeight: 3,
                     backgroundColor: Color(0xFFE5E7EB),
-                    valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF1877F2)),
+                    valueColor: AlwaysStoppedAnimation<Color>(
+                      Color(0xFF1877F2),
+                    ),
                   ),
                 ),
               ),
             if (_replyingTo != null)
               Container(
                 margin: const EdgeInsets.only(bottom: 8, left: 8, right: 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
                 decoration: BoxDecoration(
                   color: isDark
                       ? const Color(0xFF1E293B)
@@ -3920,15 +3830,14 @@ Future<void> _startCall(bool isVideo) async {
                 ),
               ),
             if (_isRecording)
-  _MessengerRecordingComposer(
-    durationText: _recordText(_recordDuration),
-    onCancel: _cancelRecording,
-    onSend: () {
-      AppHaptics.medium();
-      _stopAndSendRecording();
-    },
-  )
-
+              _MessengerRecordingComposer(
+                durationText: _recordText(_recordDuration),
+                onCancel: _cancelRecording,
+                onSend: () {
+                  AppHaptics.medium();
+                  _stopAndSendRecording();
+                },
+              )
             else
               Row(
                 children: [
@@ -3995,8 +3904,9 @@ Future<void> _startCall(bool isVideo) async {
                               decoration: InputDecoration(
                                 hintText: 'Aa',
                                 isDense: true,
-                                contentPadding:
-                                    const EdgeInsets.symmetric(vertical: 9),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  vertical: 9,
+                                ),
                                 hintStyle: TextStyle(
                                   color: isDark
                                       ? const Color(0xFF94A3B8)
@@ -4149,9 +4059,7 @@ Future<void> _startCall(bool isVideo) async {
                 ),
                 child: const Text(
                   'Unblock',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.w800),
                 ),
               ),
             ],
@@ -4189,7 +4097,8 @@ Future<void> _startCall(bool isVideo) async {
           checkPlatformCompatibility: true,
           emojiViewConfig: EmojiViewConfig(
             columns: 8,
-            emojiSizeMax: 28 *
+            emojiSizeMax:
+                28 *
                 (foundation.defaultTargetPlatform == TargetPlatform.iOS
                     ? 1.20
                     : 1.0),
@@ -4241,7 +4150,8 @@ Future<void> _startCall(bool isVideo) async {
     required bool isDark,
   }) {
     final isSeenNow = _isMessageSeenNow(message);
-    final showAvatar = !message.isMe &&
+    final showAvatar =
+        !message.isMe &&
         (index == _messages.length - 1 ||
             _messages[index + 1].isMe ||
             _messages[index + 1].sentAt.day != message.sentAt.day);
@@ -4258,7 +4168,9 @@ Future<void> _startCall(bool isVideo) async {
               _dateLabel(message.sentAt),
               style: TextStyle(
                 fontSize: 12,
-                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B7280),
+                color: isDark
+                    ? const Color(0xFF94A3B8)
+                    : const Color(0xFF6B7280),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -4291,13 +4203,15 @@ Future<void> _startCall(bool isVideo) async {
                               children: [
                                 CircleAvatar(
                                   radius: 14,
-                                  backgroundImage: widget.chat.avatarUrl.trim().isNotEmpty
+                                  backgroundImage:
+                                      widget.chat.avatarUrl.trim().isNotEmpty
                                       ? NetworkImage(widget.chat.avatarUrl)
                                       : null,
                                   child: widget.chat.avatarUrl.trim().isEmpty
                                       ? Text(
                                           _chatDisplayName().isNotEmpty
-                                              ? _chatDisplayName()[0].toUpperCase()
+                                              ? _chatDisplayName()[0]
+                                                    .toUpperCase()
                                               : 'U',
                                           style: const TextStyle(fontSize: 12),
                                         )
@@ -4313,7 +4227,10 @@ Future<void> _startCall(bool isVideo) async {
                                       decoration: BoxDecoration(
                                         color: const Color(0xFF22C55E),
                                         shape: BoxShape.circle,
-                                        border: Border.all(color: Colors.white, width: 1.5),
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 1.5,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -4344,8 +4261,7 @@ Future<void> _startCall(bool isVideo) async {
                                   isDark: isDark,
                                   isOnlyEmoji: _isOnlyEmoji(message.text),
                                   onCallAction: () => _startCall(
-                                    message.callType ==
-                                        CallEntryType.video,
+                                    message.callType == CallEntryType.video,
                                   ),
                                 ),
                               ),
@@ -4355,25 +4271,45 @@ Future<void> _startCall(bool isVideo) async {
                                   left: message.isMe ? null : 4,
                                   bottom: -17,
                                   child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 2,
+                                    ),
                                     decoration: BoxDecoration(
-                                      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                      color: isDark
+                                          ? const Color(0xFF1E293B)
+                                          : Colors.white,
                                       borderRadius: BorderRadius.circular(999),
                                       border: Border.all(
-                                        color: isDark ? const Color(0xFF334155) : const Color(0xFFE5E7EB),
+                                        color: isDark
+                                            ? const Color(0xFF334155)
+                                            : const Color(0xFFE5E7EB),
                                       ),
                                       boxShadow: [
-                                        BoxShadow(color: Colors.black.withOpacity(0.10), blurRadius: 8),
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.10,
+                                          ),
+                                          blurRadius: 8,
+                                        ),
                                       ],
                                     ),
                                     child: TweenAnimationBuilder<double>(
                                       tween: Tween(begin: 0.35, end: 1),
-                                      duration: const Duration(milliseconds: 440),
+                                      duration: const Duration(
+                                        milliseconds: 440,
+                                      ),
                                       curve: Curves.elasticOut,
                                       builder: (context, value, child) {
-                                        return Transform.scale(scale: value, child: child);
+                                        return Transform.scale(
+                                          scale: value,
+                                          child: child,
+                                        );
                                       },
-                                      child: Text(reaction, style: const TextStyle(fontSize: 16)),
+                                      child: Text(
+                                        reaction,
+                                        style: const TextStyle(fontSize: 16),
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -4404,8 +4340,8 @@ Future<void> _startCall(bool isVideo) async {
                                     color: isSeenNow
                                         ? const Color(0xFF1877F2)
                                         : (isDark
-                                            ? const Color(0xFF94A3B8)
-                                            : const Color(0xFF6B7280)),
+                                              ? const Color(0xFF94A3B8)
+                                              : const Color(0xFF6B7280)),
                                   ),
                                 ],
                               ],
@@ -4438,14 +4374,16 @@ Future<void> _startCall(bool isVideo) async {
           child: AnimatedSlide(
             duration: const Duration(milliseconds: 220),
             curve: Curves.easeInCubic,
-            offset: isDeleting ? Offset(message.isMe ? 0.18 : -0.18, 0) : Offset.zero,
+            offset: isDeleting
+                ? Offset(message.isMe ? 0.18 : -0.18, 0)
+                : Offset.zero,
             child: isDeleting ? const SizedBox.shrink() : messageRow,
           ),
         ),
       ),
     );
   }
-   
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<ChatProvider>();
@@ -4459,8 +4397,8 @@ Future<void> _startCall(bool isVideo) async {
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-  final bg = isDark ? const Color(0xFF0B1220) : const Color(0xFFF5F5F5);
-  final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
+    final bg = isDark ? const Color(0xFF0B1220) : const Color(0xFFF5F5F5);
+    final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
 
     return Scaffold(
       backgroundColor: bg,
@@ -4525,14 +4463,14 @@ Future<void> _startCall(bool isVideo) async {
                       curve: Curves.easeOutCubic,
                       child: (_showEmoji && keyboardHeight == 0)
                           ? AnimatedSlide(
-                          offset: Offset.zero,
-                          duration: const Duration(milliseconds: 260),
-                          curve: Curves.easeOutCubic,
-                          child: AnimatedOpacity(
-                            opacity: 1,
-                            duration: const Duration(milliseconds: 180),
-                            child: _buildEmojiPicker(isDark),
-                          ),
+                              offset: Offset.zero,
+                              duration: const Duration(milliseconds: 260),
+                              curve: Curves.easeOutCubic,
+                              child: AnimatedOpacity(
+                                opacity: 1,
+                                duration: const Duration(milliseconds: 180),
+                                child: _buildEmojiPicker(isDark),
+                              ),
                             )
                           : const SizedBox(height: 0),
                     );
@@ -4541,7 +4479,6 @@ Future<void> _startCall(bool isVideo) async {
               ],
             ),
           ),
-          
         ],
       ),
     );
@@ -4587,14 +4524,10 @@ class _DeleteChoiceTile extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.12),
+                color: iconColor.withValues(alpha: 0.12),
                 shape: BoxShape.circle,
               ),
-              child: Icon(
-                icon,
-                color: iconColor,
-                size: 22,
-              ),
+              child: Icon(icon, color: iconColor, size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -4631,9 +4564,7 @@ class _DeleteChoiceTile extends StatelessWidget {
 class _MessengerCameraButton extends StatelessWidget {
   final VoidCallback onTap;
 
-  const _MessengerCameraButton({
-    required this.onTap,
-  });
+  const _MessengerCameraButton({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -4679,11 +4610,7 @@ class _MessengerPlainIcon extends StatelessWidget {
       child: SizedBox(
         width: 36,
         height: 36,
-        child: Icon(
-          icon,
-          color: const Color(0xFF1877F2),
-          size: size,
-        ),
+        child: Icon(icon, color: const Color(0xFF1877F2), size: size),
       ),
     );
   }
@@ -4693,10 +4620,7 @@ class _MessengerSendLikeButton extends StatelessWidget {
   final bool hasText;
   final VoidCallback onTap;
 
-  const _MessengerSendLikeButton({
-    required this.hasText,
-    required this.onTap,
-  });
+  const _MessengerSendLikeButton({required this.hasText, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -4704,10 +4628,7 @@ class _MessengerSendLikeButton extends StatelessWidget {
       duration: const Duration(milliseconds: 160),
       transitionBuilder: (child, animation) {
         return ScaleTransition(
-          scale: CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOutBack,
-          ),
+          scale: CurvedAnimation(parent: animation, curve: Curves.easeOutBack),
           child: child,
         );
       },
@@ -4786,9 +4707,7 @@ class _MessengerRecordingComposer extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  const Expanded(
-                    child: _MessengerRecordingWave(),
-                  ),
+                  const Expanded(child: _MessengerRecordingWave()),
                 ],
               ),
             ),
@@ -4858,7 +4777,7 @@ class _MessengerRecordingWaveState extends State<_MessengerRecordingWave> {
             margin: const EdgeInsets.symmetric(horizontal: 1.2),
             height: 5 + (22 * value),
             decoration: BoxDecoration(
-              color: const Color(0xFF1877F2).withOpacity(0.85),
+              color: const Color(0xFF1877F2).withValues(alpha: 0.85),
               borderRadius: BorderRadius.circular(999),
             ),
           ),
@@ -4962,8 +4881,9 @@ class _MessengerMicButtonState extends State<_MessengerMicButton> {
                 height: 36,
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
-                  color:
-                      _holding ? const Color(0xFF1877F2) : Colors.transparent,
+                  color: _holding
+                      ? const Color(0xFF1877F2)
+                      : Colors.transparent,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -4984,10 +4904,7 @@ class _LiveWaveform extends StatefulWidget {
   final bool isActive;
   final bool danger;
 
-  const _LiveWaveform({
-    required this.isActive,
-    required this.danger,
-  });
+  const _LiveWaveform({required this.isActive, required this.danger});
 
   @override
   State<_LiveWaveform> createState() => _LiveWaveformState();
@@ -5062,17 +4979,12 @@ class _LiveWaveformState extends State<_LiveWaveform> {
   }
 }
 
-
 class _MediaAlbumGrid extends StatelessWidget {
   final List<String> images;
   final bool isMe;
   final void Function(int index)? onTap;
 
-  const _MediaAlbumGrid({
-    required this.images,
-    required this.isMe,
-    this.onTap,
-  });
+  const _MediaAlbumGrid({required this.images, required this.isMe, this.onTap});
 
   static const double _gap = 2;
   static const double _width = 244;
@@ -5086,7 +4998,7 @@ class _MediaAlbumGrid extends StatelessWidget {
         height: 150,
         alignment: Alignment.center,
         decoration: BoxDecoration(
-          color: Colors.grey.withOpacity(0.22),
+          color: Colors.grey.withValues(alpha: 0.22),
           borderRadius: BorderRadius.circular(18),
         ),
         child: const Icon(Icons.photo_library_outlined),
@@ -5128,10 +5040,7 @@ class _MediaAlbumGrid extends StatelessWidget {
     if (total == 3) {
       return Row(
         children: [
-          Expanded(
-            flex: 2,
-            child: _imageTile(images[0], 0),
-          ),
+          Expanded(flex: 2, child: _imageTile(images[0], 0)),
           const SizedBox(width: _gap),
           Expanded(
             child: Column(
@@ -5163,13 +5072,7 @@ class _MediaAlbumGrid extends StatelessWidget {
             children: [
               Expanded(child: _imageTile(images[2], 2)),
               const SizedBox(width: _gap),
-              Expanded(
-                child: _imageTile(
-                  images[3],
-                  3,
-                  extraCount: extraCount,
-                ),
-              ),
+              Expanded(child: _imageTile(images[3], 3, extraCount: extraCount)),
             ],
           ),
         ),
@@ -5177,11 +5080,7 @@ class _MediaAlbumGrid extends StatelessWidget {
     );
   }
 
-  Widget _imageTile(
-    String path,
-    int index, {
-    int extraCount = 0,
-  }) {
+  Widget _imageTile(String path, int index, {int extraCount = 0}) {
     return GestureDetector(
       onTap: () => onTap?.call(index),
       child: Stack(
@@ -5190,7 +5089,7 @@ class _MediaAlbumGrid extends StatelessWidget {
           _buildImage(path),
           if (extraCount > 0)
             Container(
-              color: Colors.black.withOpacity(0.52),
+              color: Colors.black.withValues(alpha: 0.52),
               alignment: Alignment.center,
               child: Text(
                 '+$extraCount',
@@ -5209,17 +5108,18 @@ class _MediaAlbumGrid extends StatelessWidget {
 
   Widget _buildImage(String path) {
     final lower = path.toLowerCase().trim();
-    final isNetwork = lower.startsWith('http://') || lower.startsWith('https://');
+    final isNetwork =
+        lower.startsWith('http://') || lower.startsWith('https://');
 
     if (isNetwork) {
       return Image.network(
         path,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => _brokenImage(),
+        errorBuilder: (_, _, _) => _brokenImage(),
         loadingBuilder: (context, child, progress) {
           if (progress == null) return child;
           return Container(
-            color: Colors.grey.withOpacity(0.22),
+            color: Colors.grey.withValues(alpha: 0.22),
             alignment: Alignment.center,
             child: const SizedBox(
               width: 22,
@@ -5234,26 +5134,24 @@ class _MediaAlbumGrid extends StatelessWidget {
     return Image.file(
       File(path),
       fit: BoxFit.cover,
-      errorBuilder: (_, __, ___) => _brokenImage(),
+      errorBuilder: (_, _, _) => _brokenImage(),
     );
   }
 
   Widget _brokenImage() {
     return Container(
-      color: Colors.grey.withOpacity(0.25),
+      color: Colors.grey.withValues(alpha: 0.25),
       alignment: Alignment.center,
       child: const Icon(Icons.broken_image_rounded),
     );
   }
 }
 
-
 String _resolveMessagePhotoPath(String value) {
   final cleanValue = value.trim();
   if (cleanValue.isEmpty) return '';
 
-  if (cleanValue.startsWith('http://') ||
-      cleanValue.startsWith('https://')) {
+  if (cleanValue.startsWith('http://') || cleanValue.startsWith('https://')) {
     return cleanValue;
   }
 
@@ -5261,8 +5159,7 @@ String _resolveMessagePhotoPath(String value) {
     return Uri.parse(cleanValue).toFilePath();
   }
 
-  if (cleanValue.startsWith('/media/') ||
-      cleanValue.startsWith('media/')) {
+  if (cleanValue.startsWith('/media/') || cleanValue.startsWith('media/')) {
     final mediaBaseUrl = AppConfig.apiBaseUrl.replaceFirst('/api', '');
     return cleanValue.startsWith('/')
         ? '$mediaBaseUrl$cleanValue'
@@ -5281,10 +5178,7 @@ class _MessengerMessageMedia extends StatelessWidget {
   final ChatMessage message;
   final bool isDark;
 
-  const _MessengerMessageMedia({
-    required this.message,
-    required this.isDark,
-  });
+  const _MessengerMessageMedia({required this.message, required this.isDark});
 
   @override
   Widget build(BuildContext context) {
@@ -5295,10 +5189,7 @@ class _MessengerMessageMedia extends StatelessWidget {
     // album rendering because it detects each item's real media type.
     if (message.type == MessageType.mediaAlbum ||
         message.type == MessageType.video) {
-      return DynamicMessageMedia(
-        message: message,
-        isDark: isDark,
-      );
+      return DynamicMessageMedia(message: message, isDark: isDark);
     }
 
     // Keep the existing Messenger-style single-photo viewer.
@@ -5309,19 +5200,14 @@ class _MessengerMessageMedia extends StatelessWidget {
       }
     }
 
-    return DynamicMessageMedia(
-      message: message,
-      isDark: isDark,
-    );
+    return DynamicMessageMedia(message: message, isDark: isDark);
   }
 }
 
 class _MessengerPhotoGrid extends StatelessWidget {
   final List<String> photos;
 
-  const _MessengerPhotoGrid({
-    required this.photos,
-  });
+  const _MessengerPhotoGrid({required this.photos});
 
   void _openViewer(BuildContext context, int initialIndex) {
     Navigator.of(context).push(
@@ -5329,7 +5215,7 @@ class _MessengerPhotoGrid extends StatelessWidget {
         opaque: true,
         transitionDuration: const Duration(milliseconds: 220),
         reverseTransitionDuration: const Duration(milliseconds: 180),
-        pageBuilder: (_, animation, __) {
+        pageBuilder: (_, animation, _) {
           return FadeTransition(
             opacity: CurvedAnimation(
               parent: animation,
@@ -5346,23 +5232,16 @@ class _MessengerPhotoGrid extends StatelessWidget {
     );
   }
 
-  Widget _tile(
-    BuildContext context,
-    int index, {
-    int hiddenCount = 0,
-  }) {
+  Widget _tile(BuildContext context, int index, {int hiddenCount = 0}) {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => _openViewer(context, index),
       child: Stack(
         fit: StackFit.expand,
         children: [
-          _MessagePhoto(
-            path: photos[index],
-            fit: BoxFit.cover,
-          ),
+          _MessagePhoto(path: photos[index], fit: BoxFit.cover),
           if (hiddenCount > 0) ...[
-            Container(color: Colors.black.withOpacity(0.48)),
+            Container(color: Colors.black.withValues(alpha: 0.48)),
             Center(
               child: Text(
                 '+$hiddenCount',
@@ -5370,12 +5249,7 @@ class _MessengerPhotoGrid extends StatelessWidget {
                   color: Colors.white,
                   fontSize: 30,
                   fontWeight: FontWeight.w800,
-                  shadows: [
-                    Shadow(
-                      color: Colors.black54,
-                      blurRadius: 8,
-                    ),
-                  ],
+                  shadows: [Shadow(color: Colors.black54, blurRadius: 8)],
                 ),
               ),
             ),
@@ -5388,10 +5262,9 @@ class _MessengerPhotoGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final count = photos.length;
-    final maxWidth = math.min(
-      286.0,
-      MediaQuery.sizeOf(context).width * 0.72,
-    ).toDouble();
+    final maxWidth = math
+        .min(286.0, MediaQuery.sizeOf(context).width * 0.72)
+        .toDouble();
 
     if (count == 1) {
       return ClipRRect(
@@ -5420,10 +5293,7 @@ class _MessengerPhotoGrid extends StatelessWidget {
     } else if (count == 3) {
       grid = Row(
         children: [
-          Expanded(
-            flex: 6,
-            child: _tile(context, 0),
-          ),
+          Expanded(flex: 6, child: _tile(context, 0)),
           const SizedBox(width: gap),
           Expanded(
             flex: 4,
@@ -5456,13 +5326,7 @@ class _MessengerPhotoGrid extends StatelessWidget {
               children: [
                 Expanded(child: _tile(context, 2)),
                 const SizedBox(width: gap),
-                Expanded(
-                  child: _tile(
-                    context,
-                    3,
-                    hiddenCount: hiddenCount,
-                  ),
-                ),
+                Expanded(child: _tile(context, 3, hiddenCount: hiddenCount)),
               ],
             ),
           ),
@@ -5472,11 +5336,7 @@ class _MessengerPhotoGrid extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
-      child: SizedBox(
-        width: maxWidth,
-        height: gridHeight,
-        child: grid,
-      ),
+      child: SizedBox(width: maxWidth, height: gridHeight, child: grid),
     );
   }
 }
@@ -5485,10 +5345,7 @@ class _MessagePhoto extends StatelessWidget {
   final String path;
   final BoxFit fit;
 
-  const _MessagePhoto({
-    required this.path,
-    required this.fit,
-  });
+  const _MessagePhoto({required this.path, required this.fit});
 
   @override
   Widget build(BuildContext context) {
@@ -5500,9 +5357,7 @@ class _MessagePhoto extends StatelessWidget {
     if (resolvedPath.isEmpty) {
       return ColoredBox(
         color: placeholderColor,
-        child: const Center(
-          child: Icon(Icons.broken_image_rounded),
-        ),
+        child: const Center(child: Icon(Icons.broken_image_rounded)),
       );
     }
 
@@ -5530,11 +5385,9 @@ class _MessagePhoto extends StatelessWidget {
             ),
           );
         },
-        errorBuilder: (_, __, ___) => ColoredBox(
+        errorBuilder: (_, _, _) => ColoredBox(
           color: placeholderColor,
-          child: const Center(
-            child: Icon(Icons.broken_image_rounded),
-          ),
+          child: const Center(child: Icon(Icons.broken_image_rounded)),
         ),
       );
     }
@@ -5543,16 +5396,13 @@ class _MessagePhoto extends StatelessWidget {
       File(resolvedPath),
       fit: fit,
       filterQuality: FilterQuality.medium,
-      errorBuilder: (_, __, ___) => ColoredBox(
+      errorBuilder: (_, _, _) => ColoredBox(
         color: placeholderColor,
-        child: const Center(
-          child: Icon(Icons.broken_image_rounded),
-        ),
+        child: const Center(child: Icon(Icons.broken_image_rounded)),
       ),
     );
   }
 }
-
 
 class _ZoomableMessagePhoto extends StatelessWidget {
   final String path;
@@ -5575,7 +5425,6 @@ class _ZoomableMessagePhoto extends StatelessWidget {
   }
 }
 
-
 class _MessengerPhotoViewer extends StatefulWidget {
   final List<String> photos;
   final int initialIndex;
@@ -5586,8 +5435,7 @@ class _MessengerPhotoViewer extends StatefulWidget {
   });
 
   @override
-  State<_MessengerPhotoViewer> createState() =>
-      _MessengerPhotoViewerState();
+  State<_MessengerPhotoViewer> createState() => _MessengerPhotoViewerState();
 }
 
 class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
@@ -5666,7 +5514,7 @@ class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
         bytes,
         quality: 100,
         fileName: _fileNameForPhoto(currentPath),
-        androidRelativePath: 'Pictures/MessagingApp',
+
         skipIfExists: false,
       );
 
@@ -5788,7 +5636,7 @@ class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
                       begin: Alignment.topCenter,
                       end: Alignment.bottomCenter,
                       colors: [
-                        Colors.black.withOpacity(0.72),
+                        Colors.black.withValues(alpha: 0.72),
                         Colors.transparent,
                       ],
                     ),
@@ -5853,7 +5701,7 @@ class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
                         begin: Alignment.bottomCenter,
                         end: Alignment.topCenter,
                         colors: [
-                          Colors.black.withOpacity(0.78),
+                          Colors.black.withValues(alpha: 0.78),
                           Colors.transparent,
                         ],
                       ),
@@ -5862,7 +5710,7 @@ class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
                       scrollDirection: Axis.horizontal,
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       itemCount: widget.photos.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 7),
+                      separatorBuilder: (_, _) => const SizedBox(width: 7),
                       itemBuilder: (context, index) {
                         final selected = index == _currentIndex;
 
@@ -5882,10 +5730,7 @@ class _MessengerPhotoViewerState extends State<_MessengerPhotoViewer> {
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(10),
                               border: selected
-                                  ? Border.all(
-                                      color: Colors.white,
-                                      width: 2,
-                                    )
+                                  ? Border.all(color: Colors.white, width: 2)
                                   : null,
                             ),
                             child: ClipRRect(
@@ -5933,8 +5778,9 @@ class _MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final outgoingColor = const Color(0xFF1D4ED8);
-    final incomingColor =
-        isDark ? const Color(0xFF1E293B) : const Color(0xFFEFEFF4);
+    final incomingColor = isDark
+        ? const Color(0xFF1E293B)
+        : const Color(0xFFEFEFF4);
 
     final radius = BorderRadius.only(
       topLeft: const Radius.circular(18),
@@ -5952,7 +5798,7 @@ class _MessageBubble extends StatelessWidget {
         padding: const EdgeInsets.all(8),
         decoration: BoxDecoration(
           color: message.isMe
-              ? Colors.white.withOpacity(0.18)
+              ? Colors.white.withValues(alpha: 0.18)
               : (isDark ? const Color(0xFF111827) : Colors.white),
           borderRadius: BorderRadius.circular(12),
         ),
@@ -5992,10 +5838,7 @@ class _MessageBubble extends StatelessWidget {
               left: compact ? 0 : (message.isMe ? 50 : 0),
               right: compact ? 0 : (message.isMe ? 0 : 50),
             ),
-            child: Text(
-              message.text,
-              style: const TextStyle(fontSize: 42),
-            ),
+            child: Text(message.text, style: const TextStyle(fontSize: 42)),
           );
         }
 
@@ -6012,7 +5855,7 @@ class _MessageBubble extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (replyBlock != null) replyBlock,
+              ?replyBlock,
               Text(
                 message.text,
                 style: TextStyle(
@@ -6056,10 +5899,7 @@ class _MessageBubble extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 6),
                   child: replyBlock,
                 ),
-              _MessengerMessageMedia(
-                message: message,
-                isDark: isDark,
-              ),
+              _MessengerMessageMedia(message: message, isDark: isDark),
               if (message.text.trim().isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
@@ -6078,8 +5918,8 @@ class _MessageBubble extends StatelessWidget {
                         color: message.isMe
                             ? Colors.white
                             : isDark
-                                ? Colors.white
-                                : Colors.black87,
+                            ? Colors.white
+                            : Colors.black87,
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
                       ),
@@ -6109,10 +5949,7 @@ class _MessageBubble extends StatelessWidget {
                   child: replyBlock,
                 ),
 
-              _MessengerMessageMedia(
-                message: message,
-                isDark: isDark,
-              ),
+              _MessengerMessageMedia(message: message, isDark: isDark),
 
               if (message.text.trim().isNotEmpty)
                 Padding(
@@ -6123,9 +5960,7 @@ class _MessageBubble extends StatelessWidget {
                       vertical: 10,
                     ),
                     decoration: BoxDecoration(
-                      color: message.isMe
-                          ? outgoingColor
-                          : incomingColor,
+                      color: message.isMe ? outgoingColor : incomingColor,
                       borderRadius: radius,
                     ),
                     child: Text(
@@ -6134,8 +5969,8 @@ class _MessageBubble extends StatelessWidget {
                         color: message.isMe
                             ? Colors.white
                             : isDark
-                                ? Colors.white
-                                : Colors.black87,
+                            ? Colors.white
+                            : Colors.black87,
                         fontSize: 15,
                         fontWeight: FontWeight.w500,
                       ),
@@ -6150,11 +5985,11 @@ class _MessageBubble extends StatelessWidget {
         final isMissed = message.callAnswered == false;
         final title = isMissed
             ? (message.callType == CallEntryType.video
-                ? 'Missed video call'
-                : 'Missed audio call')
+                  ? 'Missed video call'
+                  : 'Missed audio call')
             : (message.callType == CallEntryType.video
-                ? 'Video call'
-                : 'Audio call');
+                  ? 'Video call'
+                  : 'Audio call');
 
         final subtitle = message.callDuration != null
             ? '${message.callDuration!.inSeconds} sec'
@@ -6169,7 +6004,7 @@ class _MessageBubble extends StatelessWidget {
           ),
           child: Column(
             children: [
-              if (replyBlock != null) replyBlock,
+              ?replyBlock,
               Row(
                 children: [
                   Container(
@@ -6328,7 +6163,9 @@ class _AudioBubbleState extends State<_AudioBubble> {
 
       setState(() {
         _duration =
-            duration ?? widget.message.audioDuration ?? const Duration(seconds: 1);
+            duration ??
+            widget.message.audioDuration ??
+            const Duration(seconds: 1);
         _loading = false;
       });
     } catch (e) {
@@ -6404,15 +6241,17 @@ class _AudioBubbleState extends State<_AudioBubble> {
 
     final progress = total.inMilliseconds == 0
         ? 0.0
-        : (_position.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0).toDouble();
+        : (_position.inMilliseconds / total.inMilliseconds)
+              .clamp(0.0, 1.0)
+              .toDouble();
 
     final visibleProgress = _dragging ? _dragProgress : progress;
 
     final Color bubbleColor = isMe
         ? const Color(0xFF7C3AED) // Messenger purple
         : isDark
-            ? const Color(0xFF2D2D2F)
-            : const Color(0xFFE5E5E7);
+        ? const Color(0xFF2D2D2F)
+        : const Color(0xFFE5E5E7);
 
     final Color playCircleColor = Colors.white;
 
@@ -6423,16 +6262,16 @@ class _AudioBubbleState extends State<_AudioBubble> {
     final Color activeWaveColor = Colors.white;
 
     final Color inactiveWaveColor = isMe
-        ? Colors.white.withOpacity(0.34)
+        ? Colors.white.withValues(alpha: 0.34)
         : isDark
-            ? Colors.white.withOpacity(0.30)
-            : Colors.black.withOpacity(0.25);
+        ? Colors.white.withValues(alpha: 0.30)
+        : Colors.black.withValues(alpha: 0.25);
 
     final Color durationColor = isMe
         ? Colors.white
         : isDark
-            ? Colors.white
-            : Colors.black87;
+        ? Colors.white
+        : Colors.black87;
 
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
@@ -6444,7 +6283,7 @@ class _AudioBubbleState extends State<_AudioBubble> {
         borderRadius: BorderRadius.circular(999),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.10),
+            color: Colors.black.withValues(alpha: 0.10),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -6561,10 +6400,36 @@ class _SmoothMessengerWaveformState extends State<_SmoothMessengerWaveform>
   double _lastDragValue = 0.0;
 
   static const List<double> _bars = [
-    0.28, 0.48, 0.36, 0.70, 0.45, 0.86, 0.56, 0.34,
-    0.76, 0.98, 0.62, 0.42, 0.88, 0.66, 0.40, 0.72,
-    0.94, 0.52, 0.32, 0.68, 0.82, 0.58, 0.44, 0.78,
-    0.92, 0.50, 0.36, 0.64, 0.84, 0.46,
+    0.28,
+    0.48,
+    0.36,
+    0.70,
+    0.45,
+    0.86,
+    0.56,
+    0.34,
+    0.76,
+    0.98,
+    0.62,
+    0.42,
+    0.88,
+    0.66,
+    0.40,
+    0.72,
+    0.94,
+    0.52,
+    0.32,
+    0.68,
+    0.82,
+    0.58,
+    0.44,
+    0.78,
+    0.92,
+    0.50,
+    0.36,
+    0.64,
+    0.84,
+    0.46,
   ];
 
   @override
@@ -6654,11 +6519,11 @@ class _SmoothMessengerWaveformState extends State<_SmoothMessengerWaveform>
 
                         final pulse = widget.isPlaying
                             ? (math.sin(
-                                      (_controller.value * math.pi * 2) +
-                                          index * 0.55,
-                                    ) *
-                                    0.08)
-                                .abs()
+                                        (_controller.value * math.pi * 2) +
+                                            index * 0.55,
+                                      ) *
+                                      0.08)
+                                  .abs()
                             : 0.0;
 
                         final height = 7 + (24 * (_bars[index] + pulse));
@@ -6667,7 +6532,9 @@ class _SmoothMessengerWaveformState extends State<_SmoothMessengerWaveform>
                           child: AnimatedContainer(
                             duration: const Duration(milliseconds: 140),
                             curve: Curves.easeOut,
-                            margin: const EdgeInsets.symmetric(horizontal: 1.15),
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 1.15,
+                            ),
                             height: height.clamp(7.0, 31.0).toDouble(),
                             decoration: BoxDecoration(
                               color: isActive
@@ -6692,7 +6559,7 @@ class _SmoothMessengerWaveformState extends State<_SmoothMessengerWaveform>
                             borderRadius: BorderRadius.circular(999),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.18),
+                                color: Colors.black.withValues(alpha: 0.18),
                                 blurRadius: 4,
                               ),
                             ],
@@ -6728,10 +6595,7 @@ class _VideoBubble extends StatefulWidget {
   final String? path;
   final BorderRadius borderRadius;
 
-  const _VideoBubble({
-    required this.path,
-    required this.borderRadius,
-  });
+  const _VideoBubble({required this.path, required this.borderRadius});
 
   @override
   State<_VideoBubble> createState() => _VideoBubbleState();
@@ -6817,7 +6681,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
               width: 54,
               height: 54,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.45),
+                color: Colors.black.withValues(alpha: 0.45),
                 shape: BoxShape.circle,
               ),
               child: Icon(
@@ -6868,14 +6732,15 @@ class _SwipeToReplyState extends State<_SwipeToReply>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 260),
-    )..addListener(() {
-        setState(() {
-          _dragX = _returnAnimation.value;
+    _controller =
+        AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 260),
+        )..addListener(() {
+          setState(() {
+            _dragX = _returnAnimation.value;
+          });
         });
-      });
   }
 
   @override
@@ -6907,12 +6772,10 @@ class _SwipeToReplyState extends State<_SwipeToReply>
   }
 
   void _springBack() {
-    _returnAnimation = Tween<double>(begin: _dragX, end: 0).animate(
-      CurvedAnimation(
-        parent: _controller,
-        curve: Curves.elasticOut,
-      ),
-    );
+    _returnAnimation = Tween<double>(
+      begin: _dragX,
+      end: 0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.elasticOut));
     _controller
       ..reset()
       ..forward();
@@ -6936,7 +6799,9 @@ class _SwipeToReplyState extends State<_SwipeToReply>
   @override
   Widget build(BuildContext context) {
     final showIcon = _dragX.abs() > 8;
-    final progress = (_dragX.abs() / _triggerDistance).clamp(0.0, 1.25).toDouble();
+    final progress = (_dragX.abs() / _triggerDistance)
+        .clamp(0.0, 1.25)
+        .toDouble();
 
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
@@ -6968,7 +6833,7 @@ class _SwipeToReplyState extends State<_SwipeToReply>
                   decoration: BoxDecoration(
                     color: _triggered
                         ? const Color(0xFF1877F2)
-                        : const Color(0xFF1877F2).withOpacity(0.13),
+                        : const Color(0xFF1877F2).withValues(alpha: 0.13),
                     shape: BoxShape.circle,
                   ),
                   child: Icon(
@@ -6980,10 +6845,7 @@ class _SwipeToReplyState extends State<_SwipeToReply>
               ),
             ),
           ),
-          Transform.translate(
-            offset: Offset(_dragX, 0),
-            child: widget.child,
-          ),
+          Transform.translate(offset: Offset(_dragX, 0), child: widget.child),
         ],
       ),
     );
@@ -7012,16 +6874,17 @@ class _ReactionBurstOverlayState extends State<_ReactionBurstOverlay>
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 720),
-    )
-      ..addStatusListener((status) {
-        if (status == AnimationStatus.completed) {
-          widget.onCompleted();
-        }
-      })
-      ..forward();
+    _controller =
+        AnimationController(
+            vsync: this,
+            duration: const Duration(milliseconds: 720),
+          )
+          ..addStatusListener((status) {
+            if (status == AnimationStatus.completed) {
+              widget.onCompleted();
+            }
+          })
+          ..forward();
   }
 
   @override
@@ -7068,19 +6931,20 @@ class _ReactionBurstPainter extends CustomPainter {
 
     final paint = Paint()
       ..style = PaintingStyle.fill
-      ..color = const Color(0xFF1877F2).withOpacity(0.75 * fade);
+      ..color = const Color(0xFF1877F2).withValues(alpha: 0.75 * fade);
 
     for (int i = 0; i < 10; i++) {
       final angle = (math.pi * 2 / 10) * i;
       final distance = 18 + (54 * eased) + ((i % 3) * 8);
-      final point = center + Offset(math.cos(angle), math.sin(angle)) * distance;
+      final point =
+          center + Offset(math.cos(angle), math.sin(angle)) * distance;
 
       if (i.isEven) {
         textPainter.text = TextSpan(
           text: emoji,
           style: TextStyle(
             fontSize: 10 + (8 * fade),
-            color: Colors.black.withOpacity(fade),
+            color: Colors.black.withValues(alpha: fade),
           ),
         );
         textPainter.layout();
@@ -7144,7 +7008,7 @@ class _ReactionActionTile extends StatelessWidget {
                   ),
                   Icon(
                     icon,
-                    color: textColor.withOpacity(0.95),
+                    color: textColor.withValues(alpha: 0.95),
                     size: 22,
                   ),
                 ],
@@ -7157,12 +7021,13 @@ class _ReactionActionTile extends StatelessWidget {
           Divider(
             height: 1,
             thickness: 0.6,
-            color: Colors.white.withOpacity(0.08),
+            color: Colors.white.withValues(alpha: 0.08),
           ),
       ],
     );
   }
 }
+
 class _MessengerMenuTile extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -7185,15 +7050,12 @@ class _MessengerMenuTile extends StatelessWidget {
     return InkWell(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: 18,
-          vertical: 15,
-        ),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 15),
         decoration: BoxDecoration(
           border: showBorder
               ? Border(
                   bottom: BorderSide(
-                    color: dividerColor ?? Colors.white.withOpacity(0.10),
+                    color: dividerColor ?? Colors.white.withValues(alpha: 0.10),
                     width: 0.6,
                   ),
                 )
@@ -7211,11 +7073,7 @@ class _MessengerMenuTile extends StatelessWidget {
                 ),
               ),
             ),
-            Icon(
-              icon,
-              color: color,
-              size: 24,
-            ),
+            Icon(icon, color: color, size: 24),
           ],
         ),
       ),

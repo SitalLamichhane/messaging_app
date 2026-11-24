@@ -28,16 +28,10 @@ class CallControls extends StatelessWidget {
     return SafeArea(
       top: false,
       child: Container(
-        padding: const EdgeInsets.fromLTRB(
-          8,
-          10,
-          8,
-          14,
-        ),
+        padding: const EdgeInsets.fromLTRB(8, 10, 8, 14),
         color: const Color(0xFF111B21),
         child: Row(
-          mainAxisAlignment:
-              MainAxisAlignment.spaceEvenly,
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
           children: [
             _button(
               icon: microphoneEnabled
@@ -52,11 +46,8 @@ class CallControls extends StatelessWidget {
               onTap: onCamera,
             ),
             _button(
-              icon:
-                  Icons.cameraswitch_rounded,
-              onTap: cameraEnabled
-                  ? onSwitchCamera
-                  : null,
+              icon: Icons.cameraswitch_rounded,
+              onTap: cameraEnabled ? onSwitchCamera : null,
             ),
             _button(
               icon: speakerEnabled
@@ -81,19 +72,14 @@ class CallControls extends StatelessWidget {
     Color? background,
   }) {
     return Material(
-      color: background ??
-          const Color(0xFF2A3942),
+      color: background ?? const Color(0xFF2A3942),
       shape: const CircleBorder(),
       child: InkWell(
         onTap: onTap,
-        customBorder:
-            const CircleBorder(),
+        customBorder: const CircleBorder(),
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Icon(
-            icon,
-            color: Colors.white,
-          ),
+          child: Icon(icon, color: Colors.white),
         ),
       ),
     );

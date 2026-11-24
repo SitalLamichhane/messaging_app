@@ -31,8 +31,7 @@ class CallSocketEvents {
   static const String callRenegotiateOffer = 'call_renegotiate_offer';
   static const String callRenegotiateAnswer = 'call_renegotiate_answer';
   static const String callVideoToggle = 'call_video_toggle';
-  static const String callVideoUpgradeRejected =
-      'call_video_upgrade_rejected';
+  static const String callVideoUpgradeRejected = 'call_video_upgrade_rejected';
 
   static const String callEventSent = 'call_event_sent';
 }
@@ -120,16 +119,14 @@ class SocketService {
 
   /// Optional but recommended. Call this when a call starts or is accepted.
   /// It lets the socket ignore delayed events from older calls.
-  void setActiveCallContext({
-    String? callId,
-    String? conversationId,
-  }) {
+  void setActiveCallContext({String? callId, String? conversationId}) {
     final fixedCallId = callId?.trim() ?? '';
     final fixedConversationId = conversationId?.trim() ?? '';
 
     _activeCallId = fixedCallId.isEmpty ? null : fixedCallId;
-    _activeConversationId =
-        fixedConversationId.isEmpty ? null : fixedConversationId;
+    _activeConversationId = fixedConversationId.isEmpty
+        ? null
+        : fixedConversationId;
 
     if (_activeCallId != null) {
       _closedCallIds.remove(_activeCallId);
@@ -163,10 +160,7 @@ class SocketService {
     return fixed;
   }
 
-  Future<void> connect({
-    required String url,
-    bool autoReconnect = true,
-  }) async {
+  Future<void> connect({required String url, bool autoReconnect = true}) async {
     final fixedUrl = _sanitizeWsUrl(url);
 
     if (fixedUrl.isEmpty) {
@@ -277,10 +271,7 @@ class SocketService {
       return;
     }
 
-    await connect(
-      url: connectUrl,
-      autoReconnect: _autoReconnectEnabled,
-    );
+    await connect(url: connectUrl, autoReconnect: _autoReconnectEnabled);
   }
 
   Future<void> reconnect() async {
@@ -296,10 +287,7 @@ class SocketService {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
 
-    await connect(
-      url: reconnectUrl,
-      autoReconnect: true,
-    );
+    await connect(url: reconnectUrl, autoReconnect: true);
   }
 
   Future<void> _handleMessage(dynamic message, int generation) async {
@@ -497,10 +485,7 @@ class SocketService {
     }
   }
 
-  String? _normalizeOutgoingEvent(
-    String event,
-    Map<String, dynamic> payload,
-  ) {
+  String? _normalizeOutgoingEvent(String event, Map<String, dynamic> payload) {
     switch (event) {
       case CallSocketEvents.callAccept:
         if (!_containsValidAnswer(payload)) {
@@ -602,11 +587,13 @@ class SocketService {
       payload,
     );
 
-    final fixedTargetUser = targetUser ??
+    final fixedTargetUser =
+        targetUser ??
         normalizedPayload['target_user']?.toString() ??
         normalizedPayload['targetUser']?.toString();
 
-    final fixedConversationId = conversationId ??
+    final fixedConversationId =
+        conversationId ??
         normalizedPayload['conversation_id']?.toString() ??
         normalizedPayload['conversationId']?.toString();
 
@@ -638,18 +625,12 @@ class SocketService {
 
     if (normalizedEvent == CallSocketEvents.callOffer ||
         normalizedEvent == CallSocketEvents.callAnswer) {
-      setActiveCallContext(
-        callId: callId,
-        conversationId: fixedConversationId,
-      );
+      setActiveCallContext(callId: callId, conversationId: fixedConversationId);
     }
 
     if (_isTerminalEvent(normalizedEvent)) {
       _markCallClosed(callId);
-      _clearOfferCache(
-        callId: callId,
-        conversationId: fixedConversationId,
-      );
+      _clearOfferCache(callId: callId, conversationId: fixedConversationId);
     }
 
     if (!isConnected) {
@@ -877,9 +858,12 @@ class SocketService {
     final now = DateTime.now();
 
     _pendingMessages.removeWhere((item) {
-      final stale = now.difference(item.createdAt) > _messageLifetime(item.event);
-      final closed = _isCallClosed(item.callId) && !_isTerminalEvent(item.event);
-      final wrongCall = _activeCallId != null &&
+      final stale =
+          now.difference(item.createdAt) > _messageLifetime(item.event);
+      final closed =
+          _isCallClosed(item.callId) && !_isTerminalEvent(item.event);
+      final wrongCall =
+          _activeCallId != null &&
           item.callId != null &&
           item.callId!.isNotEmpty &&
           item.callId != _activeCallId;
@@ -977,13 +961,14 @@ class SocketService {
   void _handleCallReadyAutoResend(Map<String, dynamic> data) {
     final payload = _payloadOf(data);
 
-    final fromUser = payload['from']?.toString() ??
+    final fromUser =
+        payload['from']?.toString() ??
         payload['from_user']?.toString() ??
         data['from_user']?.toString() ??
         '';
 
-    final conversationId = _extractConversationId(payload) ??
-        data['conversation_id']?.toString();
+    final conversationId =
+        _extractConversationId(payload) ?? data['conversation_id']?.toString();
     final callId = _extractCallId(payload);
 
     if (fromUser.trim().isEmpty) {
@@ -1051,10 +1036,7 @@ class SocketService {
     );
   }
 
-  void _clearOfferCache({
-    String? callId,
-    String? conversationId,
-  }) {
+  void _clearOfferCache({String? callId, String? conversationId}) {
     final fixedCallId = callId?.trim() ?? '';
     final fixedConversationId = conversationId?.trim() ?? '';
 
@@ -1108,21 +1090,22 @@ class SocketService {
   }
 
   String? _extractCallId(Map<String, dynamic> payload) {
-    final value = payload['call_id']?.toString() ??
-        payload['callId']?.toString() ??
-        '';
+    final value =
+        payload['call_id']?.toString() ?? payload['callId']?.toString() ?? '';
     return value.trim().isEmpty ? null : value.trim();
   }
 
   String? _extractConversationId(Map<String, dynamic> payload) {
-    final value = payload['conversation_id']?.toString() ??
+    final value =
+        payload['conversation_id']?.toString() ??
         payload['conversationId']?.toString() ??
         '';
     return value.trim().isEmpty ? null : value.trim();
   }
 
   String? _extractTargetUser(Map<String, dynamic> payload) {
-    final value = payload['target_user']?.toString() ??
+    final value =
+        payload['target_user']?.toString() ??
         payload['targetUser']?.toString() ??
         payload['receiver_id']?.toString() ??
         payload['receiverId']?.toString() ??
@@ -1428,10 +1411,7 @@ class SocketService {
       final reconnectUrl = _url;
       if (reconnectUrl == null || _manualDisconnect) return;
 
-      await connect(
-        url: reconnectUrl,
-        autoReconnect: true,
-      );
+      await connect(url: reconnectUrl, autoReconnect: true);
     });
   }
 

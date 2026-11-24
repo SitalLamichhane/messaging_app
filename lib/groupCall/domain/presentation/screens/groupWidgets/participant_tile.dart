@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:hiddenly/groupCall/domain/infrastructure/livekit_call_service.dart';
 import 'package:livekit_client/livekit_client.dart';
+
 class ParticipantTile extends StatelessWidget {
   final Participant participant;
   final LiveKitMediaService liveKit;
@@ -15,14 +16,11 @@ class ParticipantTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final track =
-        liveKit.videoTrackFor(participant);
+    final track = liveKit.videoTrackFor(participant);
 
-    final name =
-        liveKit.displayNameFor(participant);
+    final name = liveKit.displayNameFor(participant);
 
-    final avatar =
-        liveKit.avatarFor(participant);
+    final avatar = liveKit.avatarFor(participant);
 
     return Container(
       margin: const EdgeInsets.all(3),
@@ -34,23 +32,16 @@ class ParticipantTile extends StatelessWidget {
           color: participant.isSpeaking
               ? const Color(0xFF25D366)
               : Colors.white12,
-          width:
-              participant.isSpeaking ? 3 : 1,
+          width: participant.isSpeaking ? 3 : 1,
         ),
       ),
       child: Stack(
         fit: StackFit.expand,
         children: [
           if (track != null)
-            VideoTrackRenderer(
-              track,
-              fit: VideoViewFit.cover,
-            )
+            VideoTrackRenderer(track, fit: VideoViewFit.cover)
           else
-            _AvatarFallback(
-              name: name,
-              avatarUrl: avatar,
-            ),
+            _AvatarFallback(name: name, avatarUrl: avatar),
           Positioned(
             left: 10,
             right: 10,
@@ -59,16 +50,12 @@ class ParticipantTile extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    isLocal
-                        ? '$name (You)'
-                        : name,
+                    isLocal ? '$name (You)' : name,
                     maxLines: 1,
-                    overflow:
-                        TextOverflow.ellipsis,
+                    overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
                       color: Colors.white,
-                      fontWeight:
-                          FontWeight.w600,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
@@ -91,10 +78,7 @@ class _AvatarFallback extends StatelessWidget {
   final String name;
   final String avatarUrl;
 
-  const _AvatarFallback({
-    required this.name,
-    required this.avatarUrl,
-  });
+  const _AvatarFallback({required this.name, required this.avatarUrl});
 
   @override
   Widget build(BuildContext context) {
@@ -110,12 +94,9 @@ class _AvatarFallback extends StatelessWidget {
       child: CircleAvatar(
         radius: 48,
 
-        backgroundImage:
-            avatarUrl.trim().isNotEmpty
-                ? NetworkImage(
-                    avatarUrl.trim(),
-                  )
-                : null,
+        backgroundImage: avatarUrl.trim().isNotEmpty
+            ? NetworkImage(avatarUrl.trim())
+            : null,
 
         child: avatarUrl.trim().isEmpty
             ? Text(

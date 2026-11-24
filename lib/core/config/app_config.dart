@@ -28,9 +28,7 @@ class AppConfig {
     return '$wsBaseUrl/ws/call/$conversationId/?token=$cleanToken';
   }
 
-  static String globalCallSocketUrl({
-    required String token,
-  }) {
+  static String globalCallSocketUrl({required String token}) {
     final cleanToken = Uri.encodeComponent(token.trim());
 
     return '$wsBaseUrl/ws/global-call/?token=$cleanToken';

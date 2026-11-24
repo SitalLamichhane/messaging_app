@@ -1,86 +1,89 @@
+
 name: hiddenly
-description: "A new Flutter project."
+description: "Hiddenly messaging and calling application."
 publish_to: 'none'
 
 version: 1.0.2+3
 
 environment:
-  sdk: ^3.10.7
+  sdk: ^3.14.0
 
 dependencies:
   flutter:
     sdk: flutter
 
+  # Networking
   dio: ^5.9.2
   http: ^1.6.0
   http_parser: ^4.0.2
   web_socket_channel: ^3.0.3
 
-  # -------------------------
   # Storage
-  # -------------------------
   flutter_secure_storage: ^10.2.0
   path_provider: ^2.1.5
   shared_preferences: ^2.3.3
 
-  # -------------------------
   # State management
-  # -------------------------
   flutter_riverpod: ^2.6.1
   provider: ^6.1.5+1
 
-  # -------------------------
-  # UI / utilities
-  # -------------------------
+  # UI and utilities
   intl_phone_field: ^3.2.0
   photo_view: ^0.15.0
   emoji_picker_flutter: ^4.4.0
   intl: ^0.19.0
   cupertino_icons: ^1.0.8
-
-  # -------------------------
-  # Media / files
-  # -------------------------
-  wechat_assets_picker: ^10.1.2
-  image_picker: ^1.1.2
-  camera: ^0.11.0+2
-  video_player: ^2.10.0
-  file_picker: ^13.4.0
-  saver_gallery: ^4.1.1
   characters: ^1.4.1
 
-  # -------------------------
+  # Media and files
+  wechat_assets_picker: ^10.1.2
+  image_picker: ^1.1.2
+  camera: 0.12.2
+  video_player: ^2.10.0
+  file_picker: ^13.4.0
+  saver_gallery: ^5.1.0
+
   # Audio
-  # -------------------------
   audioplayers: ^6.1.0
   just_audio: ^0.10.5
   record: ^6.1.1
 
-  # -------------------------
-  # Calls / WebRTC / LiveKit
-  # -------------------------
+  # Calls, WebRTC and LiveKit
   flutter_webrtc: ^1.4.1
   flutter_callkit_incoming: ^2.5.0
   livekit_client: ^2.13.0
   simple_pip_mode: ^1.1.0
 
-  # -------------------------
   # Firebase
-  # -------------------------
-  firebase_core: ^4.15.0
-  firebase_messaging: ^16.7.0
+  firebase_core: ^5.2.0
+  firebase_messaging: ^17.1.0
   flutter_local_notifications: ^22.0.0
 
-  # -------------------------
-  # Device / IDs
-  # -------------------------
+  # Device and permissions
   device_info_plus: ^13.3.0
   uuid: ^4.5.1
   permission_handler: 12.0.3
   vibration: ^3.2.1
 
+# Locally migrated Kotlin plugins
 dependency_overrides:
-  shared_preferences_android: 2.4.10
+  flutter_callkit_incoming:
+    path: local_plugins/flutter_callkit_incoming
+
+  record_android:
+    path: local_plugins/record_android
+
+  simple_pip_mode:
+    path: local_plugins/simple_pip_mode
+
+  emoji_picker_flutter:
+    path: local_plugins/emoji_picker_flutter
+
+  flutter_webrtc:
+    path: local_plugins/flutter_webrtc
+
+  photo_manager:
+    path: local_plugins/photo_manager
 
 dev_dependencies:
   flutter_test:
@@ -90,11 +93,13 @@ dev_dependencies:
   flutter_launcher_icons: ^0.13.1
   flutter_native_splash: ^2.4.1
 
+# Application icon
 flutter_launcher_icons:
   android: true
   ios: true
   image_path: "assets/icon.png"
 
+# Native splash screen
 flutter_native_splash:
   color: "#ffffff"
   image: assets/icon.png
@@ -102,6 +107,7 @@ flutter_native_splash:
   ios: true
   fullscreen: true
 
+# Flutter configuration
 flutter:
   uses-material-design: true
 

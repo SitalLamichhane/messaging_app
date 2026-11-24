@@ -6,25 +6,17 @@ import 'package:dio/dio.dart';
 import 'package:hiddenly/core/api_client.dart';
 
 class ChatApi {
-  static Future<Response> startPrivateChat({
-    required int userId,
-  }) {
+  static Future<Response> startPrivateChat({required int userId}) {
     return ApiClient.dio.post(
       '/chat/private/start/',
-      data: {
-        'user_id': userId,
-      },
+      data: {'user_id': userId},
     );
   }
 
-  static Future<Response> searchUser({
-    required String phone,
-  }) {
+  static Future<Response> searchUser({required String phone}) {
     return ApiClient.dio.get(
       '/chat/search-user/',
-      queryParameters: {
-        'phone': phone.trim(),
-      },
+      queryParameters: {'phone': phone.trim()},
     );
   }
 
@@ -64,12 +56,8 @@ class ChatApi {
     );
   }
 
-  static Future<Response> getMessages({
-    required int conversationId,
-  }) {
-    return ApiClient.dio.get(
-      '/chat/conversations/$conversationId/messages/',
-    );
+  static Future<Response> getMessages({required int conversationId}) {
+    return ApiClient.dio.get('/chat/conversations/$conversationId/messages/');
   }
 
   static Future<Response> sendText({
@@ -78,10 +66,7 @@ class ChatApi {
   }) {
     return ApiClient.dio.post(
       '/chat/conversations/$conversationId/send/',
-      data: {
-        'message_type': 'text',
-        'text': text.trim(),
-      },
+      data: {'message_type': 'text', 'text': text.trim()},
     );
   }
 
@@ -92,11 +77,7 @@ class ChatApi {
   }) {
     return ApiClient.dio.post(
       '/chat/conversations/$conversationId/send/',
-      data: {
-        'message_type': 'text',
-        'text': text.trim(),
-        'reply_to': replyTo,
-      },
+      data: {'message_type': 'text', 'text': text.trim(), 'reply_to': replyTo},
     );
   }
 
@@ -136,49 +117,45 @@ class ChatApi {
     );
   }
 
-static Future<Response> sendImages({
-  required int conversationId,
-  required List<File> images,
-  String? caption,
-}) async {
-  if (images.isEmpty) {
-    throw Exception('No images selected');
-  }
+  static Future<Response> sendImages({
+    required int conversationId,
+    required List<File> images,
+    String? caption,
+  }) async {
+    if (images.isEmpty) {
+      throw Exception('No images selected');
+    }
 
-  final formData = FormData();
+    final formData = FormData();
 
-  formData.fields.add(
-    const MapEntry('message_type', 'media_album'),
-  );
+    formData.fields.add(const MapEntry('message_type', 'media_album'));
 
-  if (caption != null && caption.trim().isNotEmpty) {
-    formData.fields.add(
-      MapEntry('text', caption.trim()),
-    );
-  }
+    if (caption != null && caption.trim().isNotEmpty) {
+      formData.fields.add(MapEntry('text', caption.trim()));
+    }
 
-  for (final image in images) {
-    formData.files.add(
-      MapEntry(
-        'media',
-        await MultipartFile.fromFile(
-          image.path,
-          filename: image.path.split('/').last,
+    for (final image in images) {
+      formData.files.add(
+        MapEntry(
+          'media',
+          await MultipartFile.fromFile(
+            image.path,
+            filename: image.path.split('/').last,
+          ),
         ),
+      );
+    }
+
+    return ApiClient.dio.post(
+      '/chat/conversations/$conversationId/send/',
+      data: formData,
+      options: Options(
+        contentType: 'multipart/form-data',
+        receiveTimeout: const Duration(seconds: 60),
+        sendTimeout: const Duration(seconds: 60),
       ),
     );
   }
-
-  return ApiClient.dio.post(
-    '/chat/conversations/$conversationId/send/',
-    data: formData,
-    options: Options(
-      contentType: 'multipart/form-data',
-      receiveTimeout: const Duration(seconds: 60),
-      sendTimeout: const Duration(seconds: 60),
-    ),
-  );
-}
 
   static Future<Response> sendVideo({
     required int conversationId,

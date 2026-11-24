@@ -57,7 +57,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   String _resolvedCurrentUserAvatar = '';
 
   String get _effectiveConversationId {
-    final value = widget.conversationId?.toString() ??
+    final value =
+        widget.conversationId?.toString() ??
         widget.chat?.id.toString() ??
         widget.offer?['conversation_id']?.toString() ??
         widget.offer?['conversationId']?.toString() ??
@@ -67,7 +68,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   }
 
   String get _callId {
-    final value = widget.callId ??
+    final value =
+        widget.callId ??
         widget.offer?['call_id']?.toString() ??
         widget.offer?['callId']?.toString() ??
         widget.offer?['id']?.toString() ??
@@ -94,9 +96,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
     if (id.isNotEmpty) {
       try {
-        return AppChatData.chats.firstWhere(
-          (item) => item.id.toString() == id,
-        );
+        return AppChatData.chats.firstWhere((item) => item.id.toString() == id);
       } catch (_) {
         return widget.chat;
       }
@@ -167,9 +167,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
   /// 2. {offer: {type: offer, sdp: ...}}
   /// 3. {payload: {type: offer, sdp: ...}}
   /// 4. {payload: {offer: {type: offer, sdp: ...}}}
-  Map<String, dynamic>? _normalizeWebRtcOffer(
-    Map<String, dynamic>? source,
-  ) {
+  Map<String, dynamic>? _normalizeWebRtcOffer(Map<String, dynamic>? source) {
     if (source == null) {
       debugPrint('INCOMING OFFER: source is null');
       return null;
@@ -211,14 +209,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
     }
 
     // IMPORTANT: preserve SDP exactly. Do not trim/reformat it.
-    final normalized = <String, dynamic>{
-      'type': 'offer',
-      'sdp': rawSdp,
-    };
+    final normalized = <String, dynamic>{'type': 'offer', 'sdp': rawSdp};
 
-    debugPrint(
-      'INCOMING WEBRTC OFFER NORMALIZED: sdpLength=${rawSdp.length}',
-    );
+    debugPrint('INCOMING WEBRTC OFFER NORMALIZED: sdpLength=${rawSdp.length}');
 
     return normalized;
   }
@@ -264,8 +257,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
 
       final storedUserAvatar =
           (await ApiClient.storage.read(key: 'avatar_url'))?.trim() ??
-              (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
-              '';
+          (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
+          '';
 
       _resolvedCurrentUserId = widget.currentUserId.trim().isNotEmpty
           ? widget.currentUserId.trim()
@@ -474,9 +467,8 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
       debugPrint(stack.toString());
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not accept call: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Could not accept call: $e')));
       }
     } finally {
       _accepting = false;
@@ -496,11 +488,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 28),
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [
-              Color(0xFF111827),
-              Color(0xFF0F172A),
-              Color(0xFF030712),
-            ],
+            colors: [Color(0xFF111827), Color(0xFF0F172A), Color(0xFF030712)],
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
           ),
@@ -607,10 +595,7 @@ class _IncomingButton extends StatelessWidget {
           child: Container(
             width: 72,
             height: 72,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
             child: Icon(icon, color: Colors.white, size: 34),
           ),
         ),

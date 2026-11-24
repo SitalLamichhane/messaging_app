@@ -7,7 +7,6 @@ import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
 
 import 'package:flutter_callkit_incoming/flutter_callkit_incoming.dart';
 import 'package:flutter_callkit_incoming/entities/android_params.dart';
@@ -114,13 +113,15 @@ class NotificationService {
     });
 
     FirebaseMessaging.onMessageOpenedApp.listen((RemoteMessage message) async {
-  debugPrint('FCM onMessageOpenedApp IGNORED - CallKit handles navigation');
-});
+      debugPrint('FCM onMessageOpenedApp IGNORED - CallKit handles navigation');
+    });
 
     final initialMessage = await FirebaseMessaging.instance.getInitialMessage();
 
     if (initialMessage != null) {
-      debugPrint('FCM getInitialMessage IGNORED - CallKit/main handles navigation');
+      debugPrint(
+        'FCM getInitialMessage IGNORED - CallKit/main handles navigation',
+      );
     }
 
     await _debugActiveCallKitCalls();
@@ -270,17 +271,12 @@ class NotificationService {
         'from_user',
       ]);
 
-      final callerName = _readFirstString(
-        data,
-        const {},
-        const [
-          'caller_name',
-          'callerName',
-          'nameCaller',
-          'name',
-        ],
-        fallback: 'Incoming call',
-      );
+      final callerName = _readFirstString(data, const {}, const [
+        'caller_name',
+        'callerName',
+        'nameCaller',
+        'name',
+      ], fallback: 'Incoming call');
 
       final rawCallerAvatar = _readFirstString(data, const {}, const [
         'caller_avatar',
@@ -295,7 +291,8 @@ class NotificationService {
         'conversationId',
       ]);
 
-      final isVideoCall = _readBool(data['is_video_call']) ||
+      final isVideoCall =
+          _readBool(data['is_video_call']) ||
           _readBool(data['isVideoCall']) ||
           _readBool(data['video']) ||
           data['type'] == 1 ||
@@ -347,16 +344,24 @@ class NotificationService {
         // IMPORTANT: preserve group-call metadata through native CallKit.
         // Without these fields, actionCallAccept cannot distinguish a
         // LiveKit group call from the private WebRTC call flow.
-        'is_group_call': (
-          _readBool(data['is_group_call']) ||
-          _readBool(data['isGroupCall']) ||
-          data['conversation_type']?.toString().trim().toLowerCase() == 'group'
-        ).toString(),
-        'isGroupCall': (
-          _readBool(data['is_group_call']) ||
-          _readBool(data['isGroupCall']) ||
-          data['conversation_type']?.toString().trim().toLowerCase() == 'group'
-        ).toString(),
+        'is_group_call':
+            (_readBool(data['is_group_call']) ||
+                    _readBool(data['isGroupCall']) ||
+                    data['conversation_type']
+                            ?.toString()
+                            .trim()
+                            .toLowerCase() ==
+                        'group')
+                .toString(),
+        'isGroupCall':
+            (_readBool(data['is_group_call']) ||
+                    _readBool(data['isGroupCall']) ||
+                    data['conversation_type']
+                            ?.toString()
+                            .trim()
+                            .toLowerCase() ==
+                        'group')
+                .toString(),
         'conversation_type':
             data['conversation_type']?.toString() ??
             data['conversationType']?.toString() ??
@@ -391,16 +396,16 @@ class NotificationService {
           callbackText: 'Call back',
         ),
         android: AndroidParams(
-         isCustomNotification: true,
-         isShowLogo: true,
-         backgroundColor: '#0F172A',
-         backgroundUrl: callerAvatar,
-         actionColor: '#4CAF50',
-         textColor: '#FFFFFF',
-         incomingCallNotificationChannelName: 'Incoming Calls',
-         missedCallNotificationChannelName: 'Missed Calls',
-         isShowCallID: false,
-       ),
+          isCustomNotification: true,
+          isShowLogo: true,
+          backgroundColor: '#0F172A',
+          backgroundUrl: callerAvatar,
+          actionColor: '#4CAF50',
+          textColor: '#FFFFFF',
+          incomingCallNotificationChannelName: 'Incoming Calls',
+          missedCallNotificationChannelName: 'Missed Calls',
+          isShowCallID: false,
+        ),
         ios: const IOSParams(
           iconName: 'CallKitLogo',
           handleType: 'generic',
@@ -445,17 +450,12 @@ class NotificationService {
       'handle',
     ]);
 
-    final callerName = _readFirstString(
-      extra,
-      body,
-      const [
-        'caller_name',
-        'callerName',
-        'nameCaller',
-        'name',
-      ],
-      fallback: 'Incoming call',
-    );
+    final callerName = _readFirstString(extra, body, const [
+      'caller_name',
+      'callerName',
+      'nameCaller',
+      'name',
+    ], fallback: 'Incoming call');
 
     final rawCallerAvatar = _readFirstString(extra, body, const [
       'caller_avatar',
@@ -470,34 +470,28 @@ class NotificationService {
       'conversationId',
     ]);
 
-    final conversationName = _readFirstString(
-      extra,
-      body,
-      const [
-        'conversation_name',
-        'conversationName',
-        'group_name',
-        'groupName',
-      ],
-    );
+    final conversationName = _readFirstString(extra, body, const [
+      'conversation_name',
+      'conversationName',
+      'group_name',
+      'groupName',
+    ]);
 
-    final conversationType = _readFirstString(
-      extra,
-      body,
-      const [
-        'conversation_type',
-        'conversationType',
-      ],
-    ).trim().toLowerCase();
+    final conversationType = _readFirstString(extra, body, const [
+      'conversation_type',
+      'conversationType',
+    ]).trim().toLowerCase();
 
-    final isVideoCall = _readBool(extra['is_video_call']) ||
+    final isVideoCall =
+        _readBool(extra['is_video_call']) ||
         _readBool(extra['isVideoCall']) ||
         _readBool(body['is_video_call']) ||
         _readBool(body['isVideoCall']) ||
         body['type'] == 1 ||
         body['type']?.toString() == '1';
 
-    bool isGroupCall = _readBool(extra['is_group_call']) ||
+    bool isGroupCall =
+        _readBool(extra['is_group_call']) ||
         _readBool(extra['isGroupCall']) ||
         _readBool(body['is_group_call']) ||
         _readBool(body['isGroupCall']) ||
@@ -514,7 +508,8 @@ class NotificationService {
             parsedConversationId,
           );
           final activeCall = active.call;
-          final sameCall = active.active &&
+          final sameCall =
+              active.active &&
               activeCall != null &&
               activeCall.isActive &&
               (callId.isEmpty || activeCall.callId.toString() == callId);
@@ -541,9 +536,7 @@ class NotificationService {
     debugPrint('===============================================');
 
     if (callerId.isEmpty || conversationId.isEmpty) {
-      debugPrint(
-        'CALLKIT ACCEPT IGNORED: missing callerId/conversationId',
-      );
+      debugPrint('CALLKIT ACCEPT IGNORED: missing callerId/conversationId');
       return;
     }
 
@@ -607,13 +600,9 @@ class NotificationService {
         Future.delayed(const Duration(milliseconds: 250), () async {
           try {
             await FlutterCallkitIncoming.endCall(callId);
-            debugPrint(
-              'CALLKIT GROUP ACCEPT CLEANUP END CALL: $callId',
-            );
+            debugPrint('CALLKIT GROUP ACCEPT CLEANUP END CALL: $callId');
           } catch (e) {
-            debugPrint(
-              'CALLKIT GROUP ACCEPT CLEANUP ERROR: $e',
-            );
+            debugPrint('CALLKIT GROUP ACCEPT CLEANUP ERROR: $e');
           }
         });
       }
@@ -624,9 +613,7 @@ class NotificationService {
     // ============================================================
     // PRIVATE CALL -> existing manual WebRTC route
     // ============================================================
-    debugPrint(
-      'CALLKIT ACCEPT -> PRIVATE/WEBRTC ROUTE: call=$callId',
-    );
+    debugPrint('CALLKIT ACCEPT -> PRIVATE/WEBRTC ROUTE: call=$callId');
 
     await GlobalCallHandler.instance.openIncomingCallFromCallKit(
       callId: callId,
@@ -642,12 +629,7 @@ class NotificationService {
     });
 
     if (callId.isNotEmpty) {
-      unawaited(
-        _safeUpdateCallStatus(
-          callId: callId,
-          status: 'accepted',
-        ),
-      );
+      unawaited(_safeUpdateCallStatus(callId: callId, status: 'accepted'));
 
       Future.delayed(const Duration(milliseconds: 900), () async {
         try {
@@ -686,17 +668,12 @@ class NotificationService {
       'from_user',
     ]);
 
-    final callerName = _readFirstString(
-      data,
-      const {},
-      const [
-        'caller_name',
-        'callerName',
-        'nameCaller',
-        'name',
-      ],
-      fallback: 'Incoming call',
-    );
+    final callerName = _readFirstString(data, const {}, const [
+      'caller_name',
+      'callerName',
+      'nameCaller',
+      'name',
+    ], fallback: 'Incoming call');
 
     final rawCallerAvatar = _readFirstString(data, const {}, const [
       'caller_avatar',
@@ -717,7 +694,8 @@ class NotificationService {
       'id',
     ]);
 
-    final isVideoCall = _readBool(data['is_video_call']) ||
+    final isVideoCall =
+        _readBool(data['is_video_call']) ||
         _readBool(data['isVideoCall']) ||
         _readBool(data['video']) ||
         data['type'] == 1 ||
@@ -802,10 +780,7 @@ class NotificationService {
     }
 
     if (callId.isNotEmpty) {
-      await _safeUpdateCallStatus(
-        callId: callId,
-        status: 'rejected',
-      );
+      await _safeUpdateCallStatus(callId: callId, status: 'rejected');
 
       await endCall(callId);
     }
@@ -874,10 +849,7 @@ class NotificationService {
     }
 
     if (callId.isNotEmpty) {
-      await _safeUpdateCallStatus(
-        callId: callId,
-        status: 'missed',
-      );
+      await _safeUpdateCallStatus(callId: callId, status: 'missed');
 
       await endCall(callId);
     }
@@ -899,8 +871,8 @@ class NotificationService {
 
       final currentUserAvatar =
           (await ApiClient.storage.read(key: 'avatar_url'))?.trim() ??
-              (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
-              '';
+          (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
+          '';
 
       final conversationId = _readFirstString(data, const {}, const [
         'conversation_id',
@@ -968,14 +940,11 @@ class NotificationService {
       if (kIsWeb) return;
 
       final token = await _messaging.getToken();
-      debugPrint('FCM TOKEN: $token');
+      // Never log device registration tokens.
 
       if (token == null || token.trim().isEmpty) return;
 
-      await ApiClient.storage.write(
-        key: 'fcm_token',
-        value: token.trim(),
-      );
+      await ApiClient.storage.write(key: 'fcm_token', value: token.trim());
 
       await _sendTokenToBackend(token.trim());
     } catch (e, st) {
@@ -1050,10 +1019,7 @@ class NotificationService {
     if (callId.trim().isEmpty) return;
 
     try {
-      await CallApi.updateCallStatus(
-        callId: callId.trim(),
-        status: status,
-      );
+      await CallApi.updateCallStatus(callId: callId.trim(), status: status);
     } catch (e, st) {
       debugPrint('CALL STATUS UPDATE ERROR: $e');
       debugPrint(st.toString());

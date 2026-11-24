@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 class HelpSupportScreen extends StatefulWidget {
@@ -57,7 +56,6 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               const SizedBox(height: 18),
 
               // ================= HELP INFO TEXT =================
-
               const Text(
                 "We’re here to help you",
                 style: TextStyle(
@@ -72,11 +70,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               const Text(
                 "Find answers quickly using search or browse help articles below. "
                 "If you still need help, you can create a support ticket or contact our support team anytime.",
-                style: TextStyle(
-                  fontSize: 16,
-                  height: 1.5,
-                  color: greyText,
-                ),
+                style: TextStyle(fontSize: 16, height: 1.5, color: greyText),
               ),
 
               const SizedBox(height: 18),
@@ -95,17 +89,12 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               const Text(
                 "Our support system is available 24/7. "
                 "We respond to tickets as quickly as possible to resolve your issues.",
-                style: TextStyle(
-                  fontSize: 15,
-                  height: 1.5,
-                  color: greyText,
-                ),
+                style: TextStyle(fontSize: 15, height: 1.5, color: greyText),
               ),
 
               const SizedBox(height: 24),
 
               // ================= END HELP TEXT =================
-
               if (_searchController.text.isNotEmpty)
                 ...searchResults.map(
                   (item) => ListTile(
@@ -128,7 +117,6 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
               //     color: darkText,
               //   ),
               // ),
-
               const SizedBox(height: 14),
 
               /*
@@ -287,10 +275,7 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
                 border: InputBorder.none,
                 icon: Icon(Icons.search, color: Color(0xFF5F6278)),
                 hintText: "Search for help articles...",
-                hintStyle: TextStyle(
-                  fontSize: 16,
-                  color: Color(0xFF7B7F96),
-                ),
+                hintStyle: TextStyle(fontSize: 16, color: Color(0xFF7B7F96)),
               ),
             ),
           ),
@@ -298,4 +283,4 @@ class _HelpSupportScreenState extends State<HelpSupportScreen> {
       ),
     );
   }
-}//Gitpush
+} //Gitpush

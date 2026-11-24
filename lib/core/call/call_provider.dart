@@ -14,7 +14,6 @@ import 'package:hiddenly/core/call/global_call_handler.dart';
 import 'package:hiddenly/core/call/call_notification.dart';
 import 'package:hiddenly/core/call/webrct_servide.dart';
 
-
 class CallStartConflictException implements Exception {
   final String message;
   final String? existingCallId;
@@ -189,9 +188,7 @@ class CallNotifier extends StateNotifier<CallState> {
       return incomingCallId == activeCallId;
     }
 
-    if (incomingCallId.isNotEmpty &&
-        activeCallId.isEmpty &&
-        allowAdoptCallId) {
+    if (incomingCallId.isNotEmpty && activeCallId.isEmpty && allowAdoptCallId) {
       _callId = incomingCallId;
       SocketService.instance.setActiveCallContext(
         callId: _callId,
@@ -230,7 +227,9 @@ class CallNotifier extends StateNotifier<CallState> {
     );
 
     // Never log the URL here: it contains the JWT query parameter.
-    debugPrint('CALL PROVIDER: connecting signaling socket for conversation $conversationId');
+    debugPrint(
+      'CALL PROVIDER: connecting signaling socket for conversation $conversationId',
+    );
 
     await SocketService.instance.connect(url: url, autoReconnect: true);
 
@@ -258,8 +257,8 @@ class CallNotifier extends StateNotifier<CallState> {
       final message = result.error?.trim().isNotEmpty == true
           ? result.error!.trim()
           : result.isUserBusy
-              ? 'User is on another call.'
-              : 'A call is already active in this conversation';
+          ? 'User is on another call.'
+          : 'A call is already active in this conversation';
 
       final existingCallId = result.callId?.trim() ?? '';
       final existingCallUuid = result.callUuid?.trim() ?? '';
@@ -277,10 +276,7 @@ class CallNotifier extends StateNotifier<CallState> {
       debugPrint('########################################');
 
       _safeState(
-        state.copyWith(
-          status: CallStatus.busy,
-          errorMessage: message,
-        ),
+        state.copyWith(status: CallStatus.busy, errorMessage: message),
       );
 
       throw CallStartConflictException(
@@ -380,8 +376,7 @@ class CallNotifier extends StateNotifier<CallState> {
       candidate = Map<String, dynamic>.from(rawOffer);
     }
 
-    final type =
-        candidate['type']?.toString().trim().toLowerCase() ?? '';
+    final type = candidate['type']?.toString().trim().toLowerCase() ?? '';
     final rawSdp = candidate['sdp'];
 
     if (type != 'offer' || rawSdp is! String || rawSdp.trim().isEmpty) {
@@ -389,10 +384,7 @@ class CallNotifier extends StateNotifier<CallState> {
     }
 
     // IMPORTANT: preserve SDP exactly. Do not trim/reformat it.
-    return <String, dynamic>{
-      'type': 'offer',
-      'sdp': rawSdp,
-    };
+    return <String, dynamic>{'type': 'offer', 'sdp': rawSdp};
   }
 
   Future<void> startCall({
@@ -429,7 +421,8 @@ class CallNotifier extends StateNotifier<CallState> {
     // One active call at a time. Do not reset a live call just because another
     // screen accidentally called startCall() twice.
     if (state.status != CallStatus.idle && !_isFinalStatus(state.status)) {
-      final sameCall = state.conversationId == cleanConversationId &&
+      final sameCall =
+          state.conversationId == cleanConversationId &&
           state.receiverId == cleanReceiverId;
       if (sameCall) {
         debugPrint('CALL START IGNORED: same call is already starting/active');
@@ -737,7 +730,8 @@ class CallNotifier extends StateNotifier<CallState> {
       return;
     }
 
-    final fromUser = payload['from']?.toString() ??
+    final fromUser =
+        payload['from']?.toString() ??
         payload['from_user']?.toString() ??
         payload['caller_id']?.toString() ??
         payload['callerId']?.toString();
@@ -750,7 +744,8 @@ class CallNotifier extends StateNotifier<CallState> {
       return;
     }
 
-    final payloadConversationId = payload['conversation_id']?.toString() ??
+    final payloadConversationId =
+        payload['conversation_id']?.toString() ??
         payload['conversationId']?.toString();
 
     if (payloadConversationId != null &&
@@ -776,7 +771,8 @@ class CallNotifier extends StateNotifier<CallState> {
     final callIdFromPayload =
         payload['call_id']?.toString() ?? payload['callId']?.toString();
 
-    final conversationIdFromPayload = payload['conversation_id']?.toString() ??
+    final conversationIdFromPayload =
+        payload['conversation_id']?.toString() ??
         payload['conversationId']?.toString();
 
     if ((_callId == null || _callId!.trim().isEmpty) &&
@@ -977,7 +973,8 @@ class CallNotifier extends StateNotifier<CallState> {
     final rawOffer = payload['offer'];
     if (rawOffer is! Map) return;
 
-    final requestType = payload['requestType']?.toString() ??
+    final requestType =
+        payload['requestType']?.toString() ??
         payload['request_type']?.toString() ??
         '';
 
@@ -1042,8 +1039,9 @@ class CallNotifier extends StateNotifier<CallState> {
 
     // Remember the ACTUAL user who sent this upgrade request.
     // Accept/Decline must reply to this user, not blindly to state.receiverId.
-    _pendingVideoUpgradeRequesterId =
-        requestFromUser.isEmpty ? null : requestFromUser;
+    _pendingVideoUpgradeRequesterId = requestFromUser.isEmpty
+        ? null
+        : requestFromUser;
 
     debugPrint(
       'VIDEO UPGRADE REQUEST FROM USER: '
@@ -1060,8 +1058,7 @@ class CallNotifier extends StateNotifier<CallState> {
       return;
     }
 
-    _pendingVideoUpgradeRequestId =
-        requestId.isEmpty ? null : requestId;
+    _pendingVideoUpgradeRequestId = requestId.isEmpty ? null : requestId;
 
     _safeState(
       state.copyWith(
@@ -1098,7 +1095,8 @@ class CallNotifier extends StateNotifier<CallState> {
       'VIDEO UPGRADE ANSWER RECEIVED FROM: ${_payloadFromUser(payload)}',
     );
 
-    final requestType = payload['requestType']?.toString() ??
+    final requestType =
+        payload['requestType']?.toString() ??
         payload['request_type']?.toString() ??
         '';
 
@@ -1231,7 +1229,8 @@ class CallNotifier extends StateNotifier<CallState> {
     }
 
     if (payload.containsKey('cameraOff')) {
-      final remoteCameraOff = payload['cameraOff'] == true ||
+      final remoteCameraOff =
+          payload['cameraOff'] == true ||
           payload['cameraOff']?.toString() == 'true';
 
       _safeState(
@@ -1250,7 +1249,8 @@ class CallNotifier extends StateNotifier<CallState> {
       return;
     }
 
-    final remoteIsVideoCall = payload['isVideoCall'] == true ||
+    final remoteIsVideoCall =
+        payload['isVideoCall'] == true ||
         payload['is_video_call'] == true ||
         payload['isVideoCall']?.toString() == 'true' ||
         payload['is_video_call']?.toString() == 'true';
@@ -1302,9 +1302,7 @@ class CallNotifier extends StateNotifier<CallState> {
 
     if (state.isVideoUpgradeRequesting) {
       if (rawFallbackAnswer is! Map) {
-        debugPrint(
-          'VIDEO MODE SYNC WAITING: requester still needs SDP answer',
-        );
+        debugPrint('VIDEO MODE SYNC WAITING: requester still needs SDP answer');
         return;
       }
 
@@ -1332,7 +1330,8 @@ class CallNotifier extends StateNotifier<CallState> {
             isSpeakerOn: false,
             isVideoUpgradeRequesting: false,
             isVideoUpgradeRejected: false,
-            errorMessage: 'Video was accepted but SDP answer could not be applied.',
+            errorMessage:
+                'Video was accepted but SDP answer could not be applied.',
             localRenderer: webrtc.localRenderer,
             remoteRenderer: webrtc.remoteRenderer,
           ),
@@ -1440,8 +1439,9 @@ class CallNotifier extends StateNotifier<CallState> {
       debugPrint(st.toString());
     }
 
-    final resolvedRequestId =
-        incomingRequestId.isNotEmpty ? incomingRequestId : activeRequestId;
+    final resolvedRequestId = incomingRequestId.isNotEmpty
+        ? incomingRequestId
+        : activeRequestId;
 
     _activeVideoUpgradeRequestId = null;
     if (resolvedRequestId.isNotEmpty) {
@@ -1515,7 +1515,11 @@ class CallNotifier extends StateNotifier<CallState> {
     final payload = _payloadFrom(data);
     if (!_matchesActiveEvent(payload)) return;
     if (!_canUpdate) return;
-    await _finishCall(CallStatus.ended, emitSocket: false, updateBackend: false);
+    await _finishCall(
+      CallStatus.ended,
+      emitSocket: false,
+      updateBackend: false,
+    );
   }
 
   Future<void> _handleCallBusy(Map<String, dynamic> data) async {
@@ -1588,9 +1592,7 @@ class CallNotifier extends StateNotifier<CallState> {
       if (SocketService.instance.isConnected) {
         debugPrint('ICE RESTART OFFER SENT');
       } else {
-        debugPrint(
-          'ICE RESTART OFFER QUEUED; waiting for signaling reconnect',
-        );
+        debugPrint('ICE RESTART OFFER QUEUED; waiting for signaling reconnect');
       }
     } catch (e, st) {
       debugPrint('ICE RESTART SEND ERROR: $e');
@@ -1749,8 +1751,9 @@ class CallNotifier extends StateNotifier<CallState> {
     final currentUserId = state.currentUserId?.trim() ?? '';
     final stateReceiverId = state.receiverId?.trim() ?? '';
     final requestSenderId = _pendingVideoUpgradeRequesterId?.trim() ?? '';
-    final replyTargetUserId =
-        requestSenderId.isNotEmpty ? requestSenderId : stateReceiverId;
+    final replyTargetUserId = requestSenderId.isNotEmpty
+        ? requestSenderId
+        : stateReceiverId;
     final pendingOffer = state.pendingVideoOffer;
     final videoRequestId = _pendingVideoUpgradeRequestId;
 
@@ -1858,9 +1861,7 @@ class CallNotifier extends StateNotifier<CallState> {
         ),
       );
 
-      debugPrint(
-        'VIDEO UPGRADE ACCEPTED: ${videoRequestId ?? "legacy/no-id"}',
-      );
+      debugPrint('VIDEO UPGRADE ACCEPTED: ${videoRequestId ?? "legacy/no-id"}');
     } catch (e, st) {
       debugPrint('ACCEPT VIDEO UPGRADE ERROR: $e');
       debugPrint(st.toString());
@@ -1907,8 +1908,9 @@ class CallNotifier extends StateNotifier<CallState> {
     final currentUserId = state.currentUserId?.trim() ?? '';
     final stateReceiverId = state.receiverId?.trim() ?? '';
     final requestSenderId = _pendingVideoUpgradeRequesterId?.trim() ?? '';
-    final replyTargetUserId =
-        requestSenderId.isNotEmpty ? requestSenderId : stateReceiverId;
+    final replyTargetUserId = requestSenderId.isNotEmpty
+        ? requestSenderId
+        : stateReceiverId;
     final videoRequestId = _pendingVideoUpgradeRequestId;
     final pendingOffer = Map<String, dynamic>.from(state.pendingVideoOffer!);
 
@@ -1953,7 +1955,7 @@ class CallNotifier extends StateNotifier<CallState> {
           'reason': 'declined',
           'requestType': 'video_upgrade',
           'request_type': 'video_upgrade',
-          if (declineAnswer != null) 'answer': declineAnswer,
+          'answer': declineAnswer,
           if (videoRequestId != null && videoRequestId.isNotEmpty)
             'video_request_id': videoRequestId,
           if (videoRequestId != null && videoRequestId.isNotEmpty)
@@ -2141,7 +2143,6 @@ class CallNotifier extends StateNotifier<CallState> {
 
     _timeoutTimer?.cancel();
 
-
     try {
       await CallSoundService.instance.stop();
     } catch (_) {}
@@ -2150,10 +2151,7 @@ class CallNotifier extends StateNotifier<CallState> {
     await webrtc.setSpeaker(useSpeaker);
 
     _safeState(
-      state.copyWith(
-        status: CallStatus.connected,
-        isSpeakerOn: useSpeaker,
-      ),
+      state.copyWith(status: CallStatus.connected, isSpeakerOn: useSpeaker),
     );
 
     _startDurationTimer();
@@ -2167,9 +2165,7 @@ class CallNotifier extends StateNotifier<CallState> {
       if (state.status != CallStatus.connected) return;
 
       _safeState(
-        state.copyWith(
-          duration: state.duration + const Duration(seconds: 1),
-        ),
+        state.copyWith(duration: state.duration + const Duration(seconds: 1)),
       );
     });
   }
@@ -2293,10 +2289,7 @@ class CallNotifier extends StateNotifier<CallState> {
     }
 
     try {
-      await CallApi.updateCallAction(
-        callId: callId,
-        action: action,
-      );
+      await CallApi.updateCallAction(callId: callId, action: action);
     } catch (e) {
       debugPrint('CALL BACKEND ACTION ERROR [$action]: $e');
     }

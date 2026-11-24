@@ -3,431 +3,124 @@ import 'package:hiddenly/app_haptics.dart';
 
 import 'package:hiddenly/groupCall/domain/application/chat_room_controller.dart';
 
-
-
 import 'package:hiddenly/groupCall/domain/application/group_call_controller.dart';
-
-
 
 import 'package:hiddenly/groupCall/domain/data/chat_api_service.dart';
 
-
-
 import 'package:hiddenly/groupCall/domain/infrastructure/call_api_service.dart';
-
-
-
-
-
-
 
 import 'package:hiddenly/groupCall/domain/presentation/screens/groupWidgets/message_bubble.dart';
 
-
-
 import 'package:hiddenly/groupCall/domain/presentation/screens/groupWidgets/message_composer.dart';
-
-
-
-
-
-
 
 import 'package:hiddenly/groupCall/domain/presentation/screens/group_call_screen.dart';
 
-
-
-
-
-
-
 import 'package:hiddenly/realtime/realtime_service.dart';
-
-
-
-
-
-
 
 import 'package:image_picker/image_picker.dart';
 
-
-
 import 'package:provider/provider.dart';
 
-
-
-
-
-
-
 typedef ChatSettingsBuilder = Widget Function(
-
-
-
   BuildContext context,
 
-
-
   GroupCallController? controller,
-
-
-
 );
 
-
-
-
-
-
-
 class ConversationChatScreen extends StatefulWidget {
-
-
-
   final int conversationId;
-
-
-
-
-
-
 
   final bool isGroup;
 
-
-
-
-
-
-
   final String title;
-
-
-
-
-
-
 
   final String members;
 
-
-
-
-
-
-
   final int currentUserId;
-
-
-
-
-
-
 
   final ConversationSocketUriBuilder socketUriBuilder;
 
-
-
-
-
-
-
   final Future<void> Function(bool video)? onPrivateCall;
-
-
-
-
-
-
 
   final ChatSettingsBuilder? settingsBuilder;
 
-
-
-
-
-
-
   const ConversationChatScreen({
-
-
-
     super.key,
-
-
 
     required this.conversationId,
 
-
-
     required this.isGroup,
-
-
 
     required this.title,
 
-
-
     required this.members,
-
-
 
     required this.currentUserId,
 
-
-
     required this.socketUriBuilder,
-
-
 
     this.onPrivateCall,
 
-
-
     this.settingsBuilder,
-
-
-
   });
 
-
-
-
-
-
-
   @override
-
-
-
-  State<ConversationChatScreen> createState() =>
-
-
-
-      _ConversationChatScreenState();
-
-
-
+  State<ConversationChatScreen> createState() => _ConversationChatScreenState();
 }
 
-
-
-
-
-
-
-class _ConversationChatScreenState
-
-
-
-    extends State<ConversationChatScreen>
-
-
-
+class _ConversationChatScreenState extends State<ConversationChatScreen>
     with WidgetsBindingObserver {
-
-
-
   late final ChatRoomController chatController;
-
-
-
-
-
-
 
   GroupCallController? callController;
 
-
-
-
-
-
-
   late final ConversationRealtimeService realtime;
 
-
-
-
-
-
-
-  final ScrollController scrollController =
-
-
-
-      ScrollController();
-
-
-
-
-
-
+  final ScrollController scrollController = ScrollController();
 
   bool _initialScrollCompleted = false;
 
-
-
-
-
-
-
   int _previousMessageCount = 0;
-
-
-
-
-
-
 
   double _previousKeyboardHeight = 0;
 
-
-
-
-
-
-
   bool _disposed = false;
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // INIT
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   @override
-
-
-
   void initState() {
-
-
-
     super.initState();
-
-
-
-
-
-
 
     WidgetsBinding.instance.addObserver(this);
 
-
-
-
-
-
-
-    realtime = ConversationRealtimeService(
-
-
-
-      uriBuilder: widget.socketUriBuilder,
-
-
-
-    );
-
-
-
-
-
-
+    realtime = ConversationRealtimeService(uriBuilder: widget.socketUriBuilder);
 
     chatController = ChatRoomController(
-
-
-
       conversationId: widget.conversationId,
-
-
 
       currentUserId: widget.currentUserId,
 
-
-
       api: ChatApiService(),
 
-
-
       realtime: realtime,
-
-
-
     );
 
-
-
-
-
-
-
     if (widget.isGroup) {
-
-
-
       callController = GroupCallController(
-
-
-
         conversationId: widget.conversationId,
-
-
 
         api: CallApiService(),
 
-
-
         realtime: realtime,
-
-
-
       );
-
-
-
     }
 
-
-
-
-
-
-
-    chatController.addListener(
-
-
-
-      _onChatControllerChanged,
-
-
-
-    );
-
-
-
-
-
-
+    chatController.addListener(_onChatControllerChanged);
 
     /*
 
@@ -443,79 +136,23 @@ class _ConversationChatScreenState
 
      */
 
-
-
     chatController.initialize();
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // CHAT CONTROLLER LISTENER
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   void _onChatControllerChanged() {
-
-
-
     if (!mounted || _disposed) {
-
-
-
       return;
-
-
-
     }
 
+    final currentCount = chatController.messages.length;
 
-
-
-
-
-
-    final currentCount =
-
-
-
-        chatController.messages.length;
-
-
-
-
-
-
-
-    final messageCountChanged =
-
-
-
-        currentCount != _previousMessageCount;
-
-
-
-
-
-
+    final messageCountChanged = currentCount != _previousMessageCount;
 
     /*
 
@@ -535,67 +172,19 @@ class _ConversationChatScreenState
 
      */
 
-
-
     if (!_initialScrollCompleted &&
-
-
-
         !chatController.loading &&
-
-
-
         currentCount > 0) {
-
-
-
       _initialScrollCompleted = true;
-
-
 
       _previousMessageCount = currentCount;
 
-
-
-
-
-
-
       setState(() {});
 
-
-
-
-
-
-
-      _scrollToBottom(
-
-
-
-        animated: false,
-
-
-
-      );
-
-
-
-
-
-
+      _scrollToBottom(animated: false);
 
       return;
-
-
-
     }
-
-
-
-
-
-
 
     /*
 
@@ -631,139 +220,34 @@ class _ConversationChatScreenState
 
      */
 
+    final shouldFollow = _isNearBottom();
 
-
-    final shouldFollow =
-
-
-
-        _isNearBottom();
-
-
-
-
-
-
-
-    _previousMessageCount =
-
-
-
-        currentCount;
-
-
-
-
-
-
+    _previousMessageCount = currentCount;
 
     setState(() {});
 
-
-
-
-
-
-
-    if (messageCountChanged &&
-
-
-
-        shouldFollow) {
-
-
-
+    if (messageCountChanged && shouldFollow) {
       _scrollToBottom();
-
-
-
     }
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // KEYBOARD
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   @override
-
-
-
   void didChangeMetrics() {
-
-
-
     super.didChangeMetrics();
 
-
-
-
-
-
-
     if (!mounted || _disposed) {
-
-
-
       return;
-
-
-
     }
 
+    final view = WidgetsBinding.instance.platformDispatcher.views.first;
 
-
-
-
-
-
-    final view =
-
-
-
-        WidgetsBinding.instance.platformDispatcher.views.first;
-
-
-
-
-
-
-
-    final keyboardHeight =
-
-
-
-        view.viewInsets.bottom /
-
-
-
-        view.devicePixelRatio;
-
-
-
-
-
-
+    final keyboardHeight = view.viewInsets.bottom / view.devicePixelRatio;
 
     /*
 
@@ -775,823 +259,167 @@ class _ConversationChatScreenState
 
      */
 
-
-
-    if (keyboardHeight > 0 &&
-
-
-
-        _previousKeyboardHeight <= 0) {
-
-
-
-      _scrollToBottom(
-
-
-
-        delay: const Duration(
-
-
-
-          milliseconds: 120,
-
-
-
-        ),
-
-
-
-      );
-
-
-
+    if (keyboardHeight > 0 && _previousKeyboardHeight <= 0) {
+      _scrollToBottom(delay: const Duration(milliseconds: 120));
     }
 
-
-
-
-
-
-
-    _previousKeyboardHeight =
-
-
-
-        keyboardHeight;
-
-
-
+    _previousKeyboardHeight = keyboardHeight;
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // SCROLL HELPERS
 
-
-
   // ============================================================
-
-
-
-
-
-
 
   bool _isNearBottom() {
-
-
-
     if (!scrollController.hasClients) {
-
-
-
       return true;
-
-
-
     }
 
+    final position = scrollController.position;
 
-
-
-
-
-
-    final position =
-
-
-
-        scrollController.position;
-
-
-
-
-
-
-
-    final distanceFromBottom =
-
-
-
-        position.maxScrollExtent -
-
-
-
-        position.pixels;
-
-
-
-
-
-
+    final distanceFromBottom = position.maxScrollExtent - position.pixels;
 
     return distanceFromBottom < 180;
-
-
-
   }
 
+  void _scrollToBottom({bool animated = true, Duration delay = Duration.zero}) {
+    Future<void>.delayed(delay, () {
+      if (!mounted || _disposed) {
+        return;
+      }
 
-
-
-
-
-
-  void _scrollToBottom({
-
-
-
-    bool animated = true,
-
-
-
-    Duration delay = Duration.zero,
-
-
-
-  }) {
-
-
-
-    Future<void>.delayed(
-
-
-
-      delay,
-
-
-
-      () {
-
-
-
-        if (!mounted || _disposed) {
-
-
-
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || _disposed || !scrollController.hasClients) {
           return;
-
-
-
         }
 
-
-
-
-
-
-
-        WidgetsBinding.instance
-
-
-
-            .addPostFrameCallback(
-
-
-
-          (_) {
-
-
-
-            if (!mounted ||
-
-
-
-                _disposed ||
-
-
-
-                !scrollController.hasClients) {
-
-
-
-              return;
-
-
-
-            }
-
-
-
-
-
-
-
-            final position =
-
-
-
-                scrollController.position;
-
-
-
-
-
-
-
-            final target =
-
-
-
-                position.maxScrollExtent;
-
-
-
-
-
-
-
-            if (animated) {
-
-
-
-              scrollController.animateTo(
-
-
-
-                target,
-
-
-
-                duration: const Duration(
-
-
-
-                  milliseconds: 250,
-
-
-
-                ),
-
-
-
-                curve: Curves.easeOut,
-
-
-
-              );
-
-
-
-            } else {
-
-
-
-              scrollController.jumpTo(
-
-
-
-                target,
-
-
-
-              );
-
-
-
-            }
-
-
-
-          },
-
-
-
-        );
-
-
-
-      },
-
-
-
-    );
-
-
-
+        final position = scrollController.position;
+
+        final target = position.maxScrollExtent;
+
+        if (animated) {
+          scrollController.animateTo(
+            target,
+
+            duration: const Duration(milliseconds: 250),
+
+            curve: Curves.easeOut,
+          );
+        } else {
+          scrollController.jumpTo(target);
+        }
+      });
+    });
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // SETTINGS
 
-
-
   // ============================================================
-
-
-
-
-
-
 
   void openSettings() {
-
-
-
-    final page =
-
-
-
-        widget.settingsBuilder?.call(
-
-
-
-      context,
-
-
-
-      callController,
-
-
-
-    );
-
-
-
-
-
-
+    final page = widget.settingsBuilder?.call(context, callController);
 
     if (page == null) {
-
-
-
       return;
-
-
-
     }
 
-
-
-
-
-
-
     Navigator.push(
-
-
-
       context,
 
-
-
       MaterialPageRoute(
-
-
-
         builder: (context) {
-
-
-
           if (callController != null) {
-
-
-
             return ChangeNotifierProvider.value(
-
-
-
               value: callController!,
 
-
-
               child: page,
-
-
-
             );
-
-
-
           }
 
-
-
-
-
-
-
           return page;
-
-
-
         },
-
-
-
       ),
-
-
-
     );
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // CALL
 
-
-
   // ============================================================
 
-
-
-
-
-
-
-  Future<void> startCall(
-
-
-
-    bool video,
-
-
-
-  ) async {
-
-
-
+  Future<void> startCall(bool video) async {
     if (!widget.isGroup) {
-
-
-
       AppHaptics.medium();
 
-
-
-      await widget.onPrivateCall?.call(
-
-
-
-        video,
-
-
-
-      );
-
-
-
-
-
-
+      await widget.onPrivateCall?.call(video);
 
       return;
-
-
-
     }
-
-
-
-
-
-
 
     if (callController == null) {
-
-
-
       return;
-
-
-
     }
-
-
-
-
-
-
 
     AppHaptics.medium();
 
-
-
-
-
-
-
     try {
-
-
-
-      final active =
-
-
-
-          await callController!
-
-
-
-              .checkActiveCall(
-
-
-
+      final active = await callController!.checkActiveCall(
         widget.conversationId,
-
-
-
       );
 
-
-
-
-
-
-
-      if (active != null &&
-
-
-
-          active.isActive) {
-
-
-
-        await callController!
-
-
-
-            .joinExistingCall(
-
-
-
-          active,
-
-
-
-        );
-
-
-
+      if (active != null && active.isActive) {
+        await callController!.joinExistingCall(active);
       } else {
-
-
-
-        await callController!
-
-
-
-            .startGroupCall(
-
-
-
-          conversationId:
-
-
-
-              widget.conversationId,
-
-
+        await callController!.startGroupCall(
+          conversationId: widget.conversationId,
 
           video: video,
-
-
-
         );
-
-
-
       }
-
-
-
-
-
-
 
       if (!mounted) {
-
-
-
         return;
-
-
-
       }
-
-
-
-
-
-
 
       Navigator.push(
-
-
-
         context,
 
-
-
         MaterialPageRoute(
-
-
-
-          builder: (context) =>
-
-
-
-              GroupCallScreen(
-
-
-
-            controller:
-
-
-
-                callController!,
-
-
-
-          ),
-
-
-
+          builder: (context) => GroupCallScreen(controller: callController!),
         ),
-
-
-
       );
-
-
-
     } catch (error) {
-
-
-
       if (!mounted) {
-
-
-
         return;
-
-
-
       }
 
-
-
-
-
-
-
       ScaffoldMessenger.of(context)
-
-
-
-          .showSnackBar(
-
-
-
-        SnackBar(
-
-
-
-          content: Text(
-
-
-
-            error.toString(),
-
-
-
-          ),
-
-
-
-        ),
-
-
-
-      );
-
-
-
+          .showSnackBar(SnackBar(content: Text(error.toString())));
     }
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // SEND TEXT
 
-
-
   // ============================================================
 
-
-
-
-
-
-
-  Future<void> _sendText(
-
-
-
-    String text,
-
-
-
-  ) async {
-
-
-
-    final value =
-
-
-
-        text.trim();
-
-
-
-
-
-
+  Future<void> _sendText(String text) async {
+    final value = text.trim();
 
     if (value.isEmpty) {
-
-
-
       return;
-
-
-
     }
 
-
-
-
-
-
-
     try {
-
-
-
-      await chatController.sendText(
-
-
-
-        value,
-
-
-
-      );
-
-
-
-
-
-
+      await chatController.sendText(value);
 
       AppHaptics.light();
-
-
-
-
-
-
 
       /*
 
@@ -1607,819 +435,183 @@ class _ConversationChatScreenState
 
        */
 
-
-
-      _scrollToBottom(
-
-
-
-        delay: const Duration(
-
-
-
-          milliseconds: 80,
-
-
-
-        ),
-
-
-
-      );
-
-
-
+      _scrollToBottom(delay: const Duration(milliseconds: 80));
     } catch (error) {
-
-
-
       _showError(error);
-
-
-
     }
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // SEND MEDIA
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   Future<void> _sendMedia(
-
-
-
     List<XFile> files,
-
-
 
     String caption,
 
-
-
     String type,
-
-
-
   ) async {
-
-
-
     if (files.isEmpty) {
-
-
-
       return;
-
-
-
     }
 
-
-
-
-
-
-
     try {
-
-
-
-      await chatController.sendMedia(
-
-
-
-        files,
-
-
-
-        text: caption,
-
-
-
-        type: type,
-
-
-
-      );
-
-
-
-
-
-
+      await chatController.sendMedia(files, text: caption, type: type);
 
       AppHaptics.light();
 
-
-
-
-
-
-
-      _scrollToBottom(
-
-
-
-        delay: const Duration(
-
-
-
-          milliseconds: 100,
-
-
-
-        ),
-
-
-
-      );
-
-
-
+      _scrollToBottom(delay: const Duration(milliseconds: 100));
     } catch (error) {
-
-
-
       _showError(error);
-
-
-
     }
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // DELETE
 
-
-
   // ============================================================
 
-
-
-
-
-
-
-  Future<void> _deleteMessage(
-
-
-
-    int messageId,
-
-
-
-  ) async {
-
-
-
+  Future<void> _deleteMessage(int messageId) async {
     try {
-
-
-
-      await chatController.deleteMessage(
-
-
-
-        messageId,
-
-
-
-      );
-
-
-
-
-
-
+      await chatController.deleteMessage(messageId);
 
       AppHaptics.medium();
-
-
-
     } catch (error) {
-
-
-
       _showError(error);
-
-
-
     }
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // ERROR
 
-
-
   // ============================================================
 
-
-
-
-
-
-
-  void _showError(
-
-
-
-    Object error,
-
-
-
-  ) {
-
-
-
+  void _showError(Object error) {
     if (!mounted) {
-
-
-
       return;
-
-
-
     }
-
-
-
-
-
-
 
     AppHaptics.heavy();
 
-
-
-
-
-
-
     ScaffoldMessenger.of(context)
-
-
-
-        .showSnackBar(
-
-
-
-      SnackBar(
-
-
-
-        content: Text(
-
-
-
-          error.toString(),
-
-
-
-        ),
-
-
-
-      ),
-
-
-
-    );
-
-
-
+        .showSnackBar(SnackBar(content: Text(error.toString())));
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // APP BAR
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   PreferredSizeWidget _buildAppBar() {
-
-
-
     return AppBar(
+      backgroundColor: const Color(0xff202c33),
 
-
-
-      backgroundColor:
-
-
-
-          const Color(
-
-
-
-        0xff202c33,
-
-
-
-      ),
-
-
-
-      foregroundColor:
-
-
-
-          Colors.white,
-
-
+      foregroundColor: Colors.white,
 
       leading: IconButton(
-
-
-
-        icon: const Icon(
-
-
-
-          Icons.arrow_back,
-
-
-
-        ),
-
-
+        icon: const Icon(Icons.arrow_back),
 
         onPressed: () {
-
-
-
           Navigator.pop(context);
-
-
-
         },
-
-
-
       ),
-
-
 
       titleSpacing: 0,
 
-
-
       title: GestureDetector(
-
-
-
-        behavior:
-
-
-
-            HitTestBehavior.opaque,
-
-
+        behavior: HitTestBehavior.opaque,
 
         onTap: openSettings,
 
-
-
         child: Padding(
-
-
-
-          padding:
-
-
-
-              const EdgeInsets.symmetric(
-
-
-
-            vertical: 6,
-
-
-
-          ),
-
-
+          padding: const EdgeInsets.symmetric(vertical: 6),
 
           child: Column(
+            mainAxisSize: MainAxisSize.min,
 
-
-
-            mainAxisSize:
-
-
-
-                MainAxisSize.min,
-
-
-
-            crossAxisAlignment:
-
-
-
-                CrossAxisAlignment.start,
-
-
+            crossAxisAlignment: CrossAxisAlignment.start,
 
             children: [
-
-
-
               Text(
-
-
-
                 widget.title,
-
-
 
                 maxLines: 1,
 
+                overflow: TextOverflow.ellipsis,
 
-
-                overflow:
-
-
-
-                    TextOverflow.ellipsis,
-
-
-
-                style:
-
-
-
-                    const TextStyle(
-
-
-
+                style: const TextStyle(
                   fontSize: 17,
 
-
-
-                  fontWeight:
-
-
-
-                      FontWeight.w600,
-
-
+                  fontWeight: FontWeight.w600,
 
                   color: Colors.white,
-
-
-
                 ),
-
-
-
               ),
 
-
-
-
-
-
-
-              if (widget.isGroup &&
-
-
-
-                  widget.members
-
-
-
-                      .trim()
-
-
-
-                      .isNotEmpty)
-
-
-
+              if (widget.isGroup && widget.members.trim().isNotEmpty)
                 Text(
-
-
-
                   widget.members,
-
-
 
                   maxLines: 1,
 
+                  overflow: TextOverflow.ellipsis,
 
-
-                  overflow:
-
-
-
-                      TextOverflow.ellipsis,
-
-
-
-                  style:
-
-
-
-                      const TextStyle(
-
-
-
-                    fontSize: 12,
-
-
-
-                    color:
-
-
-
-                        Colors.white70,
-
-
-
-                  ),
-
-
-
+                  style: const TextStyle(fontSize: 12, color: Colors.white70),
                 ),
-
-
-
             ],
-
-
-
           ),
-
-
-
         ),
-
-
-
       ),
 
-
-
       actions: [
-
-
-
         IconButton(
-
-
-
           tooltip: 'Video call',
 
-
-
           onPressed: () {
-
-
-
             startCall(true);
-
-
-
           },
 
-
-
-          icon: const Icon(
-
-
-
-            Icons.videocam_rounded,
-
-
-
-          ),
-
-
-
+          icon: const Icon(Icons.videocam_rounded),
         ),
-
-
 
         IconButton(
-
-
-
           tooltip: 'Audio call',
 
-
-
           onPressed: () {
-
-
-
             startCall(false);
-
-
-
           },
 
-
-
-          icon: const Icon(
-
-
-
-            Icons.call_rounded,
-
-
-
-          ),
-
-
-
+          icon: const Icon(Icons.call_rounded),
         ),
-
-
-
       ],
-
-
-
     );
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // MESSAGES
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   Widget _buildMessages() {
-
-
-
-    if (chatController.loading &&
-
-
-
-        chatController.messages.isEmpty) {
-
-
-
-      return const Center(
-
-
-
-        child:
-
-
-
-            CircularProgressIndicator(),
-
-
-
-      );
-
-
-
+    if (chatController.loading && chatController.messages.isEmpty) {
+      return const Center(child: CircularProgressIndicator());
     }
-
-
-
-
-
-
 
     if (chatController.messages.isEmpty) {
-
-
-
       return const Center(
-
-
-
-        child: Text(
-
-
-
-          'No messages yet',
-
-
-
-          style: TextStyle(
-
-
-
-            color: Colors.black54,
-
-
-
-          ),
-
-
-
-        ),
-
-
-
+        child: Text('No messages yet', style: TextStyle(color: Colors.black54)),
       );
-
-
-
     }
 
-
-
-
-
-
-
     return ListView.builder(
-
-
-
       controller: scrollController,
-
-
-
-
-
-
 
       /*
 
@@ -2454,132 +646,23 @@ class _ConversationChatScreenState
 
 
        */
-
-
-
       reverse: false,
 
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
 
+      padding: const EdgeInsets.only(left: 8, right: 8, top: 8, bottom: 8),
 
+      itemCount: chatController.messages.length,
 
+      itemBuilder: (context, index) {
+        final message = chatController.messages[index];
 
-
-
-      keyboardDismissBehavior:
-
-
-
-          ScrollViewKeyboardDismissBehavior
-
-
-
-              .onDrag,
-
-
-
-
-
-
-
-      padding:
-
-
-
-          const EdgeInsets.only(
-
-
-
-        left: 8,
-
-
-
-        right: 8,
-
-
-
-        top: 8,
-
-
-
-        bottom: 8,
-
-
-
-      ),
-
-
-
-
-
-
-
-      itemCount:
-
-
-
-          chatController.messages.length,
-
-
-
-
-
-
-
-      itemBuilder:
-
-
-
-          (context, index) {
-
-
-
-        final message =
-
-
-
-            chatController.messages[
-
-
-
-                index];
-
-
-
-
-
-
-
-        final isMine =
-
-
-
-            message.senderId ==
-
-
-
-            widget.currentUserId;
-
-
-
-
-
-
+        final isMine = message.senderId == widget.currentUserId;
 
         return MessageBubble(
-
-
-
           message: message,
 
-
-
           isMine: isMine,
-
-
-
-
-
-
 
           /*
 
@@ -2594,117 +677,31 @@ class _ConversationChatScreenState
 
 
            */
-
-
-
           onDelete: isMine
-
-
-
               ? () {
-
-
-
-                  _deleteMessage(
-
-
-
-                    message.id,
-
-
-
-                  );
-
-
-
+                  _deleteMessage(message.id);
                 }
-
-
-
               : null,
-
-
-
-
-
-
 
           // Resolve read-receipt user IDs to avatars/names learned
 
-
-
           // from the existing group message history.
+          readerAvatarResolver: chatController.avatarForUser,
 
-
-
-          readerAvatarResolver:
-
-
-
-              chatController.avatarForUser,
-
-
-
-          readerNameResolver:
-
-
-
-              chatController.nameForUser,
-
-
-
+          readerNameResolver: chatController.nameForUser,
         );
-
-
-
       },
-
-
-
     );
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // BUILD
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   @override
-
-
-
-  Widget build(
-
-
-
-    BuildContext context,
-
-
-
-  ) {
-
-
-
+  Widget build(BuildContext context) {
     /*
 
 
@@ -2731,315 +728,81 @@ class _ConversationChatScreenState
 
      */
 
-
-
     return Scaffold(
-
-
-
       resizeToAvoidBottomInset: true,
 
-
-
-
-
-
-
-      backgroundColor:
-
-
-
-          const Color(
-
-
-
-        0xffefeae2,
-
-
-
-      ),
-
-
-
-
-
-
+      backgroundColor: const Color(0xffefeae2),
 
       appBar: _buildAppBar(),
 
-
-
-
-
-
-
       body: SafeArea(
-
-
-
         child: Column(
-
-
-
           children: [
-
-
-
-            Expanded(
-
-
-
-              child:
-
-
-
-                  _buildMessages(),
-
-
-
-            ),
-
-
-
-
-
-
+            Expanded(child: _buildMessages()),
 
             if (chatController.someoneTyping)
-
-
-
               Padding(
-
-
-
                 padding: const EdgeInsets.fromLTRB(16, 5, 16, 4),
 
-
-
                 child: Align(
-
-
-
                   alignment: Alignment.centerLeft,
 
-
-
                   child: Text(
-
-
-
                     chatController.typingLabel,
-
-
 
                     maxLines: 1,
 
-
-
                     overflow: TextOverflow.ellipsis,
 
-
-
                     style: TextStyle(
-
-
-
                       fontSize: 12.5,
-
-
 
                       fontWeight: FontWeight.w600,
 
-
-
                       color: Theme.of(context).colorScheme.primary,
-
-
-
                     ),
-
-
-
                   ),
-
-
-
                 ),
-
-
-
               ),
 
-
-
-
-
-
-
             MessageComposer(
-
-
-
-              sending:
-
-
-
-                  chatController.sending,
-
-
-
-
-
-
+              sending: chatController.sending,
 
               onSendText: (text) async {
-
-
-
                 await chatController.stopTyping();
 
-
-
                 await _sendText(text);
-
-
-
               },
 
+              onTypingChanged: chatController.setTypingFromText,
 
-
-
-
-
-
-              onTypingChanged:
-
-
-
-                  chatController.setTypingFromText,
-
-
-
-
-
-
-
-              onSendMedia:
-
-
-
-                  _sendMedia,
-
-
-
+              onSendMedia: _sendMedia,
             ),
-
-
-
           ],
-
-
-
         ),
-
-
-
       ),
-
-
-
     );
-
-
-
   }
 
-
-
-
-
-
-
   // ============================================================
-
-
 
   // DISPOSE
 
-
-
   // ============================================================
 
-
-
-
-
-
-
   @override
-
-
-
   void dispose() {
-
-
-
     chatController.stopTyping();
-
-
 
     _disposed = true;
 
+    WidgetsBinding.instance.removeObserver(this);
 
-
-
-
-
-
-    WidgetsBinding.instance
-
-
-
-        .removeObserver(this);
-
-
-
-
-
-
-
-    chatController.removeListener(
-
-
-
-      _onChatControllerChanged,
-
-
-
-    );
-
-
-
-
-
-
+    chatController.removeListener(_onChatControllerChanged);
 
     chatController.dispose();
 
-
-
-
-
-
-
     callController?.dispose();
-
-
-
-
-
-
 
     /*
 
@@ -3055,30 +818,10 @@ class _ConversationChatScreenState
 
      */
 
-
-
     realtime.dispose();
-
-
-
-
-
-
 
     scrollController.dispose();
 
-
-
-
-
-
-
     super.dispose();
-
-
-
   }
-
-
-
 }

@@ -22,9 +22,9 @@ class _ProfileDataPageState extends State<ProfileDataPage> {
   late TextEditingController _businessController;
   late TextEditingController _bioController;
 
-  bool _showPhoneNumber = true;
-  bool _activeStatus = true;
-  bool _messageRequests = true;
+  final bool _showPhoneNumber = true;
+  final bool _activeStatus = true;
+  final bool _messageRequests = true;
 
   File? _selectedImage;
   String _networkImageUrl = '';
@@ -109,9 +109,8 @@ class _ProfileDataPageState extends State<ProfileDataPage> {
                 const SizedBox(height: 18),
                 Text(
                   'Change profile image',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 16),
                 ListTile(
@@ -166,11 +165,11 @@ class _ProfileDataPageState extends State<ProfileDataPage> {
     }
 
     final ok = await context.read<ProfileProvider>().updateProfile(
-          fullName: name,
-          businessName: _businessController.text.trim(),
-          bio: _bioController.text.trim(),
-          image: _selectedImage,
-        );
+      fullName: name,
+      businessName: _businessController.text.trim(),
+      bio: _bioController.text.trim(),
+      image: _selectedImage,
+    );
 
     if (!mounted) return;
 
@@ -204,10 +203,12 @@ class _ProfileDataPageState extends State<ProfileDataPage> {
     final bgColor = isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
     final cardColor = isDark ? const Color(0xFF111827) : Colors.white;
     final primaryText = isDark ? Colors.white : const Color(0xFF111827);
-    final secondaryText =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF65676B);
-    final dividerColor =
-        isDark ? const Color(0xFF243041) : const Color(0xFFE4E6EB);
+    final secondaryText = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF65676B);
+    final dividerColor = isDark
+        ? const Color(0xFF243041)
+        : const Color(0xFFE4E6EB);
     final subtleBg = isDark ? const Color(0xFF1E293B) : const Color(0xFFF3F4F6);
     const accent = Color(0xFF1877F2);
 
@@ -352,19 +353,16 @@ class _ProfileDataPageState extends State<ProfileDataPage> {
                     ),
                     child: ClipOval(
                       child: _selectedImage != null
-                          ? Image.file(
-                              _selectedImage!,
-                              fit: BoxFit.cover,
-                            )
+                          ? Image.file(_selectedImage!, fit: BoxFit.cover)
                           : _networkImageUrl.trim().isNotEmpty
-                              ? Image.network(
-                                  _networkImageUrl,
-                                  fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) {
-                                    return _fallbackImage();
-                                  },
-                                )
-                              : _fallbackImage(),
+                          ? Image.network(
+                              _networkImageUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) {
+                                return _fallbackImage();
+                              },
+                            )
+                          : _fallbackImage(),
                     ),
                   ),
                   Positioned(
@@ -626,11 +624,7 @@ class _SectionTitle extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(18, 18, 18, 10),
       child: Row(
         children: [
-          Icon(
-            icon,
-            color: const Color(0xFF1877F2),
-            size: 20,
-          ),
+          Icon(icon, color: const Color(0xFF1877F2), size: 20),
           const SizedBox(width: 10),
           Text(
             title,
@@ -759,11 +753,7 @@ class _EditableFieldTile extends StatelessWidget {
         if (showDivider)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Divider(
-              height: 1,
-              thickness: 1,
-              color: dividerColor,
-            ),
+            child: Divider(height: 1, thickness: 1, color: dividerColor),
           ),
       ],
     );
@@ -835,11 +825,7 @@ class _SwitchTileRow extends StatelessWidget {
         if (showDivider)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Divider(
-              height: 1,
-              thickness: 1,
-              color: dividerColor,
-            ),
+            child: Divider(height: 1, thickness: 1, color: dividerColor),
           ),
       ],
     );

@@ -26,8 +26,9 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
     with WidgetsBindingObserver {
   final SimplePip _pip = SimplePip();
 
-  static const MethodChannel _nativePipChannel =
-      MethodChannel('messaging_app/native_pip');
+  static const MethodChannel _nativePipChannel = MethodChannel(
+    'messaging_app/native_pip',
+  );
 
   ProviderSubscription<CallState>? _callStateSubscription;
   ProviderSubscription<bool>? _callScreenVisibleSubscription;
@@ -50,7 +51,8 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
   }
 
   bool _hasActiveCall(CallState state) {
-    final hasUsers = state.currentUserId?.trim().isNotEmpty == true &&
+    final hasUsers =
+        state.currentUserId?.trim().isNotEmpty == true &&
         state.receiverId?.trim().isNotEmpty == true;
 
     return hasUsers && !_isFinalStatus(state.status);
@@ -75,30 +77,30 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
     WidgetsBinding.instance.addObserver(this);
     _nativePipChannel.setMethodCallHandler(_handleNativePipMethod);
 
-    _callStateSubscription = ref.listenManual<CallState>(
-      callProvider,
-      (previous, next) {
-        _syncNativeCallActive(next);
+    _callStateSubscription = ref.listenManual<CallState>(callProvider, (
+      previous,
+      next,
+    ) {
+      _syncNativeCallActive(next);
 
-        if (!_hasActiveCall(next)) {
-          _clearAllCallUiFlags();
-        }
-      },
-    );
+      if (!_hasActiveCall(next)) {
+        _clearAllCallUiFlags();
+      }
+    });
 
     _callScreenVisibleSubscription = ref.listenManual<bool>(
       callScreenVisibleProvider,
-      (_, __) => _syncNativeCallActive(ref.read(callProvider)),
+      (_, _) => _syncNativeCallActive(ref.read(callProvider)),
     );
 
     _callScreenMinimizedSubscription = ref.listenManual<bool>(
       callScreenMinimizedProvider,
-      (_, __) => _syncNativeCallActive(ref.read(callProvider)),
+      (_, _) => _syncNativeCallActive(ref.read(callProvider)),
     );
 
     _forceCallPipSurfaceSubscription = ref.listenManual<bool>(
       forceCallPipSurfaceProvider,
-      (_, __) => _syncNativeCallActive(ref.read(callProvider)),
+      (_, _) => _syncNativeCallActive(ref.read(callProvider)),
     );
 
     Future.microtask(() {
@@ -147,7 +149,9 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
     debugPrint('ACTIVE CALL: ${_hasActiveCall(callState)}');
     debugPrint('CALL STATUS: ${callState.status}');
     debugPrint('CALLSCREEN VISIBLE: ${ref.read(callScreenVisibleProvider)}');
-    debugPrint('MINI OVERLAY VISIBLE: ${ref.read(callScreenMinimizedProvider)}');
+    debugPrint(
+      'MINI OVERLAY VISIBLE: ${ref.read(callScreenMinimizedProvider)}',
+    );
     debugPrint('FORCE PIP SURFACE: ${ref.read(forceCallPipSurfaceProvider)}');
 
     if (!_hasActiveCall(callState)) {
@@ -170,7 +174,8 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
     }
 
     if (call.method == 'onPipExited' || call.method == 'onActivityResume') {
-      final shouldOpen = ref.read(openCallScreenFromPipProvider) ||
+      final shouldOpen =
+          ref.read(openCallScreenFromPipProvider) ||
           ref.read(forceCallPipSurfaceProvider) ||
           ref.read(appWasInPhonePipProvider);
 
@@ -263,7 +268,8 @@ class _CallLifecycleWatcherState extends ConsumerState<CallLifecycleWatcher>
     }
 
     if (lifecycleState == AppLifecycleState.resumed) {
-      final shouldOpen = ref.read(openCallScreenFromPipProvider) ||
+      final shouldOpen =
+          ref.read(openCallScreenFromPipProvider) ||
           ref.read(forceCallPipSurfaceProvider) ||
           ref.read(appWasInPhonePipProvider);
 

@@ -1,8 +1,6 @@
-
 import 'package:flutter/material.dart';
 import 'package:hiddenly/chat_models.dart';
 import 'package:hiddenly/theme_controller.dart';
-
 
 class ConversationSearchPage extends StatefulWidget {
   final String chatName;
@@ -49,7 +47,7 @@ class _ConversationSearchPageState extends State<ConversationSearchPage> {
     }
 
     final filtered = widget.messages.where((message) {
-      final text = (message.text ?? '').toString().toLowerCase();
+      final text = message.text.toLowerCase();
       final fileName = (message.fileName ?? '').toString().toLowerCase();
       return text.contains(q) || fileName.contains(q);
     }).toList();
@@ -62,7 +60,7 @@ class _ConversationSearchPageState extends State<ConversationSearchPage> {
   }
 
   String _preview(ChatMessage message) {
-    if ((message.text ?? '').toString().trim().isNotEmpty) {
+    if (message.text.trim().isNotEmpty) {
       return message.text.toString().trim();
     }
 
@@ -108,7 +106,9 @@ class _ConversationSearchPageState extends State<ConversationSearchPage> {
       }
 
       if (index > start) {
-        spans.add(TextSpan(text: source.substring(start, index), style: normal));
+        spans.add(
+          TextSpan(text: source.substring(start, index), style: normal),
+        );
       }
 
       spans.add(
@@ -138,10 +138,12 @@ class _ConversationSearchPageState extends State<ConversationSearchPage> {
     final bgColor = isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
     final cardColor = isDark ? const Color(0xFF111827) : Colors.white;
     final primaryText = isDark ? Colors.white : const Color(0xFF111827);
-    final secondaryText =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF65676B);
-    final dividerColor =
-        isDark ? const Color(0xFF243041) : const Color(0xFFE4E6EB);
+    final secondaryText = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF65676B);
+    final dividerColor = isDark
+        ? const Color(0xFF243041)
+        : const Color(0xFFE4E6EB);
     final fieldBg = isDark ? const Color(0xFF1E293B) : const Color(0xFFF3F4F6);
     const accent = Color(0xFF1877F2);
 
@@ -188,9 +190,7 @@ class _ConversationSearchPageState extends State<ConversationSearchPage> {
                               ),
                               decoration: InputDecoration(
                                 hintText: 'Search in conversation',
-                                hintStyle: TextStyle(
-                                  color: secondaryText,
-                                ),
+                                hintStyle: TextStyle(color: secondaryText),
                                 border: InputBorder.none,
                               ),
                             ),
@@ -226,101 +226,102 @@ class _ConversationSearchPageState extends State<ConversationSearchPage> {
                       ),
                     )
                   : _results.isEmpty
-                      ? Center(
-                          child: Text(
-                            'No results found',
-                            style: TextStyle(
-                              color: secondaryText,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
+                  ? Center(
+                      child: Text(
+                        'No results found',
+                        style: TextStyle(
+                          color: secondaryText,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    )
+                  : ListView.separated(
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                      itemCount: _results.length,
+                      separatorBuilder: (_, _) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) {
+                        final message = _results[index];
+                        final preview = _preview(message);
+
+                        return Material(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(20),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(20),
+                            onTap: () {
+                              Navigator.pop(context, message.id);
+                            },
+                            child: Container(
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(color: dividerColor),
+                              ),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    width: 44,
+                                    height: 44,
+                                    decoration: BoxDecoration(
+                                      color: const Color(0x141877F2),
+                                      borderRadius: BorderRadius.circular(14),
+                                    ),
+                                    child: const Icon(
+                                      Icons.chat_bubble_rounded,
+                                      color: accent,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        RichText(
+                                          maxLines: 2,
+                                          overflow: TextOverflow.ellipsis,
+                                          text: _highlight(
+                                            preview,
+                                            query,
+                                            TextStyle(
+                                              color: secondaryText,
+                                              fontSize: 14.2,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                            TextStyle(
+                                              color: primaryText,
+                                              fontSize: 14.2,
+                                              fontWeight: FontWeight.w800,
+                                              backgroundColor: const Color(
+                                                0x331877F2,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        Text(
+                                          _formatTime(message.sentAt),
+                                          style: TextStyle(
+                                            color: secondaryText,
+                                            fontSize: 12.8,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  Icon(
+                                    Icons.chevron_right_rounded,
+                                    color: secondaryText,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
-                        )
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          itemCount: _results.length,
-                          separatorBuilder: (_, _) => const SizedBox(height: 10),
-                          itemBuilder: (context, index) {
-                            final message = _results[index];
-                            final preview = _preview(message);
-
-                            return Material(
-                              color: cardColor,
-                              borderRadius: BorderRadius.circular(20),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(20),
-                                onTap: () {
-                                  Navigator.pop(context, message.id);
-                                },
-                                child: Container(
-                                  padding: const EdgeInsets.all(14),
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(20),
-                                    border: Border.all(color: dividerColor),
-                                  ),
-                                  child: Row(
-                                    children: [
-                                      Container(
-                                        width: 44,
-                                        height: 44,
-                                        decoration: BoxDecoration(
-                                          color: const Color(0x141877F2),
-                                          borderRadius: BorderRadius.circular(14),
-                                        ),
-                                        child: const Icon(
-                                          Icons.chat_bubble_rounded,
-                                          color: accent,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 12),
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            RichText(
-                                              maxLines: 2,
-                                              overflow: TextOverflow.ellipsis,
-                                              text: _highlight(
-                                                preview,
-                                                query,
-                                                TextStyle(
-                                                  color: secondaryText,
-                                                  fontSize: 14.2,
-                                                  fontWeight: FontWeight.w500,
-                                                ),
-                                                TextStyle(
-                                                  color: primaryText,
-                                                  fontSize: 14.2,
-                                                  fontWeight: FontWeight.w800,
-                                                  backgroundColor:
-                                                      const Color(0x331877F2),
-                                                ),
-                                              ),
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              _formatTime(message.sentAt),
-                                              style: TextStyle(
-                                                color: secondaryText,
-                                                fontSize: 12.8,
-                                                fontWeight: FontWeight.w600,
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                      Icon(
-                                        Icons.chevron_right_rounded,
-                                        color: secondaryText,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            );
-                          },
-                        ),
+                        );
+                      },
+                    ),
             ),
           ],
         ),

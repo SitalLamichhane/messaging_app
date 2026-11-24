@@ -21,67 +21,67 @@ class ApiClient {
     ),
   );
 
-  static final Dio dio = Dio(
-    BaseOptions(
-      baseUrl: baseUrl,
-      connectTimeout: const Duration(seconds: 60),
-      receiveTimeout: const Duration(seconds: 60),
-      sendTimeout: const Duration(seconds: 60),
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    ),
-  )..interceptors.add(
-      InterceptorsWrapper(
-        onRequest: (options, handler) async {
-          if (_isAuthRoute(options.path)) {
-            options.headers.remove('Authorization');
-          } else {
-            final access = await storage.read(key: 'access');
+  static final Dio dio =
+      Dio(
+          BaseOptions(
+            baseUrl: baseUrl,
+            connectTimeout: const Duration(seconds: 60),
+            receiveTimeout: const Duration(seconds: 60),
+            sendTimeout: const Duration(seconds: 60),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+          ),
+        )
+        ..interceptors.add(
+          InterceptorsWrapper(
+            onRequest: (options, handler) async {
+              if (_isAuthRoute(options.path)) {
+                options.headers.remove('Authorization');
+              } else {
+                final access = await storage.read(key: 'access');
 
-            if (access != null && access.isNotEmpty) {
-              options.headers['Authorization'] =
-                  'Bearer ${access.trim()}';
-            }
-          }
-
-          _logRequest(options);
-          handler.next(options);
-        },
-
-        onResponse: (response, handler) {
-          _logResponse(response);
-          handler.next(response);
-        },
-
-        onError: (DioException e, handler) async {
-          _logError(e);
-
-          final isAuth = _isAuthRoute(e.requestOptions.path);
-
-          if (e.response?.statusCode == 401 && !isAuth) {
-            final newAccess = await _refreshToken();
-
-            if (newAccess != null && newAccess.isNotEmpty) {
-              try {
-                final request = e.requestOptions;
-
-                request.headers['Authorization'] =
-                    'Bearer $newAccess';
-
-                final retryResponse = await dio.fetch(request);
-                return handler.resolve(retryResponse);
-              } catch (retryError) {
-                debugPrint('RETRY FAILED: $retryError');
+                if (access != null && access.isNotEmpty) {
+                  options.headers['Authorization'] = 'Bearer ${access.trim()}';
+                }
               }
-            }
-          }
 
-          handler.next(e);
-        },
-      ),
-    );
+              _logRequest(options);
+              handler.next(options);
+            },
+
+            onResponse: (response, handler) {
+              _logResponse(response);
+              handler.next(response);
+            },
+
+            onError: (DioException e, handler) async {
+              _logError(e);
+
+              final isAuth = _isAuthRoute(e.requestOptions.path);
+
+              if (e.response?.statusCode == 401 && !isAuth) {
+                final newAccess = await _refreshToken();
+
+                if (newAccess != null && newAccess.isNotEmpty) {
+                  try {
+                    final request = e.requestOptions;
+
+                    request.headers['Authorization'] = 'Bearer $newAccess';
+
+                    final retryResponse = await dio.fetch(request);
+                    return handler.resolve(retryResponse);
+                  } catch (retryError) {
+                    debugPrint('RETRY FAILED: $retryError');
+                  }
+                }
+              }
+
+              handler.next(e);
+            },
+          ),
+        );
 
   // ---------------------------
   // AUTH ROUTES
@@ -113,15 +113,11 @@ class ApiClient {
         return null;
       }
 
-      await storage.write(
-        key: 'access',
-        value: newAccess.toString(),
-      );
+      await storage.write(key: 'access', value: newAccess.toString());
 
       return newAccess.toString();
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401 ||
-          e.response?.statusCode == 403) {
+      if (e.response?.statusCode == 401 || e.response?.statusCode == 403) {
         await clearTokens();
       }
 
@@ -132,9 +128,10 @@ class ApiClient {
       return null;
     }
   }
+
   static Future<String?> refreshAccessToken() async {
-  return await _refreshToken();
- }
+    return await _refreshToken();
+  }
 
   // ---------------------------
   // TOKEN HELPERS
@@ -147,11 +144,9 @@ class ApiClient {
     await storage.write(key: 'refresh', value: refresh.trim());
   }
 
-  static Future<String?> getAccessToken() =>
-      storage.read(key: 'access');
+  static Future<String?> getAccessToken() => storage.read(key: 'access');
 
-  static Future<String?> getRefreshToken() =>
-      storage.read(key: 'refresh');
+  static Future<String?> getRefreshToken() => storage.read(key: 'refresh');
 
   static Future<void> clearTokens() async {
     await storage.delete(key: 'access');

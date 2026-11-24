@@ -21,19 +21,14 @@ Future<void> startGroupCallFromChat({
 
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => GroupCallScreen(
-          controller: controller,
-        ),
+        builder: (_) => GroupCallScreen(controller: controller),
       ),
     );
   } catch (e) {
     if (!context.mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Unable to start call: $e'),
-      ),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('Unable to start call: $e')));
   }
 }
 
@@ -50,18 +45,13 @@ Future<void> joinOngoingGroupCall({
 
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => GroupCallScreen(
-          controller: controller,
-        ),
+        builder: (_) => GroupCallScreen(controller: controller),
       ),
     );
   } catch (e) {
     if (!context.mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Unable to join call: $e'),
-      ),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('Unable to join call: $e')));
   }
 }

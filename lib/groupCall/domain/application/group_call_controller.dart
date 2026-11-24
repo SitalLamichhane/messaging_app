@@ -30,8 +30,7 @@ class GroupCallController extends ChangeNotifier {
 
   String? _error;
 
-  StreamSubscription<ConversationRealtimeEvent>?
-      _realtimeSubscription;
+  StreamSubscription<ConversationRealtimeEvent>? _realtimeSubscription;
 
   bool _disposed = false;
 
@@ -43,22 +42,13 @@ class GroupCallController extends ChangeNotifier {
     required this.api,
     required this.realtime,
     LiveKitMediaService? liveKit,
-  }) : liveKit =
-            liveKit ?? LiveKitMediaService() {
-    this.liveKit.addListener(
-          _forwardMediaChanges,
-        );
+  }) : liveKit = liveKit ?? LiveKitMediaService() {
+    this.liveKit.addListener(_forwardMediaChanges);
 
-    _realtimeSubscription =
-        realtime.events.listen(
+    _realtimeSubscription = realtime.events.listen(
       _onRealtimeEvent,
-      onError: (
-        Object error,
-        StackTrace stackTrace,
-      ) {
-        debugPrint(
-          '[GROUP CALL] realtime error: $error',
-        );
+      onError: (Object error, StackTrace stackTrace) {
+        debugPrint('[GROUP CALL] realtime error: $error');
       },
     );
   }
@@ -67,8 +57,7 @@ class GroupCallController extends ChangeNotifier {
 
   CallSessionDto? get call => _call;
 
-  CallSessionDto? get activeDiscoveredCall =>
-      _activeDiscoveredCall;
+  CallSessionDto? get activeDiscoveredCall => _activeDiscoveredCall;
 
   String? get error => _error;
 
@@ -85,9 +74,7 @@ class GroupCallController extends ChangeNotifier {
       }.contains(_phase);
 
   bool get connected =>
-      !_disposed &&
-      _phase == GroupCallPhase.connected &&
-      liveKit.connected;
+      !_disposed && _phase == GroupCallPhase.connected && liveKit.connected;
 
   void _safeNotify() {
     if (!_disposed) {
@@ -99,15 +86,12 @@ class GroupCallController extends ChangeNotifier {
     _safeNotify();
   }
 
-  Future<CallSessionDto?> checkActiveCall(
-    int requestedConversationId,
-  ) async {
+  Future<CallSessionDto?> checkActiveCall(int requestedConversationId) async {
     if (_disposed) {
       return null;
     }
 
-    if (requestedConversationId !=
-        conversationId) {
+    if (requestedConversationId != conversationId) {
       throw ArgumentError(
         'GroupCallController belongs to conversation '
         '$conversationId, not $requestedConversationId.',
@@ -119,24 +103,18 @@ class GroupCallController extends ChangeNotifier {
     _safeNotify();
 
     try {
-      final result =
-          await api.getActiveGroupCall(
-        conversationId,
-      );
+      final result = await api.getActiveGroupCall(conversationId);
 
       if (_disposed) {
         return null;
       }
 
       _activeDiscoveredCall =
-          result.active &&
-                  result.call != null &&
-                  result.call!.isActive
-              ? result.call
-              : null;
+          result.active && result.call != null && result.call!.isActive
+          ? result.call
+          : null;
 
-      if (_call != null &&
-          liveKit.connected) {
+      if (_call != null && liveKit.connected) {
         _phase = GroupCallPhase.connected;
       } else {
         _phase = GroupCallPhase.idle;
@@ -152,8 +130,7 @@ class GroupCallController extends ChangeNotifier {
 
       _error = e.toString();
 
-      if (_call != null &&
-          liveKit.connected) {
+      if (_call != null && liveKit.connected) {
         _phase = GroupCallPhase.connected;
       } else {
         _phase = GroupCallPhase.idle;
@@ -173,15 +150,11 @@ class GroupCallController extends ChangeNotifier {
       return;
     }
 
-    if (conversationId !=
-        this.conversationId) {
-      throw ArgumentError(
-        'Wrong conversation for this call controller.',
-      );
+    if (conversationId != this.conversationId) {
+      throw ArgumentError('Wrong conversation for this call controller.');
     }
 
-    if (_joining ||
-        _phase == GroupCallPhase.connected) {
+    if (_joining || _phase == GroupCallPhase.connected) {
       return;
     }
 
@@ -190,8 +163,7 @@ class GroupCallController extends ChangeNotifier {
     _safeNotify();
 
     try {
-      final started =
-          await api.startGroupCall(
+      final started = await api.startGroupCall(
         conversationId: conversationId,
         isVideo: video,
       );
@@ -220,21 +192,15 @@ class GroupCallController extends ChangeNotifier {
       // Only the explicitly identified same-conversation conflict can
       // be resolved by looking up an existing group call.
       if (e.isExistingConversationCall) {
-        final active =
-            await api.getActiveGroupCall(
-          conversationId,
-        );
+        final active = await api.getActiveGroupCall(conversationId);
 
         if (_disposed) {
           return;
         }
 
-        if (active.active &&
-            active.call != null &&
-            active.call!.isActive) {
+        if (active.active && active.call != null && active.call!.isActive) {
           _call = active.call;
-          _activeDiscoveredCall =
-              active.call;
+          _activeDiscoveredCall = active.call;
 
           await _joinCurrentCall();
 
@@ -260,35 +226,25 @@ class GroupCallController extends ChangeNotifier {
     }
   }
 
-  Future<void> joinExistingCall(
-    CallSessionDto call,
-  ) async {
+  Future<void> joinExistingCall(CallSessionDto call) async {
     if (_disposed) {
       return;
     }
 
-    if (_joining ||
-        connected) {
+    if (_joining || connected) {
       return;
     }
 
-    if (call.conversationId !=
-        conversationId) {
-      throw ArgumentError(
-        'Call belongs to another conversation.',
-      );
+    if (call.conversationId != conversationId) {
+      throw ArgumentError('Call belongs to another conversation.');
     }
 
     if (!call.isGroup) {
-      throw ArgumentError(
-        'Call is not a group call.',
-      );
+      throw ArgumentError('Call is not a group call.');
     }
 
     if (!call.isActive) {
-      throw StateError(
-        'Group call is no longer active.',
-      );
+      throw StateError('Group call is no longer active.');
     }
 
     _call = call;
@@ -306,9 +262,7 @@ class GroupCallController extends ChangeNotifier {
     final selectedCall = _call;
 
     if (selectedCall == null) {
-      throw StateError(
-        'No call selected.',
-      );
+      throw StateError('No call selected.');
     }
 
     _joining = true;
@@ -323,10 +277,7 @@ class GroupCallController extends ChangeNotifier {
        *
        * Therefore we don't call "accept" separately.
        */
-      final credentials =
-          await api.getLiveKitToken(
-        selectedCall.callId,
-      );
+      final credentials = await api.getLiveKitToken(selectedCall.callId);
 
       if (_disposed) {
         return;
@@ -334,8 +285,7 @@ class GroupCallController extends ChangeNotifier {
 
       await liveKit.connect(
         credentials: credentials,
-        startWithVideo:
-            selectedCall.isVideo,
+        startWithVideo: selectedCall.isVideo,
       );
 
       if (_disposed) {
@@ -348,11 +298,9 @@ class GroupCallController extends ChangeNotifier {
       }
 
       _call = selectedCall.copyWith(
-        status:
-            selectedCall.status ==
-                    CallSessionStatus.ringing
-                ? CallSessionStatus.accepted
-                : selectedCall.status,
+        status: selectedCall.status == CallSessionStatus.ringing
+            ? CallSessionStatus.accepted
+            : selectedCall.status,
         roomName: credentials.roomName,
         myParticipantStatus: 'joined',
       );
@@ -384,31 +332,23 @@ class GroupCallController extends ChangeNotifier {
     }
   }
 
-  Future<void> declineIncoming(
-    CallSessionDto call,
-  ) async {
+  Future<void> declineIncoming(CallSessionDto call) async {
     if (_disposed) {
       return;
     }
 
-    if (call.conversationId !=
-        conversationId) {
+    if (call.conversationId != conversationId) {
       return;
     }
 
     try {
-      await api.updateStatus(
-        callId: call.callId,
-        action: 'reject',
-      );
+      await api.updateStatus(callId: call.callId, action: 'reject');
     } finally {
-      if (_call?.callId ==
-          call.callId) {
+      if (_call?.callId == call.callId) {
         _call = null;
       }
 
-      if (_activeDiscoveredCall?.callId ==
-          call.callId) {
+      if (_activeDiscoveredCall?.callId == call.callId) {
         _activeDiscoveredCall = null;
       }
 
@@ -443,10 +383,7 @@ class GroupCallController extends ChangeNotifier {
     try {
       if (selectedCall != null) {
         try {
-          await api.updateStatus(
-            callId: selectedCall.callId,
-            action: 'leave',
-          );
+          await api.updateStatus(callId: selectedCall.callId, action: 'leave');
         } catch (e) {
           requestError = e;
         }
@@ -466,18 +403,13 @@ class GroupCallController extends ChangeNotifier {
        * the whole call ended.
        */
       try {
-        final active =
-            await api.getActiveGroupCall(
-          conversationId,
-        );
+        final active = await api.getActiveGroupCall(conversationId);
 
         if (!_disposed) {
           _activeDiscoveredCall =
-              active.active &&
-                      active.call != null &&
-                      active.call!.isActive
-                  ? active.call
-                  : null;
+              active.active && active.call != null && active.call!.isActive
+              ? active.call
+              : null;
         }
       } catch (e) {
         debugPrint(
@@ -499,9 +431,7 @@ class GroupCallController extends ChangeNotifier {
     }
   }
 
-  void _onRealtimeEvent(
-    ConversationRealtimeEvent event,
-  ) {
+  void _onRealtimeEvent(ConversationRealtimeEvent event) {
     if (_disposed) {
       return;
     }
@@ -509,15 +439,9 @@ class GroupCallController extends ChangeNotifier {
     final data = event.data;
 
     final eventConversationId =
-        int.tryParse(
-          (data['conversation_id'] ?? '')
-              .toString(),
-        ) ??
-        0;
+        int.tryParse((data['conversation_id'] ?? '').toString()) ?? 0;
 
-    if (eventConversationId != 0 &&
-        eventConversationId !=
-            conversationId) {
+    if (eventConversationId != 0 && eventConversationId != conversationId) {
       return;
     }
 
@@ -532,9 +456,7 @@ class GroupCallController extends ChangeNotifier {
 
       case 'call_participant_joined':
       case 'call_participant_left':
-        unawaited(
-          _refreshActiveCallSilently(),
-        );
+        unawaited(_refreshActiveCallSilently());
         break;
 
       default:
@@ -542,22 +464,17 @@ class GroupCallController extends ChangeNotifier {
     }
   }
 
-  void _handleIncomingRealtime(
-    Map<String, dynamic> data,
-  ) {
+  void _handleIncomingRealtime(Map<String, dynamic> data) {
     try {
-      final incoming =
-          CallSessionDto.fromJson(data);
+      final incoming = CallSessionDto.fromJson(data);
 
       if (!incoming.isGroup ||
           !incoming.isActive ||
-          incoming.conversationId !=
-              conversationId) {
+          incoming.conversationId != conversationId) {
         return;
       }
 
-      _activeDiscoveredCall =
-          incoming;
+      _activeDiscoveredCall = incoming;
 
       _safeNotify();
     } catch (e) {
@@ -568,31 +485,18 @@ class GroupCallController extends ChangeNotifier {
     }
   }
 
-  void _handleStatusRealtime(
-    Map<String, dynamic> data,
-  ) {
+  void _handleStatusRealtime(Map<String, dynamic> data) {
     final eventCallId =
-        int.tryParse(
-          (data['call_id'] ??
-                  data['id'] ??
-                  '')
-              .toString(),
-        ) ??
-        0;
+        int.tryParse((data['call_id'] ?? data['id'] ?? '').toString()) ?? 0;
 
-    final status =
-        CallSessionStatus.fromJson(
-      data['status'],
-    );
+    final status = CallSessionStatus.fromJson(data['status']);
 
     /*
      * Ignore events belonging to another call
      * in the same conversation.
      */
     if (eventCallId > 0) {
-      final knownCallId =
-          _call?.callId ??
-          _activeDiscoveredCall?.callId;
+      final knownCallId = _call?.callId ?? _activeDiscoveredCall?.callId;
 
       if (knownCallId != null &&
           knownCallId > 0 &&
@@ -602,26 +506,18 @@ class GroupCallController extends ChangeNotifier {
     }
 
     if (_activeDiscoveredCall != null) {
-      _activeDiscoveredCall =
-          _activeDiscoveredCall!.copyWith(
-        status: status,
-      );
+      _activeDiscoveredCall = _activeDiscoveredCall!.copyWith(status: status);
     }
 
     if (_call != null) {
-      _call = _call!.copyWith(
-        status: status,
-      );
+      _call = _call!.copyWith(status: status);
     }
 
     if (status.isTerminal) {
       _activeDiscoveredCall = null;
 
-      if (_call != null ||
-          liveKit.connected) {
-        unawaited(
-          _endMediaLocally(),
-        );
+      if (_call != null || liveKit.connected) {
+        unawaited(_endMediaLocally());
       } else {
         _phase = GroupCallPhase.ended;
         _safeNotify();
@@ -639,21 +535,16 @@ class GroupCallController extends ChangeNotifier {
     }
 
     try {
-      final result =
-          await api.getActiveGroupCall(
-        conversationId,
-      );
+      final result = await api.getActiveGroupCall(conversationId);
 
       if (_disposed) {
         return;
       }
 
       _activeDiscoveredCall =
-          result.active &&
-                  result.call != null &&
-                  result.call!.isActive
-              ? result.call
-              : null;
+          result.active && result.call != null && result.call!.isActive
+          ? result.call
+          : null;
 
       _safeNotify();
     } catch (e) {
@@ -710,12 +601,9 @@ class GroupCallController extends ChangeNotifier {
 
     _disposed = true;
 
-    liveKit.removeListener(
-      _forwardMediaChanges,
-    );
+    liveKit.removeListener(_forwardMediaChanges);
 
-    final subscription =
-        _realtimeSubscription;
+    final subscription = _realtimeSubscription;
 
     _realtimeSubscription = null;
 

@@ -35,8 +35,11 @@ class CallApiException implements Exception {
     final body = error.response?.data;
     String message = 'Call request failed';
     if (body is Map) {
-      final candidate = body['error'] ?? body['detail'] ??
-          body['message'] ?? body['non_field_errors'];
+      final candidate =
+          body['error'] ??
+          body['detail'] ??
+          body['message'] ??
+          body['non_field_errors'];
       if (candidate is List && candidate.isNotEmpty) {
         message = candidate.first.toString();
       } else if (candidate != null) {
@@ -55,9 +58,8 @@ class CallApiException implements Exception {
   }
 
   @override
-  String toString() => statusCode == null
-      ? message
-      : 'CallApiException($statusCode): $message';
+  String toString() =>
+      statusCode == null ? message : 'CallApiException($statusCode): $message';
 }
 
 class CallApiService {
@@ -101,10 +103,7 @@ class CallApiService {
     try {
       final response = await dio.post(
         endpoint,
-        data: {
-          'conversation_id': conversationId,
-          'is_video_call': isVideo,
-        },
+        data: {'conversation_id': conversationId, 'is_video_call': isVideo},
       );
       final raw = _unwrapMap(
         response.data,
@@ -143,10 +142,7 @@ class CallApiService {
     }
     const endpoint = '/chat/calls/livekit-token/';
     try {
-      final response = await dio.post(
-        endpoint,
-        data: {'call_id': callId},
-      );
+      final response = await dio.post(endpoint, data: {'call_id': callId});
       final raw = _unwrapMap(
         response.data,
         endpoint,
@@ -206,11 +202,7 @@ class CallApiService {
     final endpoint = '/chat/conversations/$conversationId/active-call/';
     try {
       final response = await dio.get(endpoint);
-      final raw = _unwrapMap(
-        response.data,
-        endpoint,
-        keys: const ['data'],
-      );
+      final raw = _unwrapMap(response.data, endpoint, keys: const ['data']);
       return ActiveCallResult.fromJson(raw);
     } on CallApiException {
       rethrow;

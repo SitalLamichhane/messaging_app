@@ -37,7 +37,7 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  int _selectedBottomIndex = 2;
+  final int _selectedBottomIndex = 2;
   bool _notificationsEnabled = true;
 
   final ImagePicker _picker = ImagePicker();
@@ -56,9 +56,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _openProfileDataPage(UserProfile profile) async {
     final result = await Navigator.push<bool>(
       context,
-      MaterialPageRoute(
-        builder: (_) => const ProfileDataPage(),
-      ),
+      MaterialPageRoute(builder: (_) => const ProfileDataPage()),
     );
 
     if (!mounted) return;
@@ -86,7 +84,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         maxHeight: 1200,
       );
 
-      if (picked == null) return;
+      if (picked == null || !mounted) return;
 
       final file = File(picked.path);
 
@@ -151,9 +149,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 18),
                 Text(
                   'Update profile image',
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                  style: Theme.of(context).textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800),
                 ),
                 const SizedBox(height: 16),
                 ListTile(
@@ -214,12 +211,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         currentUserAvatar: profile.imageUrl,
       );
     }
-
     // PagesScreen temporarily commented.
     // else if (index == 2) {
     //   page = const PagesScreen();
     // }
-
     else if (index == 2) {
       return;
     }
@@ -246,9 +241,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ),
           title: Text(
             'Logout',
-            style: textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
+            style: textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
           ),
           content: Text(
             'Are you sure you want to logout?',
@@ -306,10 +299,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final bgColor = isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F2F5);
     final cardColor = isDark ? const Color(0xFF111827) : Colors.white;
     final primaryText = isDark ? Colors.white : const Color(0xFF111827);
-    final secondaryText =
-        isDark ? const Color(0xFF94A3B8) : const Color(0xFF65676B);
-    final dividerColor =
-        isDark ? const Color(0xFF243041) : const Color(0xFFE4E6EB);
+    final secondaryText = isDark
+        ? const Color(0xFF94A3B8)
+        : const Color(0xFF65676B);
+    final dividerColor = isDark
+        ? const Color(0xFF243041)
+        : const Color(0xFFE4E6EB);
     const accent = Color(0xFF1877F2);
 
     return Scaffold(
@@ -358,8 +353,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             ),
                             const SizedBox(height: 14),
                             Padding(
-                              padding:
-                                  const EdgeInsets.symmetric(horizontal: 16),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(20),
                                 onTap: _showLogoutDialog,
@@ -468,7 +464,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         border: Border.all(color: cardColor, width: 6),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.15),
+                            color: Colors.black.withValues(alpha: 0.15),
                             blurRadius: 22,
                             offset: const Offset(0, 8),
                           ),
@@ -476,26 +472,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       child: ClipOval(
                         child: _selectedImage != null
-                            ? Image.file(
-                                _selectedImage!,
-                                fit: BoxFit.cover,
-                              )
+                            ? Image.file(_selectedImage!, fit: BoxFit.cover)
                             : image.isNotEmpty
-                                ? Image.network(
-                                    image,
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (context, error, stackTrace) {
-                                      return _imageFallback(accent, profile);
-                                    },
-                                  )
-                                : _imageFallback(accent, profile),
+                            ? Image.network(
+                                image,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) {
+                                  return _imageFallback(accent, profile);
+                                },
+                              )
+                            : _imageFallback(accent, profile),
                       ),
                     ),
                     if (context.watch<ProfileProvider>().isSaving)
                       Positioned.fill(
                         child: Container(
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.35),
+                            color: Colors.black.withValues(alpha: 0.35),
                             shape: BoxShape.circle,
                           ),
                           child: const Center(
@@ -552,7 +545,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   profile.bio.trim(),
                   textAlign: TextAlign.center,
                   style: textTheme.bodyMedium?.copyWith(
-                    color: primaryText.withOpacity(0.88),
+                    color: primaryText.withValues(alpha: 0.88),
                     height: 1.35,
                   ),
                 ),
@@ -706,9 +699,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               dividerColor: dividerColor,
               onTap: () {
                 Navigator.push(
-                   context,
-                   MaterialPageRoute(builder: (_) => const PrivacySecurityScreen ()),
-                 );
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const PrivacySecurityScreen(),
+                  ),
+                );
               },
             ),
             ProfileMenuTile(
@@ -722,10 +717,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
               dividerColor: dividerColor,
               showDivider: false,
               onTap: () {
-                 Navigator.push(
-                   context,
-                   MaterialPageRoute(builder: (_) => const HelpSupportScreen()),
-                 );
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const HelpSupportScreen()),
+                );
               },
             ),
           ],
@@ -748,16 +743,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       // PagesScreen temporarily commented
       // _BottomNavItemData(Icons.description_outlined, 'Pages'),
-
       _BottomNavItemData(Icons.person_outline, 'Profile'),
     ];
 
     return Container(
       decoration: BoxDecoration(
         color: bgColor,
-        border: Border(
-          top: BorderSide(color: dividerColor, width: 1),
-        ),
+        border: Border(top: BorderSide(color: dividerColor, width: 1)),
       ),
       padding: const EdgeInsets.only(top: 6, bottom: 10),
       child: Row(
@@ -790,8 +782,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     items[index].label,
                     style: textTheme.labelMedium?.copyWith(
                       color: isSelected ? accent : secondaryText,
-                      fontWeight:
-                          isSelected ? FontWeight.w700 : FontWeight.w500,
+                      fontWeight: isSelected
+                          ? FontWeight.w700
+                          : FontWeight.w500,
                     ),
                   ),
                 ],
@@ -966,7 +959,7 @@ class ProfileSwitchTile extends StatelessWidget {
               Switch(
                 value: value,
                 onChanged: onChanged,
-                activeColor: const Color(0xFF1877F2),
+                activeThumbColor: const Color(0xFF1877F2),
               ),
             ],
           ),

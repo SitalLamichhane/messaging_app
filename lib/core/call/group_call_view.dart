@@ -1,4 +1,3 @@
-
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -177,7 +176,8 @@ class _GroupCallViewState extends State<GroupCallView> {
   bool _isGroupPayload(Map<String, dynamic> data) {
     final payload = _payload(data);
 
-    final convId = payload['conversation_id']?.toString() ??
+    final convId =
+        payload['conversation_id']?.toString() ??
         payload['conversationId']?.toString() ??
         data['conversation_id']?.toString() ??
         data['conversationId']?.toString() ??
@@ -572,11 +572,7 @@ class _GroupCallViewState extends State<GroupCallView> {
 
   Widget _videoGrid() {
     final items = <Widget>[
-      _videoTile(
-        title: 'You',
-        renderer: _localRenderer,
-        mirror: true,
-      ),
+      _videoTile(title: 'You', renderer: _localRenderer, mirror: true),
     ];
 
     for (final entry in _remoteRenderers.entries) {
@@ -659,10 +655,7 @@ class _GroupCallViewState extends State<GroupCallView> {
     );
   }
 
-  Widget _audioTile({
-    required String title,
-    required bool connected,
-  }) {
+  Widget _audioTile({required String title, required bool connected}) {
     return Container(
       decoration: BoxDecoration(
         color: const Color(0xFF1E293B),
@@ -674,8 +667,9 @@ class _GroupCallViewState extends State<GroupCallView> {
           children: [
             CircleAvatar(
               radius: 34,
-              backgroundColor:
-                  connected ? const Color(0xFF1877F2) : const Color(0xFF64748B),
+              backgroundColor: connected
+                  ? const Color(0xFF1877F2)
+                  : const Color(0xFF64748B),
               child: const Icon(Icons.person, color: Colors.white, size: 34),
             ),
             const SizedBox(height: 12),
@@ -708,8 +702,9 @@ class _GroupCallViewState extends State<GroupCallView> {
 
   @override
   Widget build(BuildContext context) {
-    final title =
-        widget.chat.name.trim().isEmpty ? 'Group call' : widget.chat.name.trim();
+    final title = widget.chat.name.trim().isEmpty
+        ? 'Group call'
+        : widget.chat.name.trim();
 
     return PopScope(
       canPop: false,
@@ -726,9 +721,7 @@ class _GroupCallViewState extends State<GroupCallView> {
         ),
         body: Column(
           children: [
-            Expanded(
-              child: widget.isVideoCall ? _videoGrid() : _audioGrid(),
-            ),
+            Expanded(child: widget.isVideoCall ? _videoGrid() : _audioGrid()),
             SafeArea(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(18, 12, 18, 22),

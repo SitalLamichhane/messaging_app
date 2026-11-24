@@ -36,7 +36,6 @@ import 'package:hiddenly/groupCall/domain/integration/incoming_group_call_bundle
 import 'package:hiddenly/groupCall/domain/infrastructure/livekit_call_service.dart';
 import 'package:hiddenly/realtime/realtime_service.dart';
 
-
 bool _handlingColdStartCallKit = false;
 StreamSubscription<CallEvent?>? _callKitSubscription;
 
@@ -108,8 +107,7 @@ Future<IncomingGroupCallBundle> _createIncomingGroupCallBundle(
 ) async {
   final realtime = ConversationRealtimeService(
     uriBuilder: (int requestedConversationId) async {
-      final token =
-          (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
+      final token = (await ApiClient.storage.read(key: 'access'))?.trim() ?? '';
 
       if (token.isEmpty) {
         throw StateError('Access token missing');
@@ -132,10 +130,7 @@ Future<IncomingGroupCallBundle> _createIncomingGroupCallBundle(
     liveKit: LiveKitMediaService(),
   );
 
-  return IncomingGroupCallBundle(
-    realtime: realtime,
-    controller: controller,
-  );
+  return IncomingGroupCallBundle(realtime: realtime, controller: controller);
 }
 
 Future<void> _initializeGroupCallPushRouter() async {
@@ -211,15 +206,12 @@ void _setupCallKitDebugListener() {
         debugPrint('[MAIN CALLKIT] event is null');
         return;
       }
-     // end
+      // end
       final body = _safeMap(event.body);
 
       if (event.event == Event.actionCallAccept) {
         debugPrint('[MAIN CALLKIT] ANSWER clicked');
-        await _handleCallKitAcceptFromMain(
-          body,
-          source: 'onEvent_accept',
-        );
+        await _handleCallKitAcceptFromMain(body, source: 'onEvent_accept');
         return;
       }
 
@@ -272,10 +264,7 @@ Future<void> _checkKilledStateCallKit() async {
     debugPrint('[MAIN CALLKIT] ACTIVE CALL FOUND -> FORCE OPEN CALLSCREEN');
     debugPrint('[MAIN CALLKIT] raw active call: $raw');
 
-    await _handleCallKitAcceptFromMain(
-      raw,
-      source: 'activeCalls_cold_start',
-    );
+    await _handleCallKitAcceptFromMain(raw, source: 'activeCalls_cold_start');
   } catch (e, st) {
     debugPrint('CHECK KILLED STATE CALLKIT ERROR: $e');
     debugPrint(st.toString());
@@ -287,7 +276,9 @@ Future<void> _handleCallKitAcceptFromMain(
   required String source,
 }) async {
   if (_handlingColdStartCallKit) {
-    debugPrint('[MAIN CALLKIT] accept ignored: already handling. source=$source');
+    debugPrint(
+      '[MAIN CALLKIT] accept ignored: already handling. source=$source',
+    );
     return;
   }
 
@@ -305,42 +296,45 @@ Future<void> _handleCallKitAcceptFromMain(
 
     debugPrint('[MAIN CALLKIT] extracted data: $data');
 
-    final callId = _readString(
-      data,
-      ['call_id', 'callId', 'id', 'uuid'],
-    ).ifEmpty(
-      _readString(rawData, ['id', 'uuid']),
-    );
+    final callId = _readString(data, [
+      'call_id',
+      'callId',
+      'id',
+      'uuid',
+    ]).ifEmpty(_readString(rawData, ['id', 'uuid']));
 
-    final conversationId = _readString(
-      data,
-      ['conversation_id', 'conversationId'],
-    );
+    final conversationId = _readString(data, [
+      'conversation_id',
+      'conversationId',
+    ]);
 
-    final callerId = _readString(
-      data,
-      ['caller_id', 'callerId', 'from_user', 'from'],
-    );
+    final callerId = _readString(data, [
+      'caller_id',
+      'callerId',
+      'from_user',
+      'from',
+    ]);
 
-    final callerName = _readString(
-      data,
-      ['caller_name', 'callerName', 'nameCaller', 'name'],
-    ).ifEmpty(
-      _readString(rawData, ['nameCaller', 'name']).ifEmpty('Unknown'),
-    );
+    final callerName = _readString(data, [
+      'caller_name',
+      'callerName',
+      'nameCaller',
+      'name',
+    ]).ifEmpty(_readString(rawData, ['nameCaller', 'name']).ifEmpty('Unknown'));
 
-    final callerAvatar = _readString(
-      data,
-      ['caller_avatar', 'callerAvatar', 'avatar'],
-    );
+    final callerAvatar = _readString(data, [
+      'caller_avatar',
+      'callerAvatar',
+      'avatar',
+    ]);
 
     final isVideoCall =
         _readBool(data, ['is_video_call', 'isVideoCall', 'video']) ||
-            _readBool(rawData, ['is_video_call', 'isVideoCall', 'video']) ||
-            rawData['type'] == 1 ||
-            rawData['type']?.toString() == '1' ||
-            data['type'] == 1 ||
-            data['type']?.toString() == '1';
+        _readBool(rawData, ['is_video_call', 'isVideoCall', 'video']) ||
+        rawData['type'] == 1 ||
+        rawData['type']?.toString() == '1' ||
+        data['type'] == 1 ||
+        data['type']?.toString() == '1';
 
     debugPrint('rawData type: ${rawData['type']}');
     debugPrint('data type: ${data['type']}');
@@ -379,8 +373,8 @@ Future<void> _handleCallKitAcceptFromMain(
 
     final currentUserAvatar =
         (await ApiClient.storage.read(key: 'avatar_url'))?.trim() ??
-            (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
-            '';
+        (await ApiClient.storage.read(key: 'image_url'))?.trim() ??
+        '';
 
     debugPrint('========== MAIN CALLKIT CURRENT USER ==========');
     debugPrint('currentUserId: $currentUserId');
@@ -408,12 +402,11 @@ Future<void> _handleCallKitAcceptFromMain(
       return;
     }
 
-    
-      // IMPORTANT:
-      // Do NOT call FlutterCallkitIncoming.endCall(callId) here.
-      // ANSWER means user accepted the call. endCall() can trigger ended/cancel flow
-      // and prevent Flutter call screen from opening/connecting.
-      
+    // IMPORTANT:
+    // Do NOT call FlutterCallkitIncoming.endCall(callId) here.
+    // ANSWER means user accepted the call. endCall() can trigger ended/cancel flow
+    // and prevent Flutter call screen from opening/connecting.
+
     debugPrint('');
     debugPrint('################################################');
     debugPrint('### CALLKIT ANSWER CLICKED: OPEN DIRECT CALL SCREEN');
@@ -451,8 +444,12 @@ Future<void> _handleCallKitDeclineFromMain(Map<String, dynamic> rawData) async {
     debugPrint('rawData: $rawData');
 
     final data = _extractCallData(rawData);
-    final callId = _readString(data, ['call_id', 'callId', 'id', 'uuid'])
-        .ifEmpty(_readString(rawData, ['id', 'uuid']));
+    final callId = _readString(data, [
+      'call_id',
+      'callId',
+      'id',
+      'uuid',
+    ]).ifEmpty(_readString(rawData, ['id', 'uuid']));
 
     debugPrint('[MAIN CALLKIT] decline callId: $callId');
 
@@ -482,8 +479,12 @@ Future<void> _handleCallKitEndFromMain(Map<String, dynamic> rawData) async {
     debugPrint('rawData: $rawData');
 
     final data = _extractCallData(rawData);
-    final callId = _readString(data, ['call_id', 'callId', 'id', 'uuid'])
-        .ifEmpty(_readString(rawData, ['id', 'uuid']));
+    final callId = _readString(data, [
+      'call_id',
+      'callId',
+      'id',
+      'uuid',
+    ]).ifEmpty(_readString(rawData, ['id', 'uuid']));
 
     debugPrint('[MAIN CALLKIT] end callId: $callId');
 
@@ -614,18 +615,13 @@ extension _StringFallback on String {
   }
 }
 
-
 class GlobalCallBootstrapper extends StatefulWidget {
   final Widget child;
 
-  const GlobalCallBootstrapper({
-    super.key,
-    required this.child,
-  });
+  const GlobalCallBootstrapper({super.key, required this.child});
 
   @override
-  State<GlobalCallBootstrapper> createState() =>
-      _GlobalCallBootstrapperState();
+  State<GlobalCallBootstrapper> createState() => _GlobalCallBootstrapperState();
 }
 
 class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
@@ -653,12 +649,7 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(
-        _ensureRealtimeReady(
-          reason: 'app_resumed',
-          force: true,
-        ),
-      );
+      unawaited(_ensureRealtimeReady(reason: 'app_resumed', force: true));
     }
   }
 
@@ -695,10 +686,7 @@ class _GlobalCallBootstrapperState extends State<GlobalCallBootstrapper>
   }) async {
     if (!mounted || _starting) return;
 
-    final auth = provider.Provider.of<AuthProvider>(
-      context,
-      listen: false,
-    );
+    final auth = provider.Provider.of<AuthProvider>(context, listen: false);
 
     if (!auth.isLoggedIn) {
       if (_activeUserId != null) {
@@ -969,7 +957,8 @@ class MyApp extends StatelessWidget {
   }
 
   bool _hasActiveCall(CallState state) {
-    final hasUsers = state.currentUserId?.trim().isNotEmpty == true &&
+    final hasUsers =
+        state.currentUserId?.trim().isNotEmpty == true &&
         state.receiverId?.trim().isNotEmpty == true;
 
     return hasUsers && !_isFinalCallStatus(state.status);
@@ -1053,19 +1042,19 @@ class MyApp extends StatelessWidget {
             return GlobalCallBootstrapper(
               child: CallLifecycleWatcher(
                 child: riverpod.Consumer(
-                builder: (context, ref, _) {
-                  final callState = ref.watch(callProvider);
-                  final forceCallPipSurface =
-                      ref.watch(forceCallPipSurfaceProvider);
-                  final openCallScreenFromPip =
-                      ref.watch(openCallScreenFromPipProvider);
+                  builder: (context, ref, _) {
+                    final callState = ref.watch(callProvider);
+                    final forceCallPipSurface = ref.watch(
+                      forceCallPipSurfaceProvider,
+                    );
+                    ref.watch(openCallScreenFromPipProvider);
 
-                  return LayoutBuilder(
-                    builder: (context, constraints) {
-                      final isPipLike = _isPipLikeSize(constraints);
-                      final hasActiveCall = _hasActiveCall(callState);
+                    return LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isPipLike = _isPipLikeSize(constraints);
+                        final hasActiveCall = _hasActiveCall(callState);
 
-                      /*
+                        /*
                         ABSOLUTE RULE:
 
                         If the Android window is PiP-sized OR we are preparing
@@ -1082,7 +1071,7 @@ class MyApp extends StatelessWidget {
                         If Android wrongly enters PiP after call ended -> show
                         only black safe surface, never normal app.
                       */
-                      /*
+                        /*
                         EXACT MESSENGER RULE:
 
                         1) No active call:
@@ -1097,8 +1086,8 @@ class MyApp extends StatelessWidget {
                         3) If Android is already PiP but call just ended:
                            - show black safe surface briefly, never leak normal app into PiP
                       */
-                      if (forceCallPipSurface || isPipLike) {
-                        /*
+                        if (forceCallPipSurface || isPipLike) {
+                          /*
                           IMPORTANT FIX:
 
                           Do NOT remove `child` here.
@@ -1114,51 +1103,51 @@ class MyApp extends StatelessWidget {
                           So we keep the Navigator alive but hidden behind the
                           call-only surface.
                         */
-                        if (hasActiveCall) {
-                          return Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Offstage(
-                                offstage: true,
-                                child: child ?? const SizedBox.shrink(),
-                              ),
-                              Positioned.fill(
-                                child: _GlobalPipCallSurface(
-                                  callState: callState,
-                                  forceOpenRealCallScreen: false,
+                          if (hasActiveCall) {
+                            return Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Offstage(
+                                  offstage: true,
+                                  child: child ?? const SizedBox.shrink(),
                                 ),
-                              ),
-                            ],
-                          );
+                                Positioned.fill(
+                                  child: _GlobalPipCallSurface(
+                                    callState: callState,
+                                    forceOpenRealCallScreen: false,
+                                  ),
+                                ),
+                              ],
+                            );
+                          }
+
+                          if (isPipLike) {
+                            return Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                Offstage(
+                                  offstage: true,
+                                  child: child ?? const SizedBox.shrink(),
+                                ),
+                                const Positioned.fill(
+                                  child: _PipSafeBlackSurface(),
+                                ),
+                              ],
+                            );
+                          }
                         }
 
-                        if (isPipLike) {
-                          return Stack(
-                            fit: StackFit.expand,
-                            children: [
-                              Offstage(
-                                offstage: true,
-                                child: child ?? const SizedBox.shrink(),
-                              ),
-                              const Positioned.fill(
-                                child: _PipSafeBlackSurface(),
-                              ),
-                            ],
-                          );
-                        }
-                      }
-
-                      return Stack(
-                        children: [
-                          child ?? const SizedBox.shrink(),
-                          const MiniCallOverlay(),
-                        ],
-                      );
-                    },
-                  );
-                },
+                        return Stack(
+                          children: [
+                            child ?? const SizedBox.shrink(),
+                            const MiniCallOverlay(),
+                          ],
+                        );
+                      },
+                    );
+                  },
+                ),
               ),
-            ),
             );
           },
         );
@@ -1166,7 +1155,6 @@ class MyApp extends StatelessWidget {
     );
   }
 }
-
 
 class _PipSafeBlackSurface extends StatelessWidget {
   const _PipSafeBlackSurface();
@@ -1181,10 +1169,7 @@ class _PipSafeBlackSurface extends StatelessWidget {
 
       A black surface is better than leaking normal screens into PiP.
     */
-    return const ColoredBox(
-      color: Colors.black,
-      child: SizedBox.expand(),
-    );
+    return const ColoredBox(color: Colors.black, child: SizedBox.expand());
   }
 }
 
@@ -1215,7 +1200,8 @@ class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
   }
 
   bool _hasActiveCall(CallState state) {
-    final hasUsers = state.currentUserId?.trim().isNotEmpty == true &&
+    final hasUsers =
+        state.currentUserId?.trim().isNotEmpty == true &&
         state.receiverId?.trim().isNotEmpty == true;
 
     return hasUsers && !_isFinalStatus(state.status);
@@ -1265,21 +1251,22 @@ class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
     if (_openingRealCallScreen) return;
     if (!_hasActiveCall(widget.callState)) return;
 
+    final container = riverpod.ProviderScope.containerOf(
+      context,
+      listen: false,
+    );
     _openingRealCallScreen = true;
+    bool ownsOpeningLock = false;
 
     try {
       debugPrint('GLOBAL PIP SURFACE TAP: OPEN ONE REAL CALLSCREEN');
-
-      final container = riverpod.ProviderScope.containerOf(
-        context,
-        listen: false,
-      );
 
       if (container.read(openingCallScreenProvider)) {
         debugPrint('GLOBAL PIP SURFACE OPEN IGNORED: already opening');
         return;
       }
 
+      ownsOpeningLock = true;
       container.read(openingCallScreenProvider.notifier).state = true;
 
       NavigatorState? navigator;
@@ -1298,7 +1285,7 @@ class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
         await Future.delayed(const Duration(milliseconds: 80));
       }
 
-      if (navigator == null || !navigator.mounted) {
+      if (!mounted || navigator == null || !navigator.mounted) {
         debugPrint('GLOBAL PIP SURFACE OPEN ERROR: navigator still null');
         container.read(openingCallScreenProvider.notifier).state = false;
         return;
@@ -1339,12 +1326,13 @@ class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
       debugPrint('GLOBAL PIP SURFACE OPEN CALLSCREEN ERROR: $e');
       debugPrint(st.toString());
     } finally {
-      final container = riverpod.ProviderScope.containerOf(
-        context,
-        listen: false,
-      );
-      container.read(openingCallScreenProvider.notifier).state = false;
-      _openingRealCallScreen = false;
+      try {
+        if (ownsOpeningLock) {
+          container.read(openingCallScreenProvider.notifier).state = false;
+        }
+      } finally {
+        _openingRealCallScreen = false;
+      }
     }
   }
 
@@ -1355,13 +1343,15 @@ class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
 
     final isActive = !_isFinalStatus(widget.callState.status);
 
-    final hasRemoteVideo = isActive &&
+    final hasRemoteVideo =
+        isActive &&
         widget.callState.isVideoCall &&
         !widget.callState.isRemoteCameraOff &&
         remoteRenderer != null &&
         remoteRenderer.srcObject != null;
 
-    final hasLocalVideo = isActive &&
+    final hasLocalVideo =
+        isActive &&
         widget.callState.isVideoCall &&
         !widget.callState.isCameraOff &&
         localRenderer != null &&
@@ -1423,7 +1413,7 @@ class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
                       decoration: BoxDecoration(
                         color: Colors.black,
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.25),
+                          color: Colors.white.withValues(alpha: 0.25),
                           width: 1,
                         ),
                         borderRadius: BorderRadius.circular(12),
@@ -1537,4 +1527,4 @@ class _GlobalPipCallSurfaceState extends State<_GlobalPipCallSurface> {
       ),
     );
   }
-} 
+}

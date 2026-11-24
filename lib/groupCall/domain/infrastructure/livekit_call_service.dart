@@ -45,9 +45,7 @@ class LiveKitMediaService extends ChangeNotifier {
     debugPrint('[LIVEKIT] $message');
   }
 
-  void _logRoomState({
-    String reason = 'STATE',
-  }) {
+  void _logRoomState({String reason = 'STATE'}) {
     final room = _room;
 
     _log('==================================================');
@@ -70,8 +68,7 @@ class LiveKitMediaService extends ChangeNotifier {
         '${local.audioTrackPublications.length}',
       );
 
-      for (final publication
-          in local.audioTrackPublications) {
+      for (final publication in local.audioTrackPublications) {
         _log(
           'LOCAL AUDIO -> '
           'track=${publication.track}',
@@ -83,8 +80,7 @@ class LiveKitMediaService extends ChangeNotifier {
         '${local.videoTrackPublications.length}',
       );
 
-      for (final publication
-          in local.videoTrackPublications) {
+      for (final publication in local.videoTrackPublications) {
         _log(
           'LOCAL VIDEO -> '
           'track=${publication.track}',
@@ -97,8 +93,7 @@ class LiveKitMediaService extends ChangeNotifier {
       '${room.remoteParticipants.length}',
     );
 
-    for (final participant
-        in room.remoteParticipants.values) {
+    for (final participant in room.remoteParticipants.values) {
       _log(
         'REMOTE PARTICIPANT: '
         '${participant.identity}',
@@ -119,8 +114,7 @@ class LiveKitMediaService extends ChangeNotifier {
         '${participant.audioTrackPublications.length}',
       );
 
-      for (final publication
-          in participant.audioTrackPublications) {
+      for (final publication in participant.audioTrackPublications) {
         _log(
           'REMOTE AUDIO -> '
           'track=${publication.track}',
@@ -132,8 +126,7 @@ class LiveKitMediaService extends ChangeNotifier {
         '${participant.videoTrackPublications.length}',
       );
 
-      for (final publication
-          in participant.videoTrackPublications) {
+      for (final publication in participant.videoTrackPublications) {
         _log(
           'REMOTE VIDEO -> '
           'track=${publication.track}',
@@ -169,9 +162,7 @@ class LiveKitMediaService extends ChangeNotifier {
       list.add(local);
     }
 
-    list.addAll(
-      room.remoteParticipants.values,
-    );
+    list.addAll(room.remoteParticipants.values);
 
     list.sort((a, b) {
       final localIdentity = local?.identity;
@@ -188,9 +179,7 @@ class LiveKitMediaService extends ChangeNotifier {
         return a.isSpeaking ? -1 : 1;
       }
 
-      return a.joinedAt.compareTo(
-        b.joinedAt,
-      );
+      return a.joinedAt.compareTo(b.joinedAt);
     });
 
     return List.unmodifiable(list);
@@ -205,14 +194,10 @@ class LiveKitMediaService extends ChangeNotifier {
     required bool startWithVideo,
   }) async {
     if (_disposed) {
-      throw StateError(
-        'LiveKitMediaService has been disposed.',
-      );
+      throw StateError('LiveKitMediaService has been disposed.');
     }
 
-    if (_connecting ||
-        _connected ||
-        _disconnecting) {
+    if (_connecting || _connected || _disconnecting) {
       _log(
         'CONNECT IGNORED: '
         'connecting=$_connecting '
@@ -223,8 +208,7 @@ class LiveKitMediaService extends ChangeNotifier {
       return;
     }
 
-    final generation =
-        ++_connectionGeneration;
+    final generation = ++_connectionGeneration;
 
     _connecting = true;
     _error = null;
@@ -233,31 +217,19 @@ class LiveKitMediaService extends ChangeNotifier {
 
     Room? createdRoom;
 
-    _log(
-      '==================================================',
-    );
+    _log('==================================================');
 
     _log('LIVEKIT CONNECT START');
 
-    _log(
-      'SERVER URL: ${credentials.serverUrl}',
-    );
+    _log('SERVER URL: ${credentials.serverUrl}');
 
-    _log(
-      'ROOM FROM BACKEND: ${credentials.roomName}',
-    );
+    _log('ROOM FROM BACKEND: ${credentials.roomName}');
 
-    _log(
-      'START WITH VIDEO: $startWithVideo',
-    );
+    _log('START WITH VIDEO: $startWithVideo');
 
-    _log(
-      'GENERATION: $generation',
-    );
+    _log('GENERATION: $generation');
 
-    _log(
-      '==================================================',
-    );
+    _log('==================================================');
 
     try {
       // ----------------------------------------------------------
@@ -274,12 +246,8 @@ class LiveKitMediaService extends ChangeNotifier {
         _log('LiveKit client initialized.');
       }
 
-      if (!_isGenerationValid(
-        generation,
-      )) {
-        _log(
-          'Connect cancelled after initialization.',
-        );
+      if (!_isGenerationValid(generation)) {
+        _log('Connect cancelled after initialization.');
 
         return;
       }
@@ -290,18 +258,12 @@ class LiveKitMediaService extends ChangeNotifier {
 
       _log('Requesting permissions...');
 
-      await _requestPermissions(
-        camera: startWithVideo,
-      );
+      await _requestPermissions(camera: startWithVideo);
 
       _log('Permissions granted.');
 
-      if (!_isGenerationValid(
-        generation,
-      )) {
-        _log(
-          'Connect cancelled after permissions.',
-        );
+      if (!_isGenerationValid(generation)) {
+        _log('Connect cancelled after permissions.');
 
         return;
       }
@@ -313,15 +275,10 @@ class LiveKitMediaService extends ChangeNotifier {
       _log('Creating LiveKit room...');
 
       createdRoom = Room(
-        roomOptions: const RoomOptions(
-          adaptiveStream: true,
-          dynacast: true,
-        ),
+        roomOptions: const RoomOptions(adaptiveStream: true, dynacast: true),
       );
 
-      createdRoom.addListener(
-        _onRoomChanged,
-      );
+      createdRoom.addListener(_onRoomChanged);
 
       _room = createdRoom;
 
@@ -338,20 +295,12 @@ class LiveKitMediaService extends ChangeNotifier {
         credentials.participantToken,
       );
 
-      _log(
-        'LiveKit prepareConnection completed.',
-      );
+      _log('LiveKit prepareConnection completed.');
 
-      if (!_isGenerationValid(
-        generation,
-      )) {
-        _log(
-          'Connect cancelled after prepareConnection.',
-        );
+      if (!_isGenerationValid(generation)) {
+        _log('Connect cancelled after prepareConnection.');
 
-        await _disposeSpecificRoom(
-          createdRoom,
-        );
+        await _disposeSpecificRoom(createdRoom);
 
         return;
       }
@@ -360,18 +309,14 @@ class LiveKitMediaService extends ChangeNotifier {
       // CONNECT
       // ----------------------------------------------------------
 
-      _log(
-        'Connecting to LiveKit room...',
-      );
+      _log('Connecting to LiveKit room...');
 
       await createdRoom.connect(
         credentials.serverUrl,
         credentials.participantToken,
       );
 
-      _log(
-        '==================================================',
-      );
+      _log('==================================================');
 
       _log('LIVEKIT CONNECTED');
 
@@ -395,28 +340,19 @@ class LiveKitMediaService extends ChangeNotifier {
         '${createdRoom.remoteParticipants.length}',
       );
 
-      for (final participant
-          in createdRoom.remoteParticipants.values) {
+      for (final participant in createdRoom.remoteParticipants.values) {
         _log(
           'REMOTE PARTICIPANT AFTER CONNECT: '
           '${participant.identity}',
         );
       }
 
-      _log(
-        '==================================================',
-      );
+      _log('==================================================');
 
-      if (!_isGenerationValid(
-        generation,
-      )) {
-        _log(
-          'Connect cancelled after room connection.',
-        );
+      if (!_isGenerationValid(generation)) {
+        _log('Connect cancelled after room connection.');
 
-        await _disposeSpecificRoom(
-          createdRoom,
-        );
+        await _disposeSpecificRoom(createdRoom);
 
         return;
       }
@@ -425,13 +361,10 @@ class LiveKitMediaService extends ChangeNotifier {
       // LOCAL PARTICIPANT
       // ----------------------------------------------------------
 
-      final local =
-          createdRoom.localParticipant;
+      final local = createdRoom.localParticipant;
 
       if (local == null) {
-        throw StateError(
-          'LiveKit connected but local participant is null.',
-        );
+        throw StateError('LiveKit connected but local participant is null.');
       }
 
       _log(
@@ -443,41 +376,28 @@ class LiveKitMediaService extends ChangeNotifier {
       // MICROPHONE
       // ----------------------------------------------------------
 
-      _log(
-        'Enabling local microphone...',
-      );
+      _log('Enabling local microphone...');
 
-      await local.setMicrophoneEnabled(
-        true,
-      );
+      await local.setMicrophoneEnabled(true);
 
-      _log(
-        'LOCAL MICROPHONE ENABLED',
-      );
+      _log('LOCAL MICROPHONE ENABLED');
 
       _log(
         'LOCAL AUDIO PUBLICATIONS: '
         '${local.audioTrackPublications.length}',
       );
 
-      for (final publication
-          in local.audioTrackPublications) {
+      for (final publication in local.audioTrackPublications) {
         _log(
           'LOCAL AUDIO TRACK: '
           '${publication.track}',
         );
       }
 
-      if (!_isGenerationValid(
-        generation,
-      )) {
-        _log(
-          'Connect cancelled after microphone.',
-        );
+      if (!_isGenerationValid(generation)) {
+        _log('Connect cancelled after microphone.');
 
-        await _disposeSpecificRoom(
-          createdRoom,
-        );
+        await _disposeSpecificRoom(createdRoom);
 
         return;
       }
@@ -489,67 +409,46 @@ class LiveKitMediaService extends ChangeNotifier {
       // ----------------------------------------------------------
 
       if (startWithVideo) {
-        _log(
-          'Enabling local camera...',
-        );
+        _log('Enabling local camera...');
 
         await local.setCameraEnabled(
           true,
-          cameraCaptureOptions:
-              CameraCaptureOptions(
-            cameraPosition:
-                _cameraPosition,
+          cameraCaptureOptions: CameraCaptureOptions(
+            cameraPosition: _cameraPosition,
           ),
         );
 
         _cameraEnabled = true;
 
-        _log(
-          'LOCAL CAMERA ENABLED',
-        );
+        _log('LOCAL CAMERA ENABLED');
 
         _log(
           'LOCAL VIDEO PUBLICATIONS: '
           '${local.videoTrackPublications.length}',
         );
 
-        for (final publication
-            in local.videoTrackPublications) {
+        for (final publication in local.videoTrackPublications) {
           _log(
             'LOCAL VIDEO TRACK: '
             '${publication.track}',
           );
         }
 
-        _log(
-          'Enabling speaker for video call...',
-        );
+        _log('Enabling speaker for video call...');
 
-        await _setSpeakerInternal(
-          true,
-        );
+        await _setSpeakerInternal(true);
       } else {
         _cameraEnabled = false;
 
-        _log(
-          'Audio call - camera disabled.',
-        );
+        _log('Audio call - camera disabled.');
 
-        await _setSpeakerInternal(
-          false,
-        );
+        await _setSpeakerInternal(false);
       }
 
-      if (!_isGenerationValid(
-        generation,
-      )) {
-        _log(
-          'Connect cancelled after camera setup.',
-        );
+      if (!_isGenerationValid(generation)) {
+        _log('Connect cancelled after camera setup.');
 
-        await _disposeSpecificRoom(
-          createdRoom,
-        );
+        await _disposeSpecificRoom(createdRoom);
 
         return;
       }
@@ -561,76 +460,52 @@ class LiveKitMediaService extends ChangeNotifier {
       _connected = true;
       _error = null;
 
-      _log(
-        '==================================================',
-      );
+      _log('==================================================');
 
       _log('LIVEKIT MEDIA READY');
 
-      _log(
-        'CONNECTED: $_connected',
-      );
+      _log('CONNECTED: $_connected');
 
-      _log(
-        'MICROPHONE: $_microphoneEnabled',
-      );
+      _log('MICROPHONE: $_microphoneEnabled');
 
-      _log(
-        'CAMERA: $_cameraEnabled',
-      );
+      _log('CAMERA: $_cameraEnabled');
 
-      _log(
-        'SPEAKER: $_speakerEnabled',
-      );
+      _log('SPEAKER: $_speakerEnabled');
 
       _log(
         'REMOTE COUNT: '
         '${createdRoom.remoteParticipants.length}',
       );
 
-      _log(
-        '==================================================',
-      );
+      _log('==================================================');
 
-      _logRoomState(
-        reason: 'CONNECT COMPLETE',
-      );
+      _logRoomState(reason: 'CONNECT COMPLETE');
 
       _safeNotify();
     } catch (e, stackTrace) {
-      _log(
-        '==================================================',
-      );
+      _log('==================================================');
 
       _log('LIVEKIT CONNECT ERROR');
 
       _log('ERROR: $e');
 
-      _log(
-        'STACK TRACE: $stackTrace',
-      );
+      _log('STACK TRACE: $stackTrace');
 
-      _log(
-        '==================================================',
-      );
+      _log('==================================================');
 
       if (!_disposed) {
         _error = e.toString();
       }
 
       if (createdRoom != null) {
-        await _disposeSpecificRoom(
-          createdRoom,
-        );
+        await _disposeSpecificRoom(createdRoom);
       } else {
         await _disposeRoom();
       }
 
       rethrow;
     } finally {
-      if (!_disposed &&
-          generation ==
-              _connectionGeneration) {
+      if (!_disposed && generation == _connectionGeneration) {
         _connecting = false;
 
         _safeNotify();
@@ -638,27 +513,18 @@ class LiveKitMediaService extends ChangeNotifier {
     }
   }
 
-  bool _isGenerationValid(
-    int generation,
-  ) {
-    return !_disposed &&
-        generation ==
-            _connectionGeneration;
+  bool _isGenerationValid(int generation) {
+    return !_disposed && generation == _connectionGeneration;
   }
 
   // ============================================================
   // PERMISSIONS
   // ============================================================
 
-  Future<void> _requestPermissions({
-    required bool camera,
-  }) async {
-    _log(
-      'Requesting microphone permission...',
-    );
+  Future<void> _requestPermissions({required bool camera}) async {
+    _log('Requesting microphone permission...');
 
-    final microphone =
-        await Permission.microphone.request();
+    final microphone = await Permission.microphone.request();
 
     _log(
       'Microphone permission: '
@@ -666,18 +532,13 @@ class LiveKitMediaService extends ChangeNotifier {
     );
 
     if (!microphone.isGranted) {
-      throw StateError(
-        'Microphone permission was denied.',
-      );
+      throw StateError('Microphone permission was denied.');
     }
 
     if (camera) {
-      _log(
-        'Requesting camera permission...',
-      );
+      _log('Requesting camera permission...');
 
-      final cameraPermission =
-          await Permission.camera.request();
+      final cameraPermission = await Permission.camera.request();
 
       _log(
         'Camera permission: '
@@ -685,9 +546,7 @@ class LiveKitMediaService extends ChangeNotifier {
       );
 
       if (!cameraPermission.isGranted) {
-        throw StateError(
-          'Camera permission was denied.',
-        );
+        throw StateError('Camera permission was denied.');
       }
     }
   }
@@ -701,9 +560,7 @@ class LiveKitMediaService extends ChangeNotifier {
       return;
     }
 
-    _logRoomState(
-      reason: 'ROOM CHANGED',
-    );
+    _logRoomState(reason: 'ROOM CHANGED');
 
     _safeNotify();
   }
@@ -713,8 +570,7 @@ class LiveKitMediaService extends ChangeNotifier {
   // ============================================================
 
   Future<void> toggleMicrophone() async {
-    if (_disposed ||
-        !_connected) {
+    if (_disposed || !_connected) {
       return;
     }
 
@@ -722,25 +578,18 @@ class LiveKitMediaService extends ChangeNotifier {
 
     if (room == null) return;
 
-    final local =
-        room.localParticipant;
+    final local = room.localParticipant;
 
     if (local == null) return;
 
-    final next =
-        !_microphoneEnabled;
+    final next = !_microphoneEnabled;
 
     try {
-      _log(
-        'Setting microphone: $next',
-      );
+      _log('Setting microphone: $next');
 
-      await local.setMicrophoneEnabled(
-        next,
-      );
+      await local.setMicrophoneEnabled(next);
 
-      if (_disposed ||
-          !identical(_room, room)) {
+      if (_disposed || !identical(_room, room)) {
         return;
       }
 
@@ -751,17 +600,13 @@ class LiveKitMediaService extends ChangeNotifier {
         '$_microphoneEnabled',
       );
 
-      _logRoomState(
-        reason: 'MICROPHONE TOGGLED',
-      );
+      _logRoomState(reason: 'MICROPHONE TOGGLED');
 
       _safeNotify();
     } catch (e) {
       _error = e.toString();
 
-      _log(
-        'Microphone toggle error: $e',
-      );
+      _log('Microphone toggle error: $e');
 
       _safeNotify();
 
@@ -774,8 +619,7 @@ class LiveKitMediaService extends ChangeNotifier {
   // ============================================================
 
   Future<void> toggleCamera() async {
-    if (_disposed ||
-        !_connected) {
+    if (_disposed || !_connected) {
       return;
     }
 
@@ -783,42 +627,31 @@ class LiveKitMediaService extends ChangeNotifier {
 
     if (room == null) return;
 
-    final local =
-        room.localParticipant;
+    final local = room.localParticipant;
 
     if (local == null) return;
 
-    final next =
-        !_cameraEnabled;
+    final next = !_cameraEnabled;
 
     try {
       if (next) {
-        final permission =
-            await Permission.camera
-                .request();
+        final permission = await Permission.camera.request();
 
         if (!permission.isGranted) {
-          throw StateError(
-            'Camera permission was denied.',
-          );
+          throw StateError('Camera permission was denied.');
         }
       }
 
-      _log(
-        'Setting camera: $next',
-      );
+      _log('Setting camera: $next');
 
       await local.setCameraEnabled(
         next,
-        cameraCaptureOptions:
-            CameraCaptureOptions(
-          cameraPosition:
-              _cameraPosition,
+        cameraCaptureOptions: CameraCaptureOptions(
+          cameraPosition: _cameraPosition,
         ),
       );
 
-      if (_disposed ||
-          !identical(_room, room)) {
+      if (_disposed || !identical(_room, room)) {
         return;
       }
 
@@ -829,17 +662,13 @@ class LiveKitMediaService extends ChangeNotifier {
         '$_cameraEnabled',
       );
 
-      _logRoomState(
-        reason: 'CAMERA TOGGLED',
-      );
+      _logRoomState(reason: 'CAMERA TOGGLED');
 
       _safeNotify();
     } catch (e) {
       _error = e.toString();
 
-      _log(
-        'Camera toggle error: $e',
-      );
+      _log('Camera toggle error: $e');
 
       _safeNotify();
 
@@ -852,9 +681,7 @@ class LiveKitMediaService extends ChangeNotifier {
   // ============================================================
 
   Future<void> switchCamera() async {
-    if (_disposed ||
-        !_connected ||
-        !_cameraEnabled) {
+    if (_disposed || !_connected || !_cameraEnabled) {
       return;
     }
 
@@ -862,25 +689,20 @@ class LiveKitMediaService extends ChangeNotifier {
 
     if (room == null) return;
 
-    final publications =
-        room.localParticipant
-            ?.videoTrackPublications;
+    final publications = room.localParticipant?.videoTrackPublications;
 
     if (publications == null) {
       return;
     }
 
-    for (final publication
-        in publications) {
-      final track =
-          publication.track;
+    for (final publication in publications) {
+      final track = publication.track;
 
       if (track is! LocalVideoTrack) {
         continue;
       }
 
-      final nextPosition =
-          _cameraPosition.switched();
+      final nextPosition = _cameraPosition.switched();
 
       try {
         _log(
@@ -888,29 +710,21 @@ class LiveKitMediaService extends ChangeNotifier {
           '$_cameraPosition -> $nextPosition',
         );
 
-        await track.setCameraPosition(
-          nextPosition,
-        );
+        await track.setCameraPosition(nextPosition);
 
-        if (_disposed ||
-            !identical(_room, room)) {
+        if (_disposed || !identical(_room, room)) {
           return;
         }
 
-        _cameraPosition =
-            nextPosition;
+        _cameraPosition = nextPosition;
 
-        _log(
-          'Camera switched successfully.',
-        );
+        _log('Camera switched successfully.');
 
         _safeNotify();
       } catch (e) {
         _error = e.toString();
 
-        _log(
-          'Camera switch error: $e',
-        );
+        _log('Camera switch error: $e');
 
         _safeNotify();
 
@@ -930,19 +744,13 @@ class LiveKitMediaService extends ChangeNotifier {
   // SPEAKER
   // ============================================================
 
-  Future<void> setSpeaker(
-    bool enabled,
-  ) async {
+  Future<void> setSpeaker(bool enabled) async {
     if (_disposed) return;
 
     try {
-      _log(
-        'Setting speaker: $enabled',
-      );
+      _log('Setting speaker: $enabled');
 
-      await _setSpeakerInternal(
-        enabled,
-      );
+      await _setSpeakerInternal(enabled);
 
       if (_disposed) return;
 
@@ -957,9 +765,7 @@ class LiveKitMediaService extends ChangeNotifier {
     } catch (e) {
       _error = e.toString();
 
-      _log(
-        'Speaker error: $e',
-      );
+      _log('Speaker error: $e');
 
       _safeNotify();
 
@@ -967,11 +773,8 @@ class LiveKitMediaService extends ChangeNotifier {
     }
   }
 
-  Future<void> _setSpeakerInternal(
-    bool enabled,
-  ) async {
-    await AudioManager.instance
-        .setSpeakerOutputPreferred(
+  Future<void> _setSpeakerInternal(bool enabled) async {
+    await AudioManager.instance.setSpeakerOutputPreferred(
       enabled,
       force: false,
     );
@@ -980,23 +783,16 @@ class LiveKitMediaService extends ChangeNotifier {
   }
 
   Future<void> toggleSpeaker() async {
-    await setSpeaker(
-      !_speakerEnabled,
-    );
+    await setSpeaker(!_speakerEnabled);
   }
 
   // ============================================================
   // VIDEO TRACK
   // ============================================================
 
-  VideoTrack? videoTrackFor(
-    Participant participant,
-  ) {
-    for (final publication
-        in participant
-            .videoTrackPublications) {
-      final track =
-          publication.track;
+  VideoTrack? videoTrackFor(Participant participant) {
+    for (final publication in participant.videoTrackPublications) {
+      final track = publication.track;
 
       if (track is VideoTrack) {
         return track;
@@ -1010,30 +806,21 @@ class LiveKitMediaService extends ChangeNotifier {
   // DISPLAY NAME
   // ============================================================
 
-  String displayNameFor(
-    Participant participant,
-  ) {
-    final name =
-        participant.name.trim();
+  String displayNameFor(Participant participant) {
+    final name = participant.name.trim();
 
     if (name.isNotEmpty) {
       return name;
     }
 
-    final metadata =
-        participant.metadata;
+    final metadata = participant.metadata;
 
-    if (metadata != null &&
-        metadata.trim().isNotEmpty) {
+    if (metadata != null && metadata.trim().isNotEmpty) {
       try {
-        final decoded =
-            jsonDecode(metadata);
+        final decoded = jsonDecode(metadata);
 
         if (decoded is Map) {
-          final value =
-              (decoded['full_name'] ?? '')
-                  .toString()
-                  .trim();
+          final value = (decoded['full_name'] ?? '').toString().trim();
 
           if (value.isNotEmpty) {
             return value;
@@ -1049,27 +836,18 @@ class LiveKitMediaService extends ChangeNotifier {
   // AVATAR
   // ============================================================
 
-  String avatarFor(
-    Participant participant,
-  ) {
-    final metadata =
-        participant.metadata;
+  String avatarFor(Participant participant) {
+    final metadata = participant.metadata;
 
-    if (metadata == null ||
-        metadata.trim().isEmpty) {
+    if (metadata == null || metadata.trim().isEmpty) {
       return '';
     }
 
     try {
-      final decoded =
-          jsonDecode(metadata);
+      final decoded = jsonDecode(metadata);
 
       if (decoded is Map) {
-        return (decoded[
-                    'profile_picture'] ??
-                '')
-            .toString()
-            .trim();
+        return (decoded['profile_picture'] ?? '').toString().trim();
       }
     } catch (_) {}
 
@@ -1081,20 +859,15 @@ class LiveKitMediaService extends ChangeNotifier {
   // ============================================================
 
   Future<void> disconnect() async {
-    if (_disposed ||
-        _disconnecting) {
+    if (_disposed || _disconnecting) {
       return;
     }
 
-    _log(
-      '==================================================',
-    );
+    _log('==================================================');
 
     _log('LIVEKIT DISCONNECT REQUESTED');
 
-    _logRoomState(
-      reason: 'BEFORE DISCONNECT',
-    );
+    _logRoomState(reason: 'BEFORE DISCONNECT');
 
     _disconnecting = true;
 
@@ -1106,13 +879,9 @@ class LiveKitMediaService extends ChangeNotifier {
     } finally {
       _disconnecting = false;
 
-      _log(
-        'LIVEKIT DISCONNECTED',
-      );
+      _log('LIVEKIT DISCONNECTED');
 
-      _log(
-        '==================================================',
-      );
+      _log('==================================================');
 
       _safeNotify();
     }
@@ -1122,16 +891,10 @@ class LiveKitMediaService extends ChangeNotifier {
   // DISPOSE SPECIFIC ROOM
   // ============================================================
 
-  Future<void> _disposeSpecificRoom(
-    Room room,
-  ) async {
-    _log(
-      'Disposing specific LiveKit room...',
-    );
+  Future<void> _disposeSpecificRoom(Room room) async {
+    _log('Disposing specific LiveKit room...');
 
-    room.removeListener(
-      _onRoomChanged,
-    );
+    room.removeListener(_onRoomChanged);
 
     if (identical(_room, room)) {
       _room = null;
@@ -1140,25 +903,17 @@ class LiveKitMediaService extends ChangeNotifier {
     try {
       await room.disconnect();
 
-      _log(
-        'Specific room disconnected.',
-      );
+      _log('Specific room disconnected.');
     } catch (e) {
-      _log(
-        'Specific room disconnect error: $e',
-      );
+      _log('Specific room disconnect error: $e');
     }
 
     try {
       await room.dispose();
 
-      _log(
-        'Specific room disposed.',
-      );
+      _log('Specific room disposed.');
     } catch (e) {
-      _log(
-        'Specific room dispose error: $e',
-      );
+      _log('Specific room dispose error: $e');
     }
 
     if (_room == null) {
@@ -1176,32 +931,22 @@ class LiveKitMediaService extends ChangeNotifier {
     _room = null;
 
     if (room != null) {
-      room.removeListener(
-        _onRoomChanged,
-      );
+      room.removeListener(_onRoomChanged);
 
       try {
         await room.disconnect();
 
-        _log(
-          'Room disconnected.',
-        );
+        _log('Room disconnected.');
       } catch (e) {
-        _log(
-          'Room disconnect error: $e',
-        );
+        _log('Room disconnect error: $e');
       }
 
       try {
         await room.dispose();
 
-        _log(
-          'Room disposed.',
-        );
+        _log('Room disposed.');
       } catch (e) {
-        _log(
-          'Room dispose error: $e',
-        );
+        _log('Room dispose error: $e');
       }
     }
 
@@ -1220,8 +965,7 @@ class LiveKitMediaService extends ChangeNotifier {
     _microphoneEnabled = true;
     _speakerEnabled = false;
 
-    _cameraPosition =
-        CameraPosition.front;
+    _cameraPosition = CameraPosition.front;
   }
 
   // ============================================================
@@ -1232,17 +976,11 @@ class LiveKitMediaService extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
 
-    _log(
-      '==================================================',
-    );
+    _log('==================================================');
 
-    _log(
-      'LiveKitMediaService.dispose() CALLED',
-    );
+    _log('LiveKitMediaService.dispose() CALLED');
 
-    _logRoomState(
-      reason: 'SERVICE DISPOSE',
-    );
+    _logRoomState(reason: 'SERVICE DISPOSE');
 
     _disposed = true;
 
@@ -1253,47 +991,38 @@ class LiveKitMediaService extends ChangeNotifier {
     _room = null;
 
     if (room != null) {
-      room.removeListener(
-        _onRoomChanged,
+      room.removeListener(_onRoomChanged);
+
+      unawaited(
+        room.disconnect().catchError((Object error) {
+          _log(
+            'Dispose disconnect error: '
+            '$error',
+          );
+        }),
       );
 
       unawaited(
-        room.disconnect().catchError(
-          (Object error) {
-            _log(
-              'Dispose disconnect error: '
-              '$error',
-            );
-          },
-        ),
-      );
-
-      unawaited(
-        room.dispose().then<void>(
-          (_) {
-            _log(
-              'Room disposed from '
-              'service dispose().',
-            );
-          },
-        ).catchError(
-          (Object error) {
-            _log(
-              'Dispose room error: '
-              '$error',
-            );
-          },
-        ),
+        room
+            .dispose()
+            .then<void>((_) {
+              _log(
+                'Room disposed from '
+                'service dispose().',
+              );
+            })
+            .catchError((Object error) {
+              _log(
+                'Dispose room error: '
+                '$error',
+              );
+            }),
       );
     }
 
-    _log(
-      'LiveKitMediaService disposed.',
-    );
+    _log('LiveKitMediaService disposed.');
 
-    _log(
-      '==================================================',
-    );
+    _log('==================================================');
 
     super.dispose();
   }

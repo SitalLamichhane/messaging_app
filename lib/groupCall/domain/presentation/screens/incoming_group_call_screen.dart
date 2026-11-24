@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 import 'package:hiddenly/groupCall/domain/call_models.dart';
@@ -21,8 +20,7 @@ class IncomingGroupCallScreen extends StatefulWidget {
       _IncomingGroupCallScreenState();
 }
 
-class _IncomingGroupCallScreenState
-    extends State<IncomingGroupCallScreen> {
+class _IncomingGroupCallScreenState extends State<IncomingGroupCallScreen> {
   bool _handling = false;
   bool _finished = false;
 
@@ -146,9 +144,7 @@ class _IncomingGroupCallScreenState
 
         setState(() {
           _handling = false;
-          _error =
-              widget.controller.error ??
-              'Unable to join group call.';
+          _error = widget.controller.error ?? 'Unable to join group call.';
         });
 
         return;
@@ -203,9 +199,7 @@ class _IncomingGroupCallScreenState
 
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
-          builder: (_) => GroupCallScreen(
-            controller: widget.controller,
-          ),
+          builder: (_) => GroupCallScreen(controller: widget.controller),
         ),
       );
 
@@ -241,9 +235,7 @@ class _IncomingGroupCallScreenState
         'accept error: $e',
       );
 
-      debugPrint(
-        stackTrace.toString(),
-      );
+      debugPrint(stackTrace.toString());
 
       if (!mounted) {
         return;
@@ -253,9 +245,7 @@ class _IncomingGroupCallScreenState
         _handling = false;
         _finished = false;
 
-        _error =
-            widget.controller.error ??
-            'Unable to join group call.';
+        _error = widget.controller.error ?? 'Unable to join group call.';
       });
     }
   }
@@ -311,9 +301,7 @@ class _IncomingGroupCallScreenState
         'decline error: $e',
       );
 
-      debugPrint(
-        stackTrace.toString(),
-      );
+      debugPrint(stackTrace.toString());
 
       if (!mounted) {
         return;
@@ -322,9 +310,7 @@ class _IncomingGroupCallScreenState
       setState(() {
         _handling = false;
 
-        _error =
-            widget.controller.error ??
-            'Unable to decline call.';
+        _error = widget.controller.error ?? 'Unable to decline call.';
       });
     }
   }
@@ -358,7 +344,6 @@ class _IncomingGroupCallScreenState
                 // ----------------------------------------------------------------
                 // GROUP ICON
                 // ----------------------------------------------------------------
-
                 CircleAvatar(
                   radius: 54,
                   backgroundColor: Colors.white.withOpacity(0.15),
@@ -369,18 +354,13 @@ class _IncomingGroupCallScreenState
                   ),
                 ),
 
-                const SizedBox(
-                  height: 28,
-                ),
+                const SizedBox(height: 28),
 
                 // ----------------------------------------------------------------
                 // GROUP NAME
                 // ----------------------------------------------------------------
-
                 Text(
-                  groupName.isNotEmpty
-                      ? groupName
-                      : 'Group call',
+                  groupName.isNotEmpty ? groupName : 'Group call',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
                     color: Colors.white,
@@ -389,55 +369,38 @@ class _IncomingGroupCallScreenState
                   ),
                 ),
 
-                const SizedBox(
-                  height: 10,
-                ),
+                const SizedBox(height: 10),
 
                 // ----------------------------------------------------------------
                 // CALL TYPE
                 // ----------------------------------------------------------------
-
                 Text(
                   payload.isVideo
                       ? 'Incoming group video call'
                       : 'Incoming group audio call',
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 16,
-                  ),
+                  style: const TextStyle(color: Colors.white70, fontSize: 16),
                 ),
 
                 // ----------------------------------------------------------------
                 // CALLER NAME
                 // ----------------------------------------------------------------
-
                 if (callerName.isNotEmpty) ...[
-                  const SizedBox(
-                    height: 8,
-                  ),
+                  const SizedBox(height: 8),
                   Text(
                     'From $callerName',
-                    style: const TextStyle(
-                      color: Colors.white60,
-                      fontSize: 14,
-                    ),
+                    style: const TextStyle(color: Colors.white60, fontSize: 14),
                   ),
                 ],
 
                 // ----------------------------------------------------------------
                 // ERROR
                 // ----------------------------------------------------------------
-
                 if (_error != null) ...[
-                  const SizedBox(
-                    height: 20,
-                  ),
+                  const SizedBox(height: 20),
                   Text(
                     _error!,
                     textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: Colors.redAccent,
-                    ),
+                    style: const TextStyle(color: Colors.redAccent),
                   ),
                 ],
 
@@ -446,20 +409,14 @@ class _IncomingGroupCallScreenState
                 // ----------------------------------------------------------------
                 // LOADING / CALL BUTTONS
                 // ----------------------------------------------------------------
-
                 if (_handling)
                   const Padding(
-                    padding: EdgeInsets.only(
-                      bottom: 30,
-                    ),
-                    child: CircularProgressIndicator(
-                      color: Colors.white,
-                    ),
+                    padding: EdgeInsets.only(bottom: 30),
+                    child: CircularProgressIndicator(color: Colors.white),
                   )
                 else
                   Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment.spaceEvenly,
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                     children: [
                       // ----------------------------------------------------------
                       // DECLINE
@@ -475,11 +432,8 @@ class _IncomingGroupCallScreenState
                       // ----------------------------------------------------------
                       // ACCEPT
                       // ----------------------------------------------------------
-
                       _CallButton(
-                        icon: payload.isVideo
-                            ? Icons.videocam
-                            : Icons.call,
+                        icon: payload.isVideo ? Icons.videocam : Icons.call,
                         label: 'Accept',
                         backgroundColor: Colors.green,
                         onPressed: _accept,
@@ -487,9 +441,7 @@ class _IncomingGroupCallScreenState
                     ],
                   ),
 
-                const SizedBox(
-                  height: 40,
-                ),
+                const SizedBox(height: 40),
               ],
             ),
           ),
@@ -529,25 +481,14 @@ class _CallButton extends StatelessWidget {
             child: SizedBox(
               width: 68,
               height: 68,
-              child: Icon(
-                icon,
-                color: Colors.white,
-                size: 32,
-              ),
+              child: Icon(icon, color: Colors.white, size: 32),
             ),
           ),
         ),
 
-        const SizedBox(
-          height: 10,
-        ),
+        const SizedBox(height: 10),
 
-        Text(
-          label,
-          style: const TextStyle(
-            color: Colors.white,
-          ),
-        ),
+        Text(label, style: const TextStyle(color: Colors.white)),
       ],
     );
   }

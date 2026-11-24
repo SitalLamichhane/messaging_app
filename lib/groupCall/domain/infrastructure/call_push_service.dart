@@ -10,11 +10,9 @@ class CallPushService {
 
   final Map<int, DateTime> _recentCalls = <int, DateTime>{};
 
-  static const Duration _duplicateWindow =
-      Duration(seconds: 5);
+  static const Duration _duplicateWindow = Duration(seconds: 5);
 
-  Stream<IncomingCallPayload> get incomingCalls =>
-      _incoming.stream;
+  Stream<IncomingCallPayload> get incomingCalls => _incoming.stream;
 
   StreamSubscription<RemoteMessage>? _foregroundSub;
   StreamSubscription<RemoteMessage>? _openedSub;
@@ -39,50 +37,33 @@ class CallPushService {
       await _foregroundSub?.cancel();
       await _openedSub?.cancel();
 
-      _foregroundSub =
-          FirebaseMessaging.onMessage.listen(
+      _foregroundSub = FirebaseMessaging.onMessage.listen(
         _handle,
-        onError: (
-          Object error,
-          StackTrace stackTrace,
-        ) {
-          debugPrint(
-            '[GROUP CALL PUSH] foreground error: $error',
-          );
+        onError: (Object error, StackTrace stackTrace) {
+          debugPrint('[GROUP CALL PUSH] foreground error: $error');
           debugPrint(stackTrace.toString());
         },
       );
 
-      _openedSub =
-          FirebaseMessaging.onMessageOpenedApp.listen(
+      _openedSub = FirebaseMessaging.onMessageOpenedApp.listen(
         _handle,
-        onError: (
-          Object error,
-          StackTrace stackTrace,
-        ) {
-          debugPrint(
-            '[GROUP CALL PUSH] opened-app error: $error',
-          );
+        onError: (Object error, StackTrace stackTrace) {
+          debugPrint('[GROUP CALL PUSH] opened-app error: $error');
           debugPrint(stackTrace.toString());
         },
       );
 
-      final initial =
-          await FirebaseMessaging.instance.getInitialMessage();
+      final initial = await FirebaseMessaging.instance.getInitialMessage();
 
       if (initial != null) {
         _handle(initial);
       }
 
-      debugPrint(
-        '[GROUP CALL PUSH] initialized',
-      );
+      debugPrint('[GROUP CALL PUSH] initialized');
     } catch (e, stackTrace) {
       _initialized = false;
 
-      debugPrint(
-        '[GROUP CALL PUSH] initialization error: $e',
-      );
+      debugPrint('[GROUP CALL PUSH] initialization error: $e');
       debugPrint(stackTrace.toString());
 
       rethrow;
@@ -93,16 +74,12 @@ class CallPushService {
     final now = DateTime.now();
 
     _recentCalls.removeWhere(
-      (_, time) =>
-          now.difference(time) >
-          _duplicateWindow,
+      (_, time) => now.difference(time) > _duplicateWindow,
     );
 
     final previous = _recentCalls[callId];
 
-    if (previous != null &&
-        now.difference(previous) <=
-            _duplicateWindow) {
+    if (previous != null && now.difference(previous) <= _duplicateWindow) {
       return true;
     }
 
@@ -117,23 +94,15 @@ class CallPushService {
     }
 
     try {
-      final data =
-          Map<String, dynamic>.from(
-        message.data,
-      );
+      final data = Map<String, dynamic>.from(message.data);
 
-      final type =
-          (data['type'] ?? '')
-              .toString()
-              .trim()
-              .toLowerCase();
+      final type = (data['type'] ?? '').toString().trim().toLowerCase();
 
       if (type != 'incoming_call') {
         return;
       }
 
-      final payload =
-          IncomingCallPayload.fromMap(data);
+      final payload = IncomingCallPayload.fromMap(data);
 
       // IMPORTANT:
       // Private calls continue through the existing
@@ -143,9 +112,7 @@ class CallPushService {
       }
 
       if (!payload.isValid) {
-        debugPrint(
-          '[GROUP CALL PUSH] invalid payload: $data',
-        );
+        debugPrint('[GROUP CALL PUSH] invalid payload: $data');
         return;
       }
 
@@ -167,9 +134,7 @@ class CallPushService {
         _incoming.add(payload);
       }
     } catch (e, stackTrace) {
-      debugPrint(
-        '[GROUP CALL PUSH] payload error: $e',
-      );
+      debugPrint('[GROUP CALL PUSH] payload error: $e');
       debugPrint(stackTrace.toString());
     }
   }

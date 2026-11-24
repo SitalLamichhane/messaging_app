@@ -57,7 +57,9 @@ class NicknameDisplayHelper {
       return memberDisplayName(
         chat: chat,
         userId: memberId,
-        fallbackRealName: member.name.trim().isNotEmpty ? member.name : chat.name,
+        fallbackRealName: member.name.trim().isNotEmpty
+            ? member.name
+            : chat.name,
       );
     }
 

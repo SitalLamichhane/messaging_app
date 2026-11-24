@@ -1,5 +1,3 @@
-
-
 import 'dart:async';
 import 'dart:io';
 
@@ -126,10 +124,7 @@ void _showMediaSnack(BuildContext context, String text) {
   );
 }
 
-enum _ViewerMediaType {
-  image,
-  video,
-}
+enum _ViewerMediaType { image, video }
 
 class _ViewerMedia {
   final String path;
@@ -184,7 +179,9 @@ void _openMediaViewer(
   required List<_ViewerMedia> items,
   int initialIndex = 0,
 }) {
-  final cleanItems = items.where((item) => item.path.trim().isNotEmpty).toList();
+  final cleanItems = items
+      .where((item) => item.path.trim().isNotEmpty)
+      .toList();
   if (cleanItems.isEmpty) return;
 
   final safeInitialIndex = initialIndex.clamp(0, cleanItems.length - 1);
@@ -193,16 +190,13 @@ void _openMediaViewer(
     PageRouteBuilder(
       opaque: true,
       barrierColor: Colors.black,
-      pageBuilder: (_, __, ___) => _MessengerFullScreenMediaViewer(
+      pageBuilder: (_, _, _) => _MessengerFullScreenMediaViewer(
         items: cleanItems,
         initialIndex: safeInitialIndex,
       ),
-      transitionsBuilder: (_, animation, __, child) {
+      transitionsBuilder: (_, animation, _, child) {
         return FadeTransition(
-          opacity: CurvedAnimation(
-            parent: animation,
-            curve: Curves.easeOut,
-          ),
+          opacity: CurvedAnimation(parent: animation, curve: Curves.easeOut),
           child: child,
         );
       },
@@ -213,9 +207,7 @@ void _openMediaViewer(
 class _ImageBubble extends StatelessWidget {
   final ChatMessage message;
 
-  const _ImageBubble({
-    required this.message,
-  });
+  const _ImageBubble({required this.message});
 
   @override
   Widget build(BuildContext context) {
@@ -233,7 +225,7 @@ class _ImageBubble extends StatelessWidget {
             fit: BoxFit.cover,
             filterQuality: FilterQuality.medium,
             gaplessPlayback: true,
-            errorBuilder: (_, __, ___) {
+            errorBuilder: (_, _, _) {
               return const _BrokenMediaBox(
                 icon: Icons.broken_image_rounded,
                 text: 'Image not found',
@@ -247,7 +239,7 @@ class _ImageBubble extends StatelessWidget {
             fit: BoxFit.cover,
             filterQuality: FilterQuality.medium,
             gaplessPlayback: true,
-            errorBuilder: (_, __, ___) {
+            errorBuilder: (_, _, _) {
               return const _BrokenMediaBox(
                 icon: Icons.broken_image_rounded,
                 text: 'Image not found',
@@ -386,7 +378,7 @@ class _MessengerFullScreenMediaViewerState
                       vertical: 7,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withOpacity(0.45),
+                      color: Colors.black.withValues(alpha: 0.45),
                       borderRadius: BorderRadius.circular(999),
                     ),
                     child: Text(
@@ -418,7 +410,7 @@ class _MessengerFullScreenMediaViewerState
                     vertical: 8,
                   ),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.35),
+                    color: Colors.black.withValues(alpha: 0.35),
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
@@ -457,8 +449,9 @@ class _FullScreenImagePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ImageProvider imageProvider =
-        isNetwork ? NetworkImage(path) : FileImage(File(path));
+    final ImageProvider imageProvider = isNetwork
+        ? NetworkImage(path)
+        : FileImage(File(path));
 
     return GestureDetector(
       onTap: onToggleBars,
@@ -560,7 +553,8 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
     if (controller == null || !controller.value.isInitialized) return;
 
     final value = controller.value;
-    final isCompleted = value.duration > Duration.zero &&
+    final isCompleted =
+        value.duration > Duration.zero &&
         value.position >= value.duration &&
         !value.isPlaying;
 
@@ -682,7 +676,7 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
             width: 76,
             height: 76,
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.48),
+              color: Colors.black.withValues(alpha: 0.48),
               shape: BoxShape.circle,
             ),
             alignment: Alignment.center,
@@ -703,7 +697,7 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
               width: 84,
               height: 84,
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.52),
+                color: Colors.black.withValues(alpha: 0.52),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
@@ -721,7 +715,7 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
           child: Container(
             padding: const EdgeInsets.fromLTRB(12, 9, 12, 10),
             decoration: BoxDecoration(
-              color: Colors.black.withOpacity(0.48),
+              color: Colors.black.withValues(alpha: 0.48),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
@@ -807,9 +801,7 @@ class _FullScreenVideoPageState extends State<_FullScreenVideoPage> {
 class _AudioBubble extends StatefulWidget {
   final ChatMessage message;
 
-  const _AudioBubble({
-    required this.message,
-  });
+  const _AudioBubble({required this.message});
 
   @override
   State<_AudioBubble> createState() => _AudioBubbleState();
@@ -939,17 +931,14 @@ class _AudioBubbleState extends State<_AudioBubble> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _MiniWaveform(
-                  isPlaying: _isPlaying,
-                  color: waveColor,
-                ),
+                _MiniWaveform(isPlaying: _isPlaying, color: waveColor),
                 const SizedBox(height: 4),
                 Text(
                   _duration == Duration.zero
                       ? _format(_position)
                       : '${_format(_position)} / ${_format(_duration)}',
                   style: TextStyle(
-                    color: textColor.withOpacity(0.8),
+                    color: textColor.withValues(alpha: 0.8),
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
@@ -960,13 +949,10 @@ class _AudioBubbleState extends State<_AudioBubble> {
           const SizedBox(width: 8),
           CircleAvatar(
             radius: 14,
-            backgroundColor:
-                isMe ? Colors.white.withOpacity(0.25) : const Color(0xFFD8DADF),
-            child: Icon(
-              Icons.mic_rounded,
-              color: textColor,
-              size: 16,
-            ),
+            backgroundColor: isMe
+                ? Colors.white.withValues(alpha: 0.25)
+                : const Color(0xFFD8DADF),
+            child: Icon(Icons.mic_rounded, color: textColor, size: 16),
           ),
         ],
       ),
@@ -978,10 +964,7 @@ class _MiniWaveform extends StatelessWidget {
   final bool isPlaying;
   final Color color;
 
-  const _MiniWaveform({
-    required this.isPlaying,
-    required this.color,
-  });
+  const _MiniWaveform({required this.isPlaying, required this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -1026,7 +1009,7 @@ class _MiniWaveform extends StatelessWidget {
               margin: const EdgeInsets.symmetric(horizontal: 1.4),
               height: 6 + (20 * value),
               decoration: BoxDecoration(
-                color: color.withOpacity(0.85),
+                color: color.withValues(alpha: 0.85),
                 borderRadius: BorderRadius.circular(999),
               ),
             ),
@@ -1040,9 +1023,7 @@ class _MiniWaveform extends StatelessWidget {
 class _VideoBubble extends StatefulWidget {
   final ChatMessage message;
 
-  const _VideoBubble({
-    required this.message,
-  });
+  const _VideoBubble({required this.message});
 
   @override
   State<_VideoBubble> createState() => _VideoBubbleState();
@@ -1117,7 +1098,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
 
     final value = controller.value;
 
-    final isCompleted = value.duration > Duration.zero &&
+    final isCompleted =
+        value.duration > Duration.zero &&
         value.position >= value.duration &&
         !value.isPlaying;
 
@@ -1284,7 +1266,9 @@ class _VideoBubbleState extends State<_VideoBubble> {
     final value = controller.value;
     final duration = value.duration;
     final position = value.position;
-    final durationText = duration == Duration.zero ? '' : _formatVideoTime(duration);
+    final durationText = duration == Duration.zero
+        ? ''
+        : _formatVideoTime(duration);
     final positionText = _formatVideoTime(position);
     final isPlaying = value.isPlaying;
     final isBuffering = value.isBuffering;
@@ -1329,8 +1313,8 @@ class _VideoBubbleState extends State<_VideoBubble> {
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                           colors: [
-                            Colors.black.withOpacity(0.05),
-                            Colors.black.withOpacity(0.38),
+                            Colors.black.withValues(alpha: 0.05),
+                            Colors.black.withValues(alpha: 0.38),
                           ],
                         ),
                       ),
@@ -1344,7 +1328,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                   width: 62,
                   height: 62,
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.48),
+                    color: Colors.black.withValues(alpha: 0.48),
                     shape: BoxShape.circle,
                   ),
                   alignment: Alignment.center,
@@ -1369,10 +1353,10 @@ class _VideoBubbleState extends State<_VideoBubble> {
                       width: 62,
                       height: 62,
                       decoration: BoxDecoration(
-                        color: Colors.black.withOpacity(0.52),
+                        color: Colors.black.withValues(alpha: 0.52),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: Colors.white.withOpacity(0.24),
+                          color: Colors.white.withValues(alpha: 0.24),
                           width: 1,
                         ),
                       ),
@@ -1404,7 +1388,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                             vertical: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.58),
+                            color: Colors.black.withValues(alpha: 0.58),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Row(
@@ -1449,11 +1433,12 @@ class _VideoBubbleState extends State<_VideoBubble> {
                       const Spacer(),
                       if (isPlaying || isBuffering) ...[
                         GestureDetector(
-                          onTap: () => _seekInline(const Duration(seconds: -10)),
+                          onTap: () =>
+                              _seekInline(const Duration(seconds: -10)),
                           child: Container(
                             padding: const EdgeInsets.all(5),
                             decoration: BoxDecoration(
-                              color: Colors.black.withOpacity(0.50),
+                              color: Colors.black.withValues(alpha: 0.50),
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
@@ -1473,7 +1458,7 @@ class _VideoBubbleState extends State<_VideoBubble> {
                             vertical: 5,
                           ),
                           decoration: BoxDecoration(
-                            color: Colors.black.withOpacity(0.58),
+                            color: Colors.black.withValues(alpha: 0.58),
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: const Icon(
@@ -1515,10 +1500,7 @@ class _FileBubble extends StatelessWidget {
   final ChatMessage message;
   final bool isDark;
 
-  const _FileBubble({
-    required this.message,
-    required this.isDark,
-  });
+  const _FileBubble({required this.message, required this.isDark});
 
   IconData _iconForFile(String pathOrName) {
     if (_looksLikeImagePath(pathOrName)) return Icons.image_rounded;
@@ -1591,6 +1573,7 @@ class _FileBubble extends StatelessWidget {
 
     await Clipboard.setData(ClipboardData(text: path));
 
+    if (!context.mounted) return;
     _showMediaSnack(context, 'File link copied');
   }
 
@@ -1606,18 +1589,18 @@ class _FileBubble extends StatelessWidget {
     final bgColor = isMe
         ? const Color(0xFF1877F2)
         : isDark
-            ? const Color(0xFF1E293B)
-            : const Color(0xFFEFEFF4);
+        ? const Color(0xFF1E293B)
+        : const Color(0xFFEFEFF4);
     final textColor = isMe
         ? Colors.white
         : isDark
-            ? Colors.white
-            : Colors.black87;
+        ? Colors.white
+        : Colors.black87;
     final subColor = isMe
-        ? Colors.white.withOpacity(0.78)
+        ? Colors.white.withValues(alpha: 0.78)
         : isDark
-            ? const Color(0xFFCBD5E1)
-            : const Color(0xFF6B7280);
+        ? const Color(0xFFCBD5E1)
+        : const Color(0xFF6B7280);
 
     final displayForType = path.isNotEmpty ? path : fileName;
 
@@ -1644,8 +1627,9 @@ class _FileBubble extends StatelessWidget {
                 width: 46,
                 height: 46,
                 decoration: BoxDecoration(
-                  color:
-                      isMe ? Colors.white.withOpacity(0.22) : Colors.white,
+                  color: isMe
+                      ? Colors.white.withValues(alpha: 0.22)
+                      : Colors.white,
                   borderRadius: BorderRadius.circular(14),
                 ),
                 child: Icon(
@@ -1686,11 +1670,7 @@ class _FileBubble extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 6),
-              Icon(
-                Icons.chevron_right_rounded,
-                color: subColor,
-                size: 22,
-              ),
+              Icon(Icons.chevron_right_rounded, color: subColor, size: 22),
             ],
           ),
         ),
@@ -1703,10 +1683,7 @@ class _BrokenMediaBox extends StatelessWidget {
   final IconData icon;
   final String text;
 
-  const _BrokenMediaBox({
-    required this.icon,
-    required this.text,
-  });
+  const _BrokenMediaBox({required this.icon, required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -1740,10 +1717,7 @@ class _AlbumMediaItem {
   final String path;
   final _ViewerMediaType type;
 
-  const _AlbumMediaItem({
-    required this.path,
-    required this.type,
-  });
+  const _AlbumMediaItem({required this.path, required this.type});
 }
 
 _AlbumMediaItem? _resolveAlbumMediaItem(String rawValue) {
@@ -1763,7 +1737,8 @@ _AlbumMediaItem? _resolveAlbumMediaItem(String rawValue) {
   final path = fixedMediaUrl(raw);
   if (path.trim().isEmpty) return null;
 
-  final type = explicitType ??
+  final type =
+      explicitType ??
       (_looksLikeVideoPath(path)
           ? _ViewerMediaType.video
           : _ViewerMediaType.image);
@@ -1863,7 +1838,7 @@ class _AlbumVideoThumbnailState extends State<_AlbumVideoThumbnail> {
             ),
           ),
         ),
-        Container(color: Colors.black.withOpacity(0.10)),
+        Container(color: Colors.black.withValues(alpha: 0.10)),
         const Center(
           child: DecoratedBox(
             decoration: BoxDecoration(
@@ -1888,9 +1863,7 @@ class _AlbumVideoThumbnailState extends State<_AlbumVideoThumbnail> {
 class _MediaAlbumBubble extends StatelessWidget {
   final ChatMessage message;
 
-  const _MediaAlbumBubble({
-    required this.message,
-  });
+  const _MediaAlbumBubble({required this.message});
 
   void _openAlbumViewer(
     BuildContext context,
@@ -1910,11 +1883,7 @@ class _MediaAlbumBubble extends StatelessWidget {
       );
     }
 
-    _openMediaViewer(
-      context,
-      items: items,
-      initialIndex: initialIndex,
-    );
+    _openMediaViewer(context, items: items, initialIndex: initialIndex);
   }
 
   @override
@@ -1930,14 +1899,10 @@ class _MediaAlbumBubble extends StatelessWidget {
       final only = media.first;
 
       if (only.type == _ViewerMediaType.video) {
-        return _VideoBubble(
-          message: message.copyWith(filePath: only.path),
-        );
+        return _VideoBubble(message: message.copyWith(filePath: only.path));
       }
 
-      return _ImageBubble(
-        message: message.copyWith(filePath: only.path),
-      );
+      return _ImageBubble(message: message.copyWith(filePath: only.path));
     }
 
     final visible = media.take(4).toList();
@@ -1951,30 +1916,30 @@ class _MediaAlbumBubble extends StatelessWidget {
       final content = item.type == _ViewerMediaType.video
           ? _AlbumVideoThumbnail(path: item.path)
           : (_isNetworkPath(item.path)
-              ? Image.network(
-                  item.path,
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.medium,
-                  gaplessPlayback: true,
-                  errorBuilder: (_, __, ___) {
-                    return const _BrokenMediaBox(
-                      icon: Icons.broken_image_rounded,
-                      text: 'Image not found',
-                    );
-                  },
-                )
-              : Image.file(
-                  File(item.path),
-                  fit: BoxFit.cover,
-                  filterQuality: FilterQuality.medium,
-                  gaplessPlayback: true,
-                  errorBuilder: (_, __, ___) {
-                    return const _BrokenMediaBox(
-                      icon: Icons.broken_image_rounded,
-                      text: 'Image not found',
-                    );
-                  },
-                ));
+                ? Image.network(
+                    item.path,
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.medium,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) {
+                      return const _BrokenMediaBox(
+                        icon: Icons.broken_image_rounded,
+                        text: 'Image not found',
+                      );
+                    },
+                  )
+                : Image.file(
+                    File(item.path),
+                    fit: BoxFit.cover,
+                    filterQuality: FilterQuality.medium,
+                    gaplessPlayback: true,
+                    errorBuilder: (_, _, _) {
+                      return const _BrokenMediaBox(
+                        icon: Icons.broken_image_rounded,
+                        text: 'Image not found',
+                      );
+                    },
+                  ));
 
       Widget tile = Stack(
         fit: StackFit.expand,
@@ -2026,53 +1991,50 @@ class _MediaAlbumBubble extends StatelessWidget {
                 ],
               )
             : media.length == 3
-                ? Row(
-                    children: [
-                      Expanded(
-                        flex: 2,
-                        child: mediaTile(visible[0], 0),
-                      ),
-                      const SizedBox(width: 2),
-                      Expanded(
-                        child: Column(
-                          children: [
-                            Expanded(child: mediaTile(visible[1], 1)),
-                            const SizedBox(height: 2),
-                            Expanded(child: mediaTile(visible[2], 2)),
-                          ],
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    children: [
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(child: mediaTile(visible[0], 0)),
-                            const SizedBox(width: 2),
-                            Expanded(child: mediaTile(visible[1], 1)),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Expanded(
-                        child: Row(
-                          children: [
-                            Expanded(child: mediaTile(visible[2], 2)),
-                            const SizedBox(width: 2),
-                            Expanded(
-                              child: mediaTile(
-                                visible[3],
-                                3,
-                                showOverlay: extra > 0,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
+            ? Row(
+                children: [
+                  Expanded(flex: 2, child: mediaTile(visible[0], 0)),
+                  const SizedBox(width: 2),
+                  Expanded(
+                    child: Column(
+                      children: [
+                        Expanded(child: mediaTile(visible[1], 1)),
+                        const SizedBox(height: 2),
+                        Expanded(child: mediaTile(visible[2], 2)),
+                      ],
+                    ),
                   ),
+                ],
+              )
+            : Column(
+                children: [
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: mediaTile(visible[0], 0)),
+                        const SizedBox(width: 2),
+                        Expanded(child: mediaTile(visible[1], 1)),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Expanded(child: mediaTile(visible[2], 2)),
+                        const SizedBox(width: 2),
+                        Expanded(
+                          child: mediaTile(
+                            visible[3],
+                            3,
+                            showOverlay: extra > 0,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }

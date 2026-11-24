@@ -1,4 +1,3 @@
-
 import 'package:flutter/material.dart';
 
 class PrivacySecurityScreen extends StatelessWidget {
@@ -26,7 +25,6 @@ class PrivacySecurityScreen extends StatelessWidget {
               const SizedBox(height: 28),
 
               // ================= INFO TEXT BELOW BANNER =================
-
               const Text(
                 "Control Your Privacy & Security",
                 style: TextStyle(
@@ -41,11 +39,7 @@ class PrivacySecurityScreen extends StatelessWidget {
               const Text(
                 "Hiddenly gives you full control over your account privacy and security settings. "
                 "You can manage your personal data, control profile visibility, and secure your account easily.",
-                style: TextStyle(
-                  fontSize: 16,
-                  height: 1.5,
-                  color: greyText,
-                ),
+                style: TextStyle(fontSize: 16, height: 1.5, color: greyText),
               ),
 
               const SizedBox(height: 18),
@@ -64,11 +58,7 @@ class PrivacySecurityScreen extends StatelessWidget {
               const Text(
                 "All your data is encrypted and stored securely. "
                 "We never sell your personal information. You can download or delete your data anytime.",
-                style: TextStyle(
-                  fontSize: 15,
-                  height: 1.5,
-                  color: greyText,
-                ),
+                style: TextStyle(fontSize: 15, height: 1.5, color: greyText),
               ),
 
               const SizedBox(height: 26),
@@ -212,11 +202,7 @@ class PrivacySecurityScreen extends StatelessWidget {
           onTap: () => Navigator.pop(context),
           child: const Padding(
             padding: EdgeInsets.all(6),
-            child: Icon(
-              Icons.arrow_back,
-              size: 30,
-              color: darkText,
-            ),
+            child: Icon(Icons.arrow_back, size: 30, color: darkText),
           ),
         ),
         const SizedBox(width: 18),
@@ -239,9 +225,7 @@ class PrivacySecurityScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: const Color(0xFFF6F2FF),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(
-          color: const Color(0xFFE4DAFF),
-        ),
+        border: Border.all(color: const Color(0xFFE4DAFF)),
       ),
       child: Row(
         children: [
@@ -260,11 +244,7 @@ class PrivacySecurityScreen extends StatelessWidget {
                 SizedBox(height: 14),
                 Text(
                   "Manage your privacy, security and account settings easily in one place.",
-                  style: TextStyle(
-                    fontSize: 16,
-                    height: 1.4,
-                    color: greyText,
-                  ),
+                  style: TextStyle(fontSize: 16, height: 1.4, color: greyText),
                 ),
               ],
             ),
@@ -276,11 +256,7 @@ class PrivacySecurityScreen extends StatelessWidget {
               color: primary.withOpacity(0.12),
               shape: BoxShape.circle,
             ),
-            child: const Icon(
-              Icons.shield_rounded,
-              size: 66,
-              color: primary,
-            ),
+            child: const Icon(Icons.shield_rounded, size: 66, color: primary),
           ),
         ],
       ),
@@ -335,10 +311,7 @@ class PrivacySecurityScreen extends StatelessWidget {
                     const SizedBox(height: 6),
                     Text(
                       subtitle,
-                      style: const TextStyle(
-                        fontSize: 15,
-                        color: greyText,
-                      ),
+                      style: const TextStyle(fontSize: 15, color: greyText),
                     ),
                   ],
                 ),

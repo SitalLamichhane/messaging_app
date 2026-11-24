@@ -1,0 +1,54 @@
+
+group 'com.cloudwebrtc.webrtc'
+version '1.0-SNAPSHOT'
+
+rootProject.allprojects {
+    repositories {
+        google()
+        mavenCentral()
+        maven {
+            url 'https://jitpack.io'
+        }
+    }
+}
+
+apply plugin: 'com.android.library'
+
+android {
+    namespace 'com.cloudwebrtc.webrtc'
+
+    compileSdkVersion 36
+
+    defaultConfig {
+        minSdkVersion 21
+
+        testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
+
+        consumerProguardFiles 'proguard-rules.pro'
+    }
+
+    lintOptions {
+        disable 'InvalidPackage'
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+}
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_1_8
+    }
+}
+
+dependencies {
+    implementation 'io.github.webrtc-sdk:android:150.7871.04'
+
+    implementation 'com.github.davidliu:audioswitch:039a35aefab7747c557242fa216c9ea11743b604'
+
+    implementation 'androidx.annotation:annotation:1.1.0'
+
+    testImplementation 'junit:junit:4.13.2'
+}
